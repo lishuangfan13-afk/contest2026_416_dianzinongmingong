@@ -1,0 +1,217 @@
+From fc9b6987a10ae29aacdd2469982dcf12742719f9 Mon Sep 17 00:00:00 2001
+From: yuk1-r <yuk1-r@users.noreply.github.com>
+Date: Sat, 12 Sep 2026 20:50:32 +0800
+Subject: [PATCH 1/2] fix(ai_agent): HTTP Date time sync + build-time fallback
+ for TLS clock
+
+- sync_time_via_http_date(): sync wall clock via HTTP HEAD Date header
+  (captures the previously-uncommitted working-tree patch)
+- fallback_to_build_time(): when HTTP sync fails (DNS/network down),
+  set clock from __DATE__/__TIME__, else conservative 2026-06-08 floor,
+  so TLS certificate validation always has a sane clock (fixes v4
+  regression where clock stayed at 1970 and all HTTPS died)
+- call site: try HTTP sync first, fallback on failure, log chosen path
+---
+ src/infra/vela_tls.c | 172 ++++++++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 169 insertions(+), 3 deletions(-)
+
+diff --git a/src/infra/vela_tls.c b/src/infra/vela_tls.c
+index 0b36760..d0ab68a 100644
+--- a/src/infra/vela_tls.c
++++ b/src/infra/vela_tls.c
+@@ -45,6 +45,10 @@
+ #include <fcntl.h>
+ #include <pthread.h>
+ #include <time.h>
++#include <sys/time.h>
++#include <netinet/in.h>
++#include <arpa/inet.h>
++
+ 
+ static int simple_entropy_func(void* data, unsigned char* output, size_t len)
+ {
+@@ -229,6 +233,162 @@ void vela_tls_pool_cleanup(void)
+     pthread_mutex_unlock(&s_pool_lock);
+ }
+ 
++
++/* ── Network time sync via plain HTTP ────────────────────────── */
++static const char *SYNC_MONTHS[] = {
++    "Jan","Feb","Mar","Apr","May","Jun",
++    "Jul","Aug","Sep","Oct","Nov","Dec"
++};
++
++static void sync_time_via_http_date(void)
++{
++    const char *host = "www.baidu.com";
++    int port = 80;
++
++    struct hostent *he = gethostbyname(host);
++    if (!he || !he->h_addr_list[0]) {
++        syslog(LOG_WARNING, "[tls_sync] DNS fail %s\n", host);
++        return;
++    }
++
++    int fd = socket(AF_INET, SOCK_STREAM, 0);
++    if (fd < 0) return;
++
++    struct sockaddr_in addr;
++    memset(&addr, 0, sizeof(addr));
++    addr.sin_family = AF_INET;
++    addr.sin_port = htons(port);
++    memcpy(&addr.sin_addr, he->h_addr_list[0], he->h_length);
++
++    struct timeval tv = { .tv_sec = 5, .tv_usec = 0 };
++    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
++    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
++
++    if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
++        close(fd);
++        syslog(LOG_WARNING, "[tls_sync] connect fail\n");
++        return;
++    }
++
++    const char *req = "HEAD / HTTP/1.1\r\nHost: www.baidu.com\r\nConnection: close\r\n\r\n";
++    if (send(fd, req, strlen(req), 0) < 0) { close(fd); return; }
++
++    char buf[512];
++    int total = 0;
++    while (total < (int)sizeof(buf) - 1) {
++        int nr = recv(fd, buf + total, sizeof(buf) - 1 - total, 0);
++        if (nr <= 0) break;
++        total += nr;
++        buf[total] = '\0';
++        if (strstr(buf, "\r\n\r\n")) break;
++    }
++    close(fd);
++
++    char *date_hdr = strstr(buf, "Date: ");
++    if (!date_hdr) { syslog(LOG_WARNING, "[tls_sync] No Date\n"); return; }
++    date_hdr += 6;
++    char *eol = strstr(date_hdr, "\r\n");
++    if (!eol) return;
++
++    char date_val[64];
++    size_t dlen = (size_t)(eol - date_hdr);
++    if (dlen >= sizeof(date_val)) return;
++    memcpy(date_val, date_hdr, dlen);
++    date_val[dlen] = '\0';
++
++    int day, year, hour, min, sec;
++    char mon_str[4] = {0};
++    if (sscanf(date_val, "%*[^,], %d %3s %d %d:%d:%d",
++               &day, mon_str, &year, &hour, &min, &sec) != 6) {
++        syslog(LOG_WARNING, "[tls_sync] parse fail: %s\n", date_val);
++        return;
++    }
++
++    int mon = -1;
++    for (int i = 0; i < 12; i++) {
++        if (strcmp(mon_str, SYNC_MONTHS[i]) == 0) { mon = i; break; }
++    }
++    if (mon < 0) return;
++
++    struct tm tm_utc;
++    memset(&tm_utc, 0, sizeof(tm_utc));
++    tm_utc.tm_sec  = sec;
++    tm_utc.tm_min  = min;
++    tm_utc.tm_hour = hour;
++    tm_utc.tm_mday = day;
++    tm_utc.tm_mon  = mon;
++    tm_utc.tm_year = year - 1900;
++
++    time_t t = timegm(&tm_utc);
++    if (t < 1704067200) return;
++
++    struct timeval new_tv = { .tv_sec = t, .tv_usec = 0 };
++    settimeofday(&new_tv, NULL);
++    syslog(LOG_INFO, "[tls_sync] Time set: %s epoch %ld\n",
++           date_val, (long)t);
++}
++
++/* ── Fallback: set clock to compile-time when HTTP sync fails ── */
++
++static void fallback_to_build_time(void)
++{
++    /* Parse __DATE__ "Mmm dd yyyy" and __TIME__ "hh:mm:ss" to unix epoch.
++     * This gives a reasonable time even when DNS/network is unavailable. */
++
++    const char *date = __DATE__;   /* e.g. "Sep 12 2026" */
++    const char *tstr = __TIME__;   /* e.g. "14:30:00" */
++
++    char mon_str[4] = {0};
++    int day, year;
++    if (sscanf(date, "%3s %d %d", mon_str, &day, &year) != 3) {
++        goto use_conservative;
++    }
++
++    int hour, min, sec;
++    if (sscanf(tstr, "%d:%d:%d", &hour, &min, &sec) != 3) {
++        goto use_conservative;
++    }
++
++    int mon = -1;
++    for (int i = 0; i < 12; i++) {
++        if (strcmp(mon_str, SYNC_MONTHS[i]) == 0) { mon = i; break; }
++    }
++    if (mon < 0) goto use_conservative;
++
++    {
++        struct tm tm_utc;
++        memset(&tm_utc, 0, sizeof(tm_utc));
++        tm_utc.tm_sec  = sec;
++        tm_utc.tm_min  = min;
++        tm_utc.tm_hour = hour;
++        tm_utc.tm_mday = day;
++        tm_utc.tm_mon  = mon;
++        tm_utc.tm_year = year - 1900;
++
++        time_t t = timegm(&tm_utc);
++        if (t >= 1780876800) { /* must be >= 2026-06-08 */
++            struct timeval tv = { .tv_sec = t, .tv_usec = 0 };
++            settimeofday(&tv, NULL);
++            syslog(LOG_INFO,
++                "[vela_tls] HTTP sync failed, fallback to build time: UNIX=%ld\n",
++                (long)t);
++            return;
++        }
++    }
++
++use_conservative:
++    /* Conservative fixed timestamp: 2026-06-08 00:00:00 UTC
++     * (competition registration date, guaranteed after MiMo cert notBefore) */
++    {
++        time_t conservative = 1780876800;
++        struct timeval tv = { .tv_sec = conservative, .tv_usec = 0 };
++        settimeofday(&tv, NULL);
++        syslog(LOG_INFO,
++            "[vela_tls] HTTP sync failed, fallback to conservative time: UNIX=%ld\n",
++            (long)conservative);
++    }
++}
++
+ static int tls_ctx_connect(tls_ctx_t* ctx, const char* host, const char* port)
+ {
+     int ret;
+@@ -253,9 +413,15 @@ static int tls_ctx_connect(tls_ctx_t* ctx, const char* host, const char* port)
+     syslog(LOG_DEBUG, "[%s] Handshake start: Host=%s, UNIX=%ld\n", TAG, host, (long)now);
+ 
+     if (now < 1704067200) { /* Jan 1 2024 */
+-        syslog(LOG_WARNING, "[%s] Clock too old, forcing to 2026\n", TAG);
+-        struct timespec ts = { .tv_sec = 1772275200, .tv_nsec = 0 };
+-        clock_settime(CLOCK_REALTIME, &ts);
++        syslog(LOG_WARNING, "[%s] Clock too old, syncing via HTTP\n", TAG);
++        sync_time_via_http_date();
++        now = time(NULL);
++        if (now < 1704067200) {
++            /* HTTP sync failed (DNS/network unavailable), use build time */
++            fallback_to_build_time();
++            now = time(NULL);
++        }
++        syslog(LOG_INFO, "[%s] After sync: UNIX=%ld\n", TAG, (long)now);
+     }
+ 
+     /* TCP connect — use HTTP CONNECT proxy if configured */
+-- 
+2.53.0.windows.2
+

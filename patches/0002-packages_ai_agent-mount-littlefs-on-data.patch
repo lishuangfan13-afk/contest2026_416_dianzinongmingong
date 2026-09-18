@@ -1,0 +1,48 @@
+From afe82e6d90c893bb790df91804af165640b22dea Mon Sep 17 00:00:00 2001
+From: yuk1-r <yuk1-r@users.noreply.github.com>
+Date: Sat, 12 Sep 2026 22:01:13 +0800
+Subject: [PATCH 2/2] fix(storage): mount littlefs on /data with tmpfs fallback
+
+Try mounting /dev/data as littlefs first for persistent storage.
+Falls back to tmpfs if CONFIG_FS_LITTLEFS is not enabled or /dev/data
+partition device does not exist. Boot safety preserved: mount failure
+never blocks startup.
+
+Signed-off-by: yuk1-r <yuk1-r@users.noreply.github.com>
+---
+ src/agent_main.c | 16 ++++++++++++----
+ 1 file changed, 12 insertions(+), 4 deletions(-)
+
+diff --git a/src/agent_main.c b/src/agent_main.c
+index 9d676c2..a55aac6 100644
+--- a/src/agent_main.c
++++ b/src/agent_main.c
+@@ -489,13 +489,21 @@ int ai_agent_main(int argc, char* argv[])
+ 
+     /* ── Phase 0: Storage Bootstrapping (Auto-mount & Mkdir) ── */
+ 
+-    struct stat st;
+-    if (stat("/data", &st) != 0) {
+-        syslog(LOG_INFO, "[%s] Mounting /data as tmpfs for simulation...\n", TAG);
++    /* Ensure /data mount point directory exists */
++    mkdir("/data", 0755);
++
++    /* Try persistent littlefs mount first.
++     * Requires CONFIG_FS_LITTLEFS and a /dev/data MTD partition.
++     * Falls back to tmpfs if device or driver unavailable. */
++    if (mount("/dev/data", "/data", "littlefs", 0, "autoformat") == 0) {
++        syslog(LOG_INFO, "[%s] /data mounted littlefs (persistent)\n", TAG);
++    } else {
++        syslog(LOG_INFO, "[%s] /data littlefs unavailable (err=%d), "
++               "fallback to tmpfs\n", TAG, errno);
+         mount(NULL, "/data", "tmpfs", 0, NULL);
+     }
+ 
+-    /* Ensure directory structure exists (No more manual mkdir needed!) */
++    /* Ensure directory structure exists */
+     mkdir("/data/agent", 0755);
+     mkdir("/data/agent/config", 0755);
+     mkdir("/data/agent/memory", 0755);
+-- 
+2.53.0.windows.2
+

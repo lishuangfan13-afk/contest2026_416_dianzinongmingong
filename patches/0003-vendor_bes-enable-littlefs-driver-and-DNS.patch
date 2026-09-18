@@ -1,0 +1,66 @@
+From 42ccc9c7e8c5ddb37efc7b2c8e8c400b70ebc5bc Mon Sep 17 00:00:00 2001
+From: lishuangfan13-afk <lishuangfan13@gmail.com>
+Date: Sat, 12 Sep 2026 22:02:31 +0800
+Subject: [PATCH 1/2] fix(board): enable littlefs driver and default DNS server
+
+- Add CONFIG_FS_LITTLEFS=y for persistent /data partition support
+- Change DNS from NOADDR to IPv4 with default server 223.5.5.5
+  (Alibaba public DNS) so gethostbyname works out of the box
+
+Signed-off-by: yuk1-r <yuk1-r@users.noreply.github.com>
+---
+ boards/best1700_ep/aos_evb/configs/ap/defconfig | 13 ++++++++++---
+ 1 file changed, 10 insertions(+), 3 deletions(-)
+
+diff --git a/boards/best1700_ep/aos_evb/configs/ap/defconfig b/boards/best1700_ep/aos_evb/configs/ap/defconfig
+index fca41af..cc0d6e9 100644
+--- a/boards/best1700_ep/aos_evb/configs/ap/defconfig
++++ b/boards/best1700_ep/aos_evb/configs/ap/defconfig
+@@ -95,7 +95,6 @@ CONFIG_BOARD_LATE_INITIALIZE=y
+ CONFIG_BOARD_RESET_ON_ASSERT=2
+ CONFIG_BUILTIN=y
+ CONFIG_CRYPTO_MBEDTLS=y
+-CONFIG_DEBUG_ASSERTIONS=y
+ CONFIG_DEBUG_BATTERY=y
+ CONFIG_DEBUG_BATTERY_ERROR=y
+ CONFIG_DEBUG_BUSFAULT=y
+@@ -137,6 +136,7 @@ CONFIG_FSUTILS_MKGPT=y
+ CONFIG_FS_FATFS=y
+ CONFIG_FS_FATFS_SECTOR_RATIO=64
+ CONFIG_FS_HOSTFS=y
++CONFIG_FS_LITTLEFS=y
+ CONFIG_FS_LARGEFILE=y
+ CONFIG_FS_LOCK_BUCKET_SIZE=8
+ CONFIG_FS_PROCFS=y
+@@ -212,7 +212,7 @@ CONFIG_LV_USE_QRCODE=y
+ CONFIG_MEDIA=y
+ CONFIG_MEDIA_TOOL=y
+ CONFIG_MM_HEAP_MEMPOOL_THRESHOLD=256
+-CONFIG_MQ_MAXMSGSIZE=64
++CONFIG_MQ_MAXMSGSIZE=4096
+ CONFIG_MTD=y
+ CONFIG_MTD_PARTITION=y
+ CONFIG_MTD_PROGMEM=y
+@@ -221,7 +221,8 @@ CONFIG_NET=y
+ CONFIG_NETDB_DNSCLIENT=y
+ CONFIG_NETDB_DNSCLIENT_NAMESIZE=512
+ CONFIG_NETDB_DNSCLIENT_RECV_TIMEOUT=5
+-CONFIG_NETDB_DNSSERVER_NOADDR=y
++CONFIG_NETDB_DNSSERVER_IPv4=y
++CONFIG_NETDB_DNSSERVER_IPv4ADDR=0xDF050505
+ CONFIG_NETDEV_MULTIPLE_IPv6=y
+ CONFIG_NETDEV_WIRELESS_IOCTL=y
+ CONFIG_NETDOWN_NOTIFIER=y
+@@ -375,3 +376,9 @@ CONFIG_WATCHDOG=y
+ CONFIG_WATCHDOG_AUTOMONITOR=y
+ CONFIG_WIRELESS_WAPI=y
+ CONFIG_WIRELESS_WAPI_CMDTOOL=y
++
++CONFIG_DEBUG_ASSERTIONS=y
++CONFIG_EXAMPLES_AI_AGENT_VELA=y
++CONFIG_NETUTILS_CJSON=y
++CONFIG_EXAMPLES_ZHAOXI_UI=y
++CONFIG_INPUT_TOUCHSCREEN=y
+-- 
+2.53.0.windows.2
+

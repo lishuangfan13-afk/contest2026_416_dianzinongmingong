@@ -1,0 +1,28 @@
+From 615218d4363256303c7e7edb82342dd1c42bf146 Mon Sep 17 00:00:00 2001
+From: lishuangfan13-afk <lishuangfan13@gmail.com>
+Date: Sat, 12 Sep 2026 22:14:13 +0800
+Subject: [PATCH 2/2] fix(board): boot into zhaoxi_ui instead of lvgldemo
+
+zhaoxi_ui initializes its own display and touch indev via lv_nuttx_init
+and lvgldemo running concurrently breaks touch input (dual LVGL task
+conflict). Boot straight into zhaoxi_ui (v5 firmware behavior).
+---
+ boards/best1700_ep/aos_evb/src/etc/init.d/rcS.ap | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/boards/best1700_ep/aos_evb/src/etc/init.d/rcS.ap b/boards/best1700_ep/aos_evb/src/etc/init.d/rcS.ap
+index 1d52f8d..9236cab 100755
+--- a/boards/best1700_ep/aos_evb/src/etc/init.d/rcS.ap
++++ b/boards/best1700_ep/aos_evb/src/etc/init.d/rcS.ap
+@@ -41,7 +41,7 @@ bluetoothd &
+ #ifdef CONFIG_BESWATCH
+ beswatch &
+ #else
+-lvgldemo widgets &
++zhaoxi_ui &
+ #endif
+ 
+ #ifdef CONFIG_KVDB_PERSIST_PATH
+-- 
+2.53.0.windows.2
+
