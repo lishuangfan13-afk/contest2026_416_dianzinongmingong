@@ -122,7 +122,33 @@ cd flash\vela_2800bp\vela_2800bp
 
 `--reboot` 通过串口让板子自动复位进入下载模式；若板子已在崩溃循环/OTA 引导状态，可省略 `--reboot` 直接启动 dldtool 后按 RESET 触发 SYNC。烧录完成后拔插 USB 重启。
 
-### 4.6 串口验证
+### 4.6 资产部署
+
+`assets/agent_deploy/` 下的 8 个资产需推送到开发板才能生效。路径映射（`<BASE>` 为 ai_agent 数据根目录）：
+
+| 本地文件 | 设备端路径 | 说明 |
+|----------|-----------|------|
+| `SOUL.md` | `<BASE>/config/SOUL.md` | Agent 人格 |
+| `USER.md` | `<BASE>/config/USER.md` | 用户信息 |
+| `MEMORY.md` | `<BASE>/memory/MEMORY.md` | 长期记忆 |
+| `cron.json` | `<BASE>/cron.json` | 定时任务（cron_service 读这里，不是 `config/` 下） |
+| 4 个 skill `.md` | `<BASE>/skills/` | 自定义 Skill |
+
+> **注意**：`<BASE>` 在旧固件（如 9 月 6 日构建）为 `/data/ai_agent`，工作区最新源码已改为 `/data/agent`（`agent_config.h` 的 `CONFIG_EXAMPLES_AI_AGENT_VELA_DATA_DIR`）。部署脚本会自动探测，也可用 `-BaseDir` 显式指定。
+
+使用串口部署脚本（Windows PowerShell 5.1+，板子处于 NSH 控制台或被 ai_agent 占用均可，脚本会自动 `quit` 退回 NSH）：
+
+```powershell
+powershell -File contest2026_416_dianzinongmingong\tools\deploy_assets.ps1 -Port COM3 -Baud 921600
+```
+
+脚本通过 NSH `echo` 逐行写入并 `cat` 回读逐字节校验，校验失败自动重试（最多 3 轮，应对 921600 高波特率下偶发的单比特传输错误）。实现上绕开了两个坑：本固件 NSH readline 行缓冲仅 80 字节（超限截断执行），且双引号字符串内不支持 `\"` 转义（含引号的行自动改用单引号包裹）。未采用 `install_skill`（源码仅支持 https URL，stdin 模式未实现）与 `memory_write`（按空白分词只取首个参数，写不了多行中文），详见脚本头部注释。
+
+注意事项：
+- **/data 为 tmpfs**：LittleFS 分区启用前，每次重启/烧录后资产全部丢失，需重新运行本脚本
+- **覆盖语义**：同名 skill 部署会直接覆盖设备端文件内容（`>` 重定向），无需关心内置 skill 是否已写入
+
+### 4.7 串口验证
 
 ```bash
 # 串口 COM20, 波特率 921600
