@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "jobs": [
+    {
+      "id": "morning-briefing",
+      "action": "ask",
+      "message": "请生成今日早报",
+      "schedule_type": "every",
+      "interval_sec": 86400,
+      "channel": "system",
+      "enabled": true,
+      "description": "每天早8点推送简报"
+    },
+    {
+      "id": "sedentary-reminder",
+      "action": "notify",
+      "message": "坐了挺久了，起来活动一下吧！",
+      "schedule_type": "every",
+      "interval_sec": 5400,
+      "channel": "system",
+      "enabled": false,
+      "description": "每90分钟久坐提醒"
+    },
+    {
+      "id": "water-reminder",
+      "action": "notify",
+      "message": "记得喝口水 💧",
+      "schedule_type": "every",
+      "interval_sec": 7200,
+      "channel": "system",
+      "enabled": false,
+      "description": "每2小时饮水提醒"
+    }
+  ]
+}
