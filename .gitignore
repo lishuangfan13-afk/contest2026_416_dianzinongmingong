@@ -1,0 +1,22 @@
+# ============================================================
+# .gitignore for contest2026_416_dianzinongmingong
+#
+# Ignores build artifacts. AI Coding logs under logs/ are NOT ignored.
+# ============================================================
+
+# Build artifacts
+build/
+cmake_out/
+out/
+*.o
+*.a
+*.elf
+*.hex
+*.map
+
+# Editor / OS junk
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
