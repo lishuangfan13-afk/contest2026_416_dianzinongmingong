@@ -5,10 +5,10 @@
 「朝夕」是一个运行在 BES2800BP 开发板上的主动式 AI 生活管家。它不等用户提问，而是通过 cron 定时引擎主动推送每日简报、健康提醒和待办提醒；用户也可以通过自然语言与它交互，让它记事、设提醒、查天气。核心亮点：
 
 - **主动式服务**：基于 ai_agent 框架的 cron_service，每日定时推送天气+待办+新闻简报
-- **5 个自定义设备端 Skill**：daily-briefing、note-taker、reminder、health-reminder，加上 SOUL.md 人格系统
-- **LVGL 桌面 UI**：zhaoxi_ui 应用独占 454x454 屏幕，深色主题，实时钟表+状态栏+导航栏
+- **4 个自定义设备端 Skill**：daily-briefing、note-taker、reminder、health-reminder，配合 SOUL.md 人格与 MEMORY.md 记忆系统
+- **LVGL 桌面 UI**：zhaoxi_ui 应用独占 454x454 屏幕（RM69330，深色主题，实时钟表+状态栏+导航栏）
 - **MiMo v2.5 Pro 后端**：通过小米 MiMo API 提供 LLM 推理能力
-- **小文件系统持久化**：LittleFS 挂载 /data，Skill 数据、记忆、笔记落盘不丢失
+- **存储层**：实现 /data 的 LittleFS 挂载与 tmpfs 自动回退（板级分区表暂无 data 分区，当前以 tmpfs 运行；分区表启用后配置零改动生效）
 
 ## 二、选题方向
 
@@ -51,6 +51,8 @@ contest2026_416_dianzinongmingong/
 │   ├── 0002-packages_ai_agent-mount-littlefs-on-data.patch
 │   ├── 0003-vendor_bes-enable-littlefs-driver-and-DNS.patch
 │   └── 0004-vendor_bes-boot-into-zhaoxi_ui.patch
+├── tools/
+│   └── ntc_patch.py        # NTC 断言跳过补丁（符号级定位 + 0xb955 硬校验）
 ├── quickapp/
 │   └── hello_quickapp/     # 组委会示例快应用（保留）
 ├── contest2026_416_dianzinongmingong.xml  # repo manifest
@@ -101,13 +103,13 @@ bash vendor/bes/readme/1700_ap.sh
 
 ### 4.4 NTC 补丁
 
-板子无 NTC 热敏电阻，需对 `nuttx_ap.bin` 做二进制补丁跳过断言（偏移 0x47bc 处 0xb955 改为 0xe011）：
+板子无 NTC 热敏电阻，需对固件做二进制补丁跳过断言：以符号级方式定位 `pmu_open+0x1a78` 的 `cbnz r5`（0xb955），改写为跳转指令（0xe011）。补丁前会硬校验原指令，布局漂移时拒绝执行。
 
 ```bash
-python3 work/patch_v3_local.py
+python3 contest2026_416_dianzinongmingong/tools/ntc_patch.py
 ```
 
-该脚本读取 `cmake_out/aos_evb_ap/nuttx_ap.bin`，校验 0xb955 签名后写入补丁，输出到 `flash/vela_2800bp/vela_2800bp/nuttx_ap.bin`。
+脚本读取 `cmake_out/best1700_ep/aos_evb/out/nuttx_ap.elf`（符号定位）、重新生成 `nuttx_ap.bin` 并同步到 `flash/vela_2800bp/vela_2800bp/nuttx_ap.bin`。
 
 ### 4.5 烧录
 
@@ -115,10 +117,10 @@ python3 work/patch_v3_local.py
 
 ```powershell
 cd flash\vela_2800bp\vela_2800bp
-.\dldtool.exe 20 .\programmer1700_dual.bin --set-dual-chip 1 -M .\nuttx_ap.bin --pgm-rate 2000000
+.\dldtool.exe 20 --reboot .\programmer1700_dual.bin --set-dual-chip 1 -M .\nuttx_ap.bin --pgm-rate 2000000
 ```
 
-进入下载模式：板子按 RESET，dldtool 自动 SYNC。烧录完成后拔插 USB 重启。
+`--reboot` 通过串口让板子自动复位进入下载模式；若板子已在崩溃循环/OTA 引导状态，可省略 `--reboot` 直接启动 dldtool 后按 RESET 触发 SYNC。烧录完成后拔插 USB 重启。
 
 ### 4.6 串口验证
 
