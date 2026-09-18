@@ -196,7 +196,7 @@ renew wlan0
 ### AI Agent LLM 配置
 ```
 # ai_agent shell 命令
-set_llm https://api.xiaomimimo.com/v1 mimo-v2.5-pro sk-c26emduem3clnuqn4ys4tqa6jrgs0jkz9i1ltb0e2nytwxef
+set_llm https://api.xiaomimimo.com/v1 mimo-v2.5-pro <YOUR_MIMO_API_KEY>
 set_wifi <SSID> <密码>
 ```
 
