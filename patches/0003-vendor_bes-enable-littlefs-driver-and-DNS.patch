@@ -1,5 +1,5 @@
-From 42ccc9c7e8c5ddb37efc7b2c8e8c400b70ebc5bc Mon Sep 17 00:00:00 2001
-From: lishuangfan13-afk <lishuangfan13@gmail.com>
+From f42e299e5b51088822b214660f0f7781e46024c0 Mon Sep 17 00:00:00 2001
+From: yuk1-r <yuk1-r@users.noreply.github.com>
 Date: Sat, 12 Sep 2026 22:02:31 +0800
 Subject: [PATCH 1/2] fix(board): enable littlefs driver and default DNS server
 

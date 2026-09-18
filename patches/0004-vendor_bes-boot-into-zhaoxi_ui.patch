@@ -1,5 +1,5 @@
-From 615218d4363256303c7e7edb82342dd1c42bf146 Mon Sep 17 00:00:00 2001
-From: lishuangfan13-afk <lishuangfan13@gmail.com>
+From 271b5da7bc179ce2713369c9288acaf7414f4109 Mon Sep 17 00:00:00 2001
+From: yuk1-r <yuk1-r@users.noreply.github.com>
 Date: Sat, 12 Sep 2026 22:14:13 +0800
 Subject: [PATCH 2/2] fix(board): boot into zhaoxi_ui instead of lvgldemo
 
