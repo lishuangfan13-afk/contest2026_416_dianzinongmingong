@@ -12,5 +12,12 @@
     <linkfile src="app/hello_app" dest="packages/demos/contest2026_416_hello_app"/>
     <linkfile src="quickapp/hello_quickapp" dest="packages/apps/contest2026_416_hello_quickapp"/>
     <linkfile src="board/contest_board" dest="vendor/openvela/boards/contest2026_416_board"/>
+    <!--
+      zhaoxi_ui: After repo sync, this linkfile creates packages/zhaoxi_ui in
+      the openvela build tree. In the apps repo, packages/ is a symlink to
+      ../packages, so the final path apps/packages/zhaoxi_ui is resolved.
+      Enabled via CONFIG_EXAMPLES_ZHAOXI_UI=y in defconfig.
+    -->
+    <linkfile src="app/zhaoxi_ui" dest="packages/zhaoxi_ui"/>
   </project>
 </manifest>
