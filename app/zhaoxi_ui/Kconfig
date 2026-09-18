@@ -1,0 +1,6 @@
+config EXAMPLES_ZHAOXI_UI
+    bool "Zhaoxi AI Assistant UI"
+    default n
+    depends on GRAPHICS_LVGL
+    ---help---
+        Zhaoxi (朝夕) AI Life Assistant LVGL UI.

@@ -1,0 +1,15 @@
+if(CONFIG_EXAMPLES_ZHAOXI_UI)
+  nuttx_add_application(
+    NAME
+    zhaoxi_ui
+    PRIORITY
+    100
+    STACKSIZE
+    16384
+    MODULE
+    ${CONFIG_EXAMPLES_ZHAOXI_UI}
+    DEPENDS
+    lvgl
+    SRCS
+    src/zhaoxi_ui.c)
+endif()
