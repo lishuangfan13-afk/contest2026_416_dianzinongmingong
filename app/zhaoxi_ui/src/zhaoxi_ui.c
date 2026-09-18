@@ -6,17 +6,10 @@
 #include <nuttx/config.h>
 #include <unistd.h>
 #include <stdio.h>
-#include <stdbool.h>
 #include <string.h>
 #include <time.h>
 #include <sys/boardctl.h>
 #include <lvgl/lvgl.h>
-
-#ifdef CONFIG_NET
-#include <sys/socket.h>
-#include <sys/ioctl.h>
-#include <net/if.h>
-#endif
 
 /* ── Screen dimensions ──────────────────────────────────────── */
 #define SCREEN_W 454
@@ -44,7 +37,6 @@ static lv_obj_t *g_agent_label;
 static lv_obj_t *g_task_label;
 static lv_timer_t *g_clock_timer;
 static lv_timer_t *g_task_timer;
-static lv_timer_t *g_wifi_timer;
 
 /* ── Clock update timer ─────────────────────────────────────── */
 static void clock_timer_cb(lv_timer_t *timer)
@@ -110,48 +102,13 @@ static void task_timer_cb(lv_timer_t *timer)
     lv_label_set_text(g_task_label, buf);
 }
 
-/* ── WiFi status: check wlan0/eth0 UP+RUNNING via ioctl ─────── */
-static bool wifi_is_up(void)
-{
-#ifdef CONFIG_NET
-    static const char *ifnames[] = { "wlan0", "eth0" };
-
-    int sock = socket(AF_INET, SOCK_DGRAM, 0);
-    if (sock < 0) {
-        return false;
-    }
-
-    bool up = false;
-    for (size_t i = 0; i < sizeof(ifnames) / sizeof(ifnames[0]); i++) {
-        struct ifreq ifr;
-        memset(&ifr, 0, sizeof(ifr));
-        strlcpy(ifr.ifr_name, ifnames[i], IFNAMSIZ);
-        if (ioctl(sock, SIOCGIFFLAGS, (unsigned long)&ifr) == 0) {
-            if ((ifr.ifr_flags & IFF_UP) && (ifr.ifr_flags & IFF_RUNNING)) {
-                up = true;
-                break;
-            }
-        }
-    }
-    close(sock);
-    return up;
-#else
-    return false;
-#endif
-}
-
-static void wifi_timer_cb(lv_timer_t *timer)
-{
-    if (wifi_is_up()) {
-        lv_label_set_text(g_status_label, LV_SYMBOL_WIFI " Connected");
-        lv_obj_set_style_text_color(g_status_label, COLOR_GREEN, 0);
-    } else {
-        lv_label_set_text(g_status_label, LV_SYMBOL_WIFI " Offline");
-        lv_obj_set_style_text_color(g_status_label, COLOR_ORANGE, 0);
-    }
-}
-
-/* ── Create status bar (top) ────────────────────────────────── */
+/* ── WiFi status label ────────────────────────────────────────
+ * NOTE: An earlier revision queried wlan0/eth0 flags via
+ * socket()+ioctl(SIOCGIFFLAGS) from this LVGL thread. On BES the
+ * network stack lives behind rpmsg on another core, and concurrent
+ * socket creation from the UI thread while ai_agent ran TLS sessions
+ * caused heap corruption asserts (mm_malloc.c). The check was removed;
+ * the label is static until a safe status channel exists. ────────── */
 static void create_status_bar(lv_obj_t *parent)
 {
     lv_obj_t *bar = lv_obj_create(parent);
@@ -373,10 +330,6 @@ int main(int argc, FAR char *argv[])
     /* Start task count timer (every 5 sec) */
     g_task_timer = lv_timer_create(task_timer_cb, 5000, NULL);
     task_timer_cb(g_task_timer); /* initial update */
-
-    /* Start WiFi status timer (every 5 sec) */
-    g_wifi_timer = lv_timer_create(wifi_timer_cb, 5000, NULL);
-    wifi_timer_cb(g_wifi_timer); /* initial update */
 
     LV_LOG_USER("Zhaoxi UI started!");
 
