@@ -151,10 +151,11 @@ powershell -File contest2026_416_dianzinongmingong\tools\deploy_assets.ps1 -Port
 ### 4.7 串口验证
 
 ```bash
-# 串口 COM20, 波特率 921600
+# 串口 COM3, 波特率 921600
 # 板子启动后应看到 zhaoxi_ui 界面（454x454 深色桌面）
-# NSH 控制台可执行：
+# NSH 控制台可执行（注意 mode 2 不可少，否则 set_ssid 报 -22）：
 nsh> ifup wlan0
+nsh> wapi mode wlan0 2
 nsh> wapi psk wlan0 <密码> 3
 nsh> wapi essid wlan0 <SSID> 1
 nsh> renew wlan0
