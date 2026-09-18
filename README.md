@@ -1,148 +1,156 @@
-# contest2026_416_dianzinongmingong
+# 朝夕 · 主动式 AI 生活管家
 
-👋 欢迎参加 **2026 首届 openvela AI 硬件开发者大赛**！
+## 一、作品简介
 
-这是组委会为你的队伍创建的**专属参赛仓库**（本仓为样例/模板，队伍编号 `416`；你看到的将是你自己的 `contest2026_<编号>_<队伍名>`）。比赛期间，你的全部参赛代码、打包产物与 AI Coding 日志都提交到这里。
+「朝夕」是一个运行在 BES2800BP 开发板上的主动式 AI 生活管家。它不等用户提问，而是通过 cron 定时引擎主动推送每日简报、健康提醒和待办提醒；用户也可以通过自然语言与它交互，让它记事、设提醒、查天气。核心亮点：
 
-> 本仓既是「代码仓」，又内置了一键拉取整套 openvela 工程的 `repo` 清单（manifest）。你只需跟它打交道，**自始至终只动一个文件夹**。
+- **主动式服务**：基于 ai_agent 框架的 cron_service，每日定时推送天气+待办+新闻简报
+- **5 个自定义设备端 Skill**：daily-briefing、note-taker、reminder、health-reminder，加上 SOUL.md 人格系统
+- **LVGL 桌面 UI**：zhaoxi_ui 应用独占 454x454 屏幕，深色主题，实时钟表+状态栏+导航栏
+- **MiMo v2.5 Pro 后端**：通过小米 MiMo API 提供 LLM 推理能力
+- **小文件系统持久化**：LittleFS 挂载 /data，Skill 数据、记忆、笔记落盘不丢失
 
----
+## 二、选题方向
 
-## 一、先读这些官方文档
+**AI 硬件产品创新**
 
-**通用（所有赛道必读）：**
+基于 openvela（NuttX 内核）+ packages/ai_agent 框架 + 自定义 Skill 系统，在 BES2800BP_EVB 开发板上构建一个真正"主动干活"的 AI 生活管家，区别于被动问答式的传统智能助手。
 
-| 文档                                                                                                                                     | 用途                                           |
-| ---------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
-| [《大赛总览》](https://github.com/open-vela/docs/blob/dev-ai-contest-2026/zh-cn/contest_2026/contest_overview.md)                        | 赛道、流程、评分、资源，建议先通读             |
-| [《参赛代码提交指南》](https://github.com/open-vela/docs/blob/dev-ai-contest-2026/zh-cn/contest_2026/code_submission_guide.md)           | 仓库获取、提交流程、时间与权限（**以此为准**） |
-| [《AI Coding 日志归集与提交手册》](https://github.com/open-vela/docs/blob/dev-ai-contest-2026/zh-cn/contest_2026/ai_coding_log_guide.md) | 如何导出 AI 对话日志并提交到 `logs/`           |
+## 三、目录结构
 
-**按你的赛道选读（三选一）：**
+```
+contest2026_416_dianzinongmingong/
+├── app/
+│   ├── hello_app/          # 组委会示例应用（保留）
+│   └── zhaoxi_ui/          # 朝夕 LVGL 桌面 UI 应用
+│       ├── CMakeLists.txt
+│       ├── Kconfig
+│       ├── Make.defs
+│       ├── Makefile
+│       └── src/
+│           └── zhaoxi_ui.c # UI 主程序（454x454 深色主题）
+├── assets/
+│   └── agent_deploy/       # 设备端 Agent 部署资产
+│       ├── SOUL.md         # Agent 人格设定
+│       ├── USER.md         # 用户信息模板
+│       ├── MEMORY.md       # 长期记忆模板
+│       ├── cron.json       # 定时任务配置
+│       ├── daily-briefing.md   # 每日简报 Skill
+│       ├── health-reminder.md  # 健康提醒 Skill
+│       ├── note-taker.md       # 语音记事 Skill
+│       └── reminder.md         # 定时提醒 Skill
+├── board/
+│   └── contest_board/      # 组委会示例板级适配（保留）
+├── docs/
+│   ├── development_plan.md         # 完整开发计划
+│   └── BES2800BP_development_summary.md  # 硬件/构建/烧录经验总结
+├── logs/                   # AI Coding 日志（由 contest-log-collector 自动归集）
+├── patches/
+│   ├── README.md           # 补丁说明与应用方法
+│   ├── 0001-packages_ai_agent-fix-HTTP-Date-time-sync.patch
+│   ├── 0002-packages_ai_agent-mount-littlefs-on-data.patch
+│   ├── 0003-vendor_bes-enable-littlefs-driver-and-DNS.patch
+│   └── 0004-vendor_bes-boot-into-zhaoxi_ui.patch
+├── quickapp/
+│   └── hello_quickapp/     # 组委会示例快应用（保留）
+├── contest2026_416_dianzinongmingong.xml  # repo manifest
+├── openvela.xml            # openvela 基础 manifest
+├── .gitignore
+└── README.md               # 本文件
+```
 
-| 赛道                  | 教程导航                                                                                                                                                 |
-| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 快应用 / 手表应用创新 | [快应用教程导航](https://github.com/open-vela/docs/blob/dev-ai-contest-2026/zh-cn/contest_2026/quickapp/quickapp_guide_index.md)                         |
-| AI 硬件产品创新       | [AI 硬件赛道教程导航](https://github.com/open-vela/docs/blob/dev-ai-contest-2026/zh-cn/contest_2026/ai_hardware/ai_hardware_guide_index.md)              |
-| 新硬件适配            | [新硬件适配赛道教程导航](https://github.com/open-vela/docs/blob/dev-ai-contest-2026/zh-cn/contest_2026/hardware_porting/hardware_porting_guide_index.md) |
+## 四、运行方式
 
----
-
-## 二、第一步：拉取完整工程
-
-用组委会提供的命令一键拉取「openvela 全量源码 + 你的专属仓」：
+### 4.1 拉取工程
 
 ```bash
-repo init -u https://github.com/open-vela/contest2026_416_dianzinongmingong \
+repo init -u https://github.com/yuk1-r/contest2026_416_dianzinongmingong \
   -b dev-ai-contest-2026 -m contest2026_416_dianzinongmingong.xml
 repo sync -c -j8
 ```
 
-同步后，你的整个仓库位于工作区的 `contest2026_416_dianzinongmingong/`，openvela 全量源码在外层（`nuttx/`、`apps/`、`packages/`、`vendor/` 等）。
+### 4.2 应用公共仓补丁
 
----
-
-## 三、第二步：在哪里写代码
-
-**只在自己的仓目录 `contest2026_416_dianzinongmingong/` 里开发。** 不同作品形态放在对应子目录，manifest 会通过 `<linkfile>` 把它们**软链**到 openvela 编译树该在的位置——你不用手动 copy：
-
-| 作品形态 | 你的代码放这里             | 系统自动映射到                                 |
-| -------- | -------------------------- | ---------------------------------------------- |
-| 应用     | `app/hello_app/`           | `packages/demos/contest2026_416_hello_app`     |
-| 快应用   | `quickapp/hello_quickapp/` | `packages/apps/contest2026_416_hello_quickapp` |
-| 板级适配 | `board/contest_board/`     | `vendor/openvela/boards/contest2026_416_board` |
-
-> 用不到的形态目录可以删掉；新增作品时按同样规则加子目录，并在 `contest2026_416_dianzinongmingong.xml` 里补一条 `<linkfile>` 映射即可。**生产仓库（packages/nuttx/vendor 等）零改动。**
-
-建议仓库目录约定（便于评委定位）：
-
-```text
-app/ | quickapp/ | board/   # 你的作品代码
-logs/                       # AI Coding 日志（主动导出后提交，格式见 logs/README.md）
-README.md                   # 作品说明（提交前请改成你自己的，见第六节）
-```
-
-> 仓内附带了一个 `.gitignore.example`，给出了**编译产物**等不需要进仓的文件示例。如需启用，`cp .gitignore.example .gitignore` 后按需增删即可。**注意 `logs/` 下最终导出的 AI Coding 日志必须提交，不要忽略。**
->
-> `logs/` 的目录结构与提交格式见 [logs/README.md](logs/README.md)。
-
----
-
-## 四、第三步：编译与运行
-
-编译/运行步骤随作品形态不同而不同，请参考你所在赛道的教程导航：
-
-- 快应用 / 手表应用：[快应用教程导航](https://github.com/open-vela/docs/blob/dev-ai-contest-2026/zh-cn/contest_2026/quickapp/quickapp_guide_index.md)（含模拟器与开发板部署）。
-- AI 硬件产品创新：[AI 硬件赛道教程导航](https://github.com/open-vela/docs/blob/dev-ai-contest-2026/zh-cn/contest_2026/ai_hardware/ai_hardware_guide_index.md)（环境搭建、编译烧录、Skill 开发）。
-- 新硬件适配：[新硬件适配赛道教程导航](https://github.com/open-vela/docs/blob/dev-ai-contest-2026/zh-cn/contest_2026/hardware_porting/hardware_porting_guide_index.md)（BSP 移植、最小 NSH 基线）。
-
-子目录已通过 manifest 中的 `<linkfile>` 软链进 openvela 编译树，因此构建在 openvela 工作区**根目录**（即你这个仓的上一级）进行。openvela 使用 `build.sh` 作为统一入口，接收一个 **board config 路径**作为参数：
+本作品对 `packages/ai_agent` 和 `vendor/bes` 两个公共仓有改动，已生成 `patches/` 目录下的 4 个补丁。正式 PR 流程进行中；如需本地复现，可按顺序应用：
 
 ```bash
-# 进入 openvela 工作区根目录（你的仓的上一级）
-cd ..
+cd packages/ai_agent
+git am ../../contest2026_416_dianzinongmingong/patches/0001-*.patch
+git am ../../contest2026_416_dianzinongmingong/patches/0002-*.patch
 
-# 通用语法：第一个参数是 board config 路径，第二个参数可以是 menuconfig / distclean 等
-./build.sh <board-config-path> [menuconfig|distclean] [-j8]
+cd ../vendor/bes
+git am ../../contest2026_416_dianzinongmingong/patches/0003-*.patch
+git am ../../contest2026_416_dianzinongmingong/patches/0004-*.patch
 ```
 
-> 具体的 board config 路径、目标产物、模拟器/真机部署方式请以你所在赛道的教程导航为准。本仓 `app/` `quickapp/` `board/` 三个示例骨架对应的 Kconfig 选项可通过 `menuconfig` 启用。
+补丁作用：
+- `0001` / `0002`：ai_agent 的 HTTP Date 对时 + /data LittleFS 挂载
+- `0003`：defconfig 启用 LittleFS 驱动 + DNS 服务器 223.5.5.5
+- `0004`：rcS.ap 启动 zhaoxi_ui 替代 lvgldemo
 
----
+### 4.3 编译
 
-## 五、第四步：提交作品
+环境要求：WSL Ubuntu-22.04 + ARM 工具链（openvela prebuilts 自带）
 
-1. **fork** 你的专属仓 → 开发 → `git commit` 并推送 → 向专属仓发起 **Pull Request**，可**自行 review 并合入**（无需等组委会）。
-2. **AI Coding 日志**：与 AI 工具的对话会自动记录到本机 staging（不会自动上传），需你**主动导出/打包**选定会话到仓内 `logs/` 目录后一并提交。详见[《AI Coding 日志归集与提交手册》](https://github.com/open-vela/docs/blob/dev-ai-contest-2026/zh-cn/contest_2026/ai_coding_log_guide.md)。
-3. 若需改动 **nuttx 等公共仓库**，不在本仓改，而是 fork 对应公共仓、以 PR 提交到 `dev-ai-contest-2026` 分支，由组委会 review 后合入。
+```bash
+cd /path/to/openvela   # 工作区根目录（仓的上一级）
+bash vendor/bes/readme/1700_ap.sh
+```
 
-> ⏰ **提交作品截止：9 月 20 日**。截止后统一收回 push 权限，仍可查看 / clone。
->
-> 获奖后再按要求将作品 PR 至 openvela 上游对应仓库（走标准 PR + CI 流程）。
+编译产物：`cmake_out/aos_evb_ap/nuttx_ap.bin`
 
-### 关于 PR 与 CLA
+### 4.4 NTC 补丁
 
-- 本仓所有改动通过 **Pull Request** 合入（分支保护强制，可自行合入自己的 PR）。
-- 首次贡献需在[**官网签署 CLA**](https://openvela.com/#/community/cla)；PR 上会自动跑 `cla/signature` 检查，在官网签署成功后，在 PR 评论 `/check-cla` 复检即可通过。
+板子无 NTC 热敏电阻，需对 `nuttx_ap.bin` 做二进制补丁跳过断言（偏移 0x47bc 处 0xb955 改为 0xe011）：
 
----
+```bash
+python3 work/patch_v3_local.py
+```
 
-## 六、提交前：把本 README 改成你的作品说明
+该脚本读取 `cmake_out/aos_evb_ap/nuttx_ap.bin`，校验 0xb955 签名后写入补丁，输出到 `flash/vela_2800bp/vela_2800bp/nuttx_ap.bin`。
 
-本文件目前是组委会给的**使用说明书**。**作品提交前，请把它替换成你自己作品的说明**，方便评委快速了解你做了什么、怎么跑起来。建议至少包含以下内容：
+### 4.5 烧录
 
-```markdown
-# <你的作品名>
+**红线：只许 AP-only 烧录，严禁 nuttx_ota.bin / nuttx_bl.bin**
 
-## 一、作品简介
-<一句话/一段话说明这个作品是什么、解决什么问题、亮点在哪>
+```powershell
+cd flash\vela_2800bp\vela_2800bp
+.\dldtool.exe 20 .\programmer1700_dual.bin --set-dual-chip 1 -M .\nuttx_ap.bin --pgm-rate 2000000
+```
 
-## 二、选题方向
-<快应用 / 手表应用创新 ｜ AI 硬件产品创新 ｜ 新硬件适配 ｜ 自定方向，并简述理由>
+进入下载模式：板子按 RESET，dldtool 自动 SYNC。烧录完成后拔插 USB 重启。
 
-## 三、目录结构
-<列出你这个仓里各目录/文件的作用，例如：>
-- `app/xxx/`        — <说明>
-- `board/xxx/`      — <说明>
-- `quickapp/xxx/`   — <说明>
-- `logs/`           — AI Coding 日志
-- `docs/` 或其他    — <说明>
+### 4.6 串口验证
 
-## 四、运行方式
-<拉取工程后，如何编译、烧录/部署、运行的完整步骤；最好能让评委照着一步步复现>
+```bash
+# 串口 COM20, 波特率 921600
+# 板子启动后应看到 zhaoxi_ui 界面（454x454 深色桌面）
+# NSH 控制台可执行：
+nsh> ifup wlan0
+nsh> wapi psk wlan0 <密码> 3
+nsh> wapi essid wlan0 <SSID> 1
+nsh> renew wlan0
+```
 
 ## 五、AI Coding 使用说明
-<说明本作品如何借助 AI 辅助开发：
-- 在需求拆解 / 方案设计 / 编码 / 调试 / 文档等环节如何与 AI 协作；
-- AI 对开发效率或质量带来的实际帮助。
-完整对话日志见 logs/ 目录>
-```
 
-> 提示：将会根据「作品本身 + 你的 README 说明 + `logs/` 里的 AI Coding 日志」来理解和评估你的作品，README 写清楚很重要。
+### 开发工具
 
----
+前一阶段开发使用 Codex CLI / Qoder 进行 AI 辅助编码，涵盖：
+- **需求拆解**：将"主动式 AI 管家"拆解为 Skill 系统 + cron 引擎 + LVGL UI 三个模块
+- **方案设计**：AI 协助设计 Skill 文件格式、cron.json 配置结构、SOUL.md 人格模板
+- **编码实现**：zhaoxi_ui.c 的 LVGL 布局代码、Skill markdown 文件、defconfig 配置
+- **调试排障**：NTC 断言崩溃的二进制补丁方案、网络对时问题的 HTTP Date 方案
 
-## 附：仓库命名规范
+### 日志状态
 
-`contest2026_<编号>_<队伍名>` — 编号三位零填充；队名 slug（全小写、英文/拼音、连字符）。例：`contest2026_416_dianzinongmingong`。
-（仓库由组委会统一创建，**每队仅一个仓**，无需自行命名。）
+AI 对话日志正在整理中。比赛仓已安装官方 `contest-log-collector` 工具，后续开发会话将自动归集到 `logs/` 目录。
+
+### 公共仓改动说明
+
+以下改动在公共仓中，已附 patches/ 补丁，正式 PR 流程进行中：
+
+| 仓库 | 补丁 | 改动内容 |
+|------|------|----------|
+| `packages/ai_agent` | 0001, 0002 | HTTP Date 对时 + LittleFS /data 挂载 |
+| `vendor/bes` | 0003, 0004 | defconfig 启用 LittleFS/DNS + rcS.ap 启动 zhaoxi_ui |
