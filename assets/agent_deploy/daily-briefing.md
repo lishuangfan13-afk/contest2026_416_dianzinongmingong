@@ -4,7 +4,7 @@
 
 ## 何时使用
 - 用户问"今天有什么安排"、"早安"、"今日简报"
-- cron 定时任务触发（默认每天早 8 点）
+- 用户收到 cron 定时推送的简报提醒后回复触发（cron.json 中 id=morning-briefing，kind=every，interval_s=86400；框架触发时只推送 message 文本、不自动调用本 skill，且 every 从启动时刻起算，不保证恰在早 8 点）
 
 ## 执行步骤
 1. 使用 get_current_time 获取今天的日期和时间

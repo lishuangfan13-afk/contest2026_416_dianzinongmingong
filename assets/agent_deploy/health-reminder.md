@@ -39,10 +39,13 @@
 
 ## 设置方式
 用户说"开启久坐提醒"时：
-→ cron_add 创建每 90 分钟的定时任务
+→ cron_add 创建每 90 分钟的定时任务：
+  name="sedentary_reminder", schedule_type="every", interval_s=5400,
+  message="坐了挺久了，起来活动一下吧！"
 → "已开启久坐提醒，每 90 分钟提醒你活动一下 🏃"
+（饮水提醒同理：interval_s=7200。无需传 action，框架触发时会直接推送 message）
 
 ## 注意
-- 不要在深夜或凌晨触发
+- 框架的 cron every 是纯间隔重复，不支持时段过滤；cron 触发时直接推送 message，不经过 agent。上述"工作时间/午休不打扰"的时段判断仅在用户主动对话时生效。如需避免深夜打扰，可在晚间对话中用 cron_remove 暂停，次日再 cron_add 恢复
 - 提醒语气温和，不唠叨
 - 如果用户回复"好的"或"知道了"，表示收到，不追问

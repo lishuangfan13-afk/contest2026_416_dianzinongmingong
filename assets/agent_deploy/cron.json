@@ -3,33 +3,33 @@
   "jobs": [
     {
       "id": "morning-briefing",
-      "action": "ask",
-      "message": "请生成今日早报",
-      "schedule_type": "every",
-      "interval_sec": 86400,
+      "name": "每日简报",
+      "kind": "every",
+      "interval_s": 86400,
+      "message": "早上好！对我说「今日简报」，我来为你生成今日早报 ☀️",
       "channel": "system",
       "enabled": true,
-      "description": "每天早8点推送简报"
+      "description": "每天推送一次简报提醒（原设计为 action=ask 让 agent 自动生成简报，但框架 action 只接受已注册工具名，ask 不存在，故改为纯文本提醒）"
     },
     {
       "id": "sedentary-reminder",
-      "action": "notify",
+      "name": "久坐提醒",
+      "kind": "every",
+      "interval_s": 5400,
       "message": "坐了挺久了，起来活动一下吧！",
-      "schedule_type": "every",
-      "interval_sec": 5400,
       "channel": "system",
       "enabled": false,
-      "description": "每90分钟久坐提醒"
+      "description": "每90分钟久坐提醒，默认禁用，用户说「开启久坐提醒」时由 agent 用 cron_add 重新创建"
     },
     {
       "id": "water-reminder",
-      "action": "notify",
+      "name": "饮水提醒",
+      "kind": "every",
+      "interval_s": 7200,
       "message": "记得喝口水 💧",
-      "schedule_type": "every",
-      "interval_sec": 7200,
       "channel": "system",
       "enabled": false,
-      "description": "每2小时饮水提醒"
+      "description": "每2小时饮水提醒，默认禁用（原设计为 action=notify，notify 不是注册工具，故去掉 action，框架会直接推送 message）"
     }
   ]
 }

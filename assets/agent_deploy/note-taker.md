@@ -14,7 +14,7 @@
 2. 分析用户意图，分类为：
    - **待办**（TODO）：有明确行动项 → 存入 /data/agent/TASKS.md
    - **备忘**（MEMO）：纯记录信息 → 存入 /data/agent/memory/daily/YYYY-MM-DD.md
-   - **提醒**（REMINDER）：有时间约束 → 调用 cron_add 创建定时提醒
+   - **提醒**（REMINDER）：有时间约束 → 调用 cron_add 创建定时提醒（必填参数：name、schedule_type（"at" 一次性 / "every" 重复）、message；at 用 at_epoch，every 用 interval_s）
 3. 写入对应文件，格式：
    - 待办：- [ ] [YYYY-MM-DD] 描述
    - 备忘：- [HH:MM] 内容
