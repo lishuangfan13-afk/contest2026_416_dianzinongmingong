@@ -6,9 +6,17 @@
 #include <nuttx/config.h>
 #include <unistd.h>
 #include <stdio.h>
+#include <stdbool.h>
+#include <string.h>
 #include <time.h>
 #include <sys/boardctl.h>
 #include <lvgl/lvgl.h>
+
+#ifdef CONFIG_NET
+#include <sys/socket.h>
+#include <sys/ioctl.h>
+#include <net/if.h>
+#endif
 
 /* ── Screen dimensions ──────────────────────────────────────── */
 #define SCREEN_W 454
@@ -23,6 +31,9 @@
 #define COLOR_GREEN     lv_color_hex(0x3FB950)
 #define COLOR_ORANGE    lv_color_hex(0xD29922)
 
+#define TASKS_FILE "/data/agent/TASKS.md"
+#define TASKS_FILE_LEGACY "/data/ai_agent/TASKS.md"
+
 /* ── Static UI elements ─────────────────────────────────────── */
 static lv_obj_t *g_clock_label;
 static lv_obj_t *g_date_label;
@@ -30,7 +41,10 @@ static lv_obj_t *g_greeting_label;
 static lv_obj_t *g_weather_label;
 static lv_obj_t *g_status_label;
 static lv_obj_t *g_agent_label;
+static lv_obj_t *g_task_label;
 static lv_timer_t *g_clock_timer;
+static lv_timer_t *g_task_timer;
+static lv_timer_t *g_wifi_timer;
 
 /* ── Clock update timer ─────────────────────────────────────── */
 static void clock_timer_cb(lv_timer_t *timer)
@@ -62,6 +76,79 @@ static void clock_timer_cb(lv_timer_t *timer)
     else if (t->tm_hour < 22) greeting = "晚上好，放松一下";
     else greeting = "夜深了，早点休息";
     lv_label_set_text(g_greeting_label, greeting);
+}
+
+/* ── Task count: read TASKS.md, count unfinished "- [ ]" ───── */
+static int count_pending_tasks(void)
+{
+    FILE *fp = fopen(TASKS_FILE, "r");
+    if (fp == NULL) {
+        /* Older firmware keeps agent data under /data/ai_agent */
+        fp = fopen(TASKS_FILE_LEGACY, "r");
+        if (fp == NULL) {
+            return 0;
+        }
+    }
+
+    int count = 0;
+    char line[256];
+    while (fgets(line, sizeof(line), fp) != NULL) {
+        const char *p = line;
+        while (*p == ' ' || *p == '\t') p++;
+        if (strncmp(p, "- [ ]", 5) == 0) {
+            count++;
+        }
+    }
+    fclose(fp);
+    return count;
+}
+
+static void task_timer_cb(lv_timer_t *timer)
+{
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%d 条待办", count_pending_tasks());
+    lv_label_set_text(g_task_label, buf);
+}
+
+/* ── WiFi status: check wlan0/eth0 UP+RUNNING via ioctl ─────── */
+static bool wifi_is_up(void)
+{
+#ifdef CONFIG_NET
+    static const char *ifnames[] = { "wlan0", "eth0" };
+
+    int sock = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sock < 0) {
+        return false;
+    }
+
+    bool up = false;
+    for (size_t i = 0; i < sizeof(ifnames) / sizeof(ifnames[0]); i++) {
+        struct ifreq ifr;
+        memset(&ifr, 0, sizeof(ifr));
+        strlcpy(ifr.ifr_name, ifnames[i], IFNAMSIZ);
+        if (ioctl(sock, SIOCGIFFLAGS, (unsigned long)&ifr) == 0) {
+            if ((ifr.ifr_flags & IFF_UP) && (ifr.ifr_flags & IFF_RUNNING)) {
+                up = true;
+                break;
+            }
+        }
+    }
+    close(sock);
+    return up;
+#else
+    return false;
+#endif
+}
+
+static void wifi_timer_cb(lv_timer_t *timer)
+{
+    if (wifi_is_up()) {
+        lv_label_set_text(g_status_label, LV_SYMBOL_WIFI " Connected");
+        lv_obj_set_style_text_color(g_status_label, COLOR_GREEN, 0);
+    } else {
+        lv_label_set_text(g_status_label, LV_SYMBOL_WIFI " Offline");
+        lv_obj_set_style_text_color(g_status_label, COLOR_ORANGE, 0);
+    }
 }
 
 /* ── Create status bar (top) ────────────────────────────────── */
@@ -168,11 +255,11 @@ static void create_info_cards(lv_obj_t *parent)
     lv_obj_set_style_text_font(task_title, &lv_font_montserrat_20, 0);
     lv_obj_align(task_title, LV_ALIGN_TOP_LEFT, 4, 4);
 
-    lv_obj_t *task_value = lv_label_create(task_card);
-    lv_label_set_text(task_value, "0 条待办");
-    lv_obj_set_style_text_color(task_value, COLOR_TEXT, 0);
-    lv_obj_set_style_text_font(task_value, &lv_font_montserrat_28, 0);
-    lv_obj_align(task_value, LV_ALIGN_BOTTOM_LEFT, 4, -4);
+    g_task_label = lv_label_create(task_card);
+    lv_label_set_text(g_task_label, "0 条待办");
+    lv_obj_set_style_text_color(g_task_label, COLOR_TEXT, 0);
+    lv_obj_set_style_text_font(g_task_label, &lv_font_montserrat_28, 0);
+    lv_obj_align(g_task_label, LV_ALIGN_BOTTOM_LEFT, 4, -4);
 }
 
 /* ── Create bottom nav bar ──────────────────────────────────── */
@@ -282,6 +369,14 @@ int main(int argc, FAR char *argv[])
     /* Start clock update timer (every 1 sec) */
     g_clock_timer = lv_timer_create(clock_timer_cb, 1000, NULL);
     clock_timer_cb(g_clock_timer); /* initial update */
+
+    /* Start task count timer (every 5 sec) */
+    g_task_timer = lv_timer_create(task_timer_cb, 5000, NULL);
+    task_timer_cb(g_task_timer); /* initial update */
+
+    /* Start WiFi status timer (every 5 sec) */
+    g_wifi_timer = lv_timer_create(wifi_timer_cb, 5000, NULL);
+    wifi_timer_cb(g_wifi_timer); /* initial update */
 
     LV_LOG_USER("Zhaoxi UI started!");
 
