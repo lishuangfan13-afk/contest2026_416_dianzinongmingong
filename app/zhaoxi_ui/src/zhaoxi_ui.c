@@ -19,8 +19,45 @@ LV_FONT_DECLARE(zhaoxi_font_28);
 /* ── Screen dimensions ──────────────────────────────────────── */
 #define SCREEN_W 454
 #define SCREEN_H 454
-#define NAV_H    70
-#define TILE_H   (SCREEN_H - NAV_H)
+
+/* The RM69330 panel is a ROUND 454x454 AMOLED. Content laid out as
+ * full-width rectangles gets clipped at the curved edges (that is why the
+ * old status bar and nav bar looked cut off). All content is therefore
+ * horizontally centered and sized against the inscribed circle:
+ *   center (227,227), radius 227.                                        */
+#define CIRCLE_R   227
+#define CIRCLE_CX  227
+#define CIRCLE_CY  227
+#define SAFE_MARGIN 12   /* keep this far inside the bezel */
+
+/* Integer square root (avoids a libm dependency). */
+static int isqrt_i(long v)
+{
+    long x = 0;
+    if (v <= 0) return 0;
+    while ((x + 1) * (x + 1) <= v) x++;
+    return (int)x;
+}
+
+/* Maximum width for a horizontally-centered box of height h whose vertical
+ * center sits at cy, so that all four corners stay inside the circle. */
+static int circle_max_w(int cy, int h)
+{
+    int dy = cy - CIRCLE_CY;
+    if (dy < 0) dy = -dy;
+    dy += h / 2;
+    long v = (long)CIRCLE_R * CIRCLE_R - (long)dy * dy;
+    int half = isqrt_i(v) - SAFE_MARGIN;
+    if (half < 0) half = 0;
+    return (half * 2) & ~1;   /* even */
+}
+
+/* Min of a desired width and the circular limit. */
+static int circle_fit_w(int cy, int h, int want)
+{
+    int lim = circle_max_w(cy, h);
+    return (want < lim) ? want : lim;
+}
 
 /* ── Colors (dark theme) ────────────────────────────────────── */
 #define COLOR_BG        lv_color_hex(0x0D1117)
@@ -282,26 +319,34 @@ static void poll_timer_cb(lv_timer_t *timer)
  * the label is now fed from the NET_STATUS file instead. ────────── */
 static void create_status_bar(lv_obj_t *parent)
 {
+    /* Compact centered pill, sized to fit the top arc of the round panel. */
+    const int h = 34;
+    const int cy = 56;
+    int w = circle_fit_w(cy, h, 224);
+
     lv_obj_t *bar = lv_obj_create(parent);
-    lv_obj_set_size(bar, SCREEN_W, 40);
-    lv_obj_align(bar, LV_ALIGN_TOP_MID, 0, 0);
+    lv_obj_set_size(bar, w, h);
+    lv_obj_align(bar, LV_ALIGN_TOP_MID, 0, cy - h / 2);
     lv_obj_set_style_bg_color(bar, COLOR_CARD, 0);
     lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(bar, 0, 0);
-    lv_obj_set_style_radius(bar, 0, 0);
-    lv_obj_set_style_pad_hor(bar, 16, 0);
+    lv_obj_set_style_radius(bar, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_pad_hor(bar, 12, 0);
+    lv_obj_set_style_pad_ver(bar, 0, 0);
     lv_obj_clear_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
 
     /* WiFi status */
     g_status_label = lv_label_create(bar);
-    lv_label_set_text(g_status_label, LV_SYMBOL_WIFI " Connected");
+    lv_label_set_text(g_status_label, LV_SYMBOL_WIFI " ...");
     lv_obj_set_style_text_color(g_status_label, COLOR_GREEN, 0);
     lv_obj_set_style_text_font(g_status_label, &zhaoxi_font_20, 0);
+    lv_obj_set_width(g_status_label, (w - 24) * 3 / 5);
+    lv_label_set_long_mode(g_status_label, LV_LABEL_LONG_DOT);
     lv_obj_align(g_status_label, LV_ALIGN_LEFT_MID, 0, 0);
 
     /* AI Agent status */
     g_agent_label = lv_label_create(bar);
-    lv_label_set_text(g_agent_label, LV_SYMBOL_OK " AI Ready");
+    lv_label_set_text(g_agent_label, LV_SYMBOL_OK " AI");
     lv_obj_set_style_text_color(g_agent_label, COLOR_ACCENT, 0);
     lv_obj_set_style_text_font(g_agent_label, &zhaoxi_font_20, 0);
     lv_obj_align(g_agent_label, LV_ALIGN_RIGHT_MID, 0, 0);
@@ -310,14 +355,18 @@ static void create_status_bar(lv_obj_t *parent)
 /* ── Create main clock area (center) ────────────────────────── */
 static void create_clock_area(lv_obj_t *parent)
 {
+    const int h = 146;
+    const int cy = 172;
+    int w = circle_fit_w(cy, h, 310);
+
     /* Clock container */
     lv_obj_t *clock_card = lv_obj_create(parent);
-    lv_obj_set_size(clock_card, SCREEN_W - 40, 180);
-    lv_obj_align(clock_card, LV_ALIGN_TOP_MID, 0, 55);
+    lv_obj_set_size(clock_card, w, h);
+    lv_obj_align(clock_card, LV_ALIGN_TOP_MID, 0, cy - h / 2);
     lv_obj_set_style_bg_color(clock_card, COLOR_CARD, 0);
     lv_obj_set_style_bg_opa(clock_card, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(clock_card, 0, 0);
-    lv_obj_set_style_radius(clock_card, 20, 0);
+    lv_obj_set_style_radius(clock_card, 28, 0);
     lv_obj_clear_flag(clock_card, LV_OBJ_FLAG_SCROLLABLE);
 
     /* Time display - large */
@@ -325,69 +374,84 @@ static void create_clock_area(lv_obj_t *parent)
     lv_label_set_text(g_clock_label, "00:00");
     lv_obj_set_style_text_color(g_clock_label, COLOR_TEXT, 0);
     lv_obj_set_style_text_font(g_clock_label, &lv_font_montserrat_48, 0);
-    lv_obj_align(g_clock_label, LV_ALIGN_CENTER, 0, -20);
+    lv_obj_align(g_clock_label, LV_ALIGN_CENTER, 0, -18);
 
     /* Date display */
     g_date_label = lv_label_create(clock_card);
     lv_label_set_text(g_date_label, "1月1日 周一");
     lv_obj_set_style_text_color(g_date_label, COLOR_TEXT_DIM, 0);
     lv_obj_set_style_text_font(g_date_label, &zhaoxi_font_20, 0);
-    lv_obj_align(g_date_label, LV_ALIGN_CENTER, 0, 25);
+    lv_obj_align(g_date_label, LV_ALIGN_CENTER, 0, 32);
 
     /* Greeting */
     g_greeting_label = lv_label_create(parent);
     lv_label_set_text(g_greeting_label, "你好，欢迎使用朝夕");
     lv_obj_set_style_text_color(g_greeting_label, COLOR_ACCENT, 0);
     lv_obj_set_style_text_font(g_greeting_label, &zhaoxi_font_22, 0);
-    lv_obj_align(g_greeting_label, LV_ALIGN_TOP_MID, 0, 250);
+    lv_obj_set_width(g_greeting_label, 300);
+    lv_obj_set_style_text_align(g_greeting_label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_long_mode(g_greeting_label, LV_LABEL_LONG_DOT);
+    lv_obj_align(g_greeting_label, LV_ALIGN_TOP_MID, 0, 251);
 }
 
 /* ── Create info cards area ─────────────────────────────────── */
 static void create_info_cards(lv_obj_t *parent)
 {
-    /* Weather card */
+    const int h = 80;
+    const int cy = 320;
+    const int gap = 12;
+    int total = circle_fit_w(cy, h, 292);
+    int card_w = (total - gap) / 2;
+
+    /* Weather card (left) */
     lv_obj_t *weather_card = lv_obj_create(parent);
-    lv_obj_set_size(weather_card, (SCREEN_W - 52) / 2, 80);
-    lv_obj_align(weather_card, LV_ALIGN_TOP_LEFT, 16, 290);
+    lv_obj_set_size(weather_card, card_w, h);
+    lv_obj_align(weather_card, LV_ALIGN_TOP_MID, -(card_w + gap) / 2, cy - h / 2);
     lv_obj_set_style_bg_color(weather_card, COLOR_CARD, 0);
     lv_obj_set_style_bg_opa(weather_card, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(weather_card, 0, 0);
-    lv_obj_set_style_radius(weather_card, 16, 0);
+    lv_obj_set_style_radius(weather_card, 18, 0);
+    lv_obj_set_style_pad_all(weather_card, 8, 0);
     lv_obj_clear_flag(weather_card, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t *weather_title = lv_label_create(weather_card);
     lv_label_set_text(weather_title, LV_SYMBOL_LOOP " 天气");
     lv_obj_set_style_text_color(weather_title, COLOR_TEXT_DIM, 0);
     lv_obj_set_style_text_font(weather_title, &zhaoxi_font_20, 0);
-    lv_obj_align(weather_title, LV_ALIGN_TOP_LEFT, 4, 4);
+    lv_obj_align(weather_title, LV_ALIGN_TOP_LEFT, 0, 0);
 
     g_weather_label = lv_label_create(weather_card);
     lv_label_set_text(g_weather_label, "暂无数据");
     lv_obj_set_style_text_color(g_weather_label, COLOR_TEXT_DIM, 0);
-    lv_obj_set_style_text_font(g_weather_label, &zhaoxi_font_28, 0);
-    lv_obj_align(g_weather_label, LV_ALIGN_BOTTOM_LEFT, 4, -4);
+    lv_obj_set_style_text_font(g_weather_label, &zhaoxi_font_20, 0);
+    lv_obj_set_width(g_weather_label, card_w - 16);
+    lv_label_set_long_mode(g_weather_label, LV_LABEL_LONG_DOT);
+    lv_obj_align(g_weather_label, LV_ALIGN_BOTTOM_LEFT, 0, 0);
 
-    /* Task/Reminder card */
+    /* Task/Reminder card (right) */
     lv_obj_t *task_card = lv_obj_create(parent);
-    lv_obj_set_size(task_card, (SCREEN_W - 52) / 2, 80);
-    lv_obj_align(task_card, LV_ALIGN_TOP_RIGHT, -16, 290);
+    lv_obj_set_size(task_card, card_w, h);
+    lv_obj_align(task_card, LV_ALIGN_TOP_MID, (card_w + gap) / 2, cy - h / 2);
     lv_obj_set_style_bg_color(task_card, COLOR_CARD, 0);
     lv_obj_set_style_bg_opa(task_card, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(task_card, 0, 0);
-    lv_obj_set_style_radius(task_card, 16, 0);
+    lv_obj_set_style_radius(task_card, 18, 0);
+    lv_obj_set_style_pad_all(task_card, 8, 0);
     lv_obj_clear_flag(task_card, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t *task_title = lv_label_create(task_card);
     lv_label_set_text(task_title, LV_SYMBOL_BELL " 提醒");
     lv_obj_set_style_text_color(task_title, COLOR_TEXT_DIM, 0);
     lv_obj_set_style_text_font(task_title, &zhaoxi_font_20, 0);
-    lv_obj_align(task_title, LV_ALIGN_TOP_LEFT, 4, 4);
+    lv_obj_align(task_title, LV_ALIGN_TOP_LEFT, 0, 0);
 
     g_task_label = lv_label_create(task_card);
     lv_label_set_text(g_task_label, "0 条待办");
     lv_obj_set_style_text_color(g_task_label, COLOR_TEXT, 0);
-    lv_obj_set_style_text_font(g_task_label, &zhaoxi_font_28, 0);
-    lv_obj_align(g_task_label, LV_ALIGN_BOTTOM_LEFT, 4, -4);
+    lv_obj_set_style_text_font(g_task_label, &zhaoxi_font_20, 0);
+    lv_obj_set_width(g_task_label, card_w - 16);
+    lv_label_set_long_mode(g_task_label, LV_LABEL_LONG_DOT);
+    lv_obj_align(g_task_label, LV_ALIGN_BOTTOM_LEFT, 0, 0);
 }
 
 /* ── Home tile ──────────────────────────────────────────────── */
@@ -440,29 +504,36 @@ static void build_chat_tile(lv_obj_t *tile)
     lv_obj_set_style_bg_opa(tile, LV_OPA_COVER, 0);
     lv_obj_clear_flag(tile, LV_OBJ_FLAG_SCROLLABLE);
 
-    /* Reminder line */
+    /* Reminder line (centered, inside the top arc) */
     g_reminder_label = lv_label_create(tile);
     lv_label_set_text(g_reminder_label, "提醒：暂无");
     lv_obj_set_style_text_color(g_reminder_label, COLOR_ORANGE, 0);
     lv_obj_set_style_text_font(g_reminder_label, &zhaoxi_font_20, 0);
-    lv_obj_set_width(g_reminder_label, SCREEN_W - 20);
+    lv_obj_set_width(g_reminder_label, 220);
+    lv_obj_set_style_text_align(g_reminder_label, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_long_mode(g_reminder_label, LV_LABEL_LONG_DOT);
-    lv_obj_align(g_reminder_label, LV_ALIGN_TOP_LEFT, 10, 4);
+    lv_obj_align(g_reminder_label, LV_ALIGN_TOP_MID, 0, 36);
 
-    /* Text area */
+    /* Input row: textarea + send, centered as a ~292px group */
+    const int row_w = 292;
+    const int row_h = 44;
+    const int row_y = 66;
+    const int send_w = 84;
+    const int gap = 10;
+
     g_chat_ta = lv_textarea_create(tile);
-    lv_obj_set_size(g_chat_ta, SCREEN_W - 110, 44);
-    lv_obj_align(g_chat_ta, LV_ALIGN_TOP_LEFT, 10, 34);
+    lv_obj_set_size(g_chat_ta, row_w - send_w - gap, row_h);
+    lv_obj_align(g_chat_ta, LV_ALIGN_TOP_MID, -(send_w + gap) / 2, row_y);
     lv_textarea_set_one_line(g_chat_ta, true);
     lv_textarea_set_placeholder_text(g_chat_ta, "输入内容...");
     lv_obj_set_style_text_font(g_chat_ta, &zhaoxi_font_20, 0);
     lv_obj_add_event_cb(g_chat_ta, chat_ready_cb, LV_EVENT_READY, NULL);
 
-    /* Send button */
     lv_obj_t *send = lv_btn_create(tile);
-    lv_obj_set_size(send, 80, 44);
-    lv_obj_align(send, LV_ALIGN_TOP_RIGHT, -10, 34);
+    lv_obj_set_size(send, send_w, row_h);
+    lv_obj_align(send, LV_ALIGN_TOP_MID, (row_w - send_w) / 2, row_y);
     lv_obj_set_style_bg_color(send, COLOR_ACCENT, 0);
+    lv_obj_set_style_radius(send, 12, 0);
     lv_obj_set_style_shadow_width(send, 0, 0);
     lv_obj_add_event_cb(send, chat_send_cb, LV_EVENT_CLICKED, NULL);
 
@@ -472,20 +543,22 @@ static void build_chat_tile(lv_obj_t *tile)
     lv_obj_set_style_text_font(send_lbl, &zhaoxi_font_20, 0);
     lv_obj_align(send_lbl, LV_ALIGN_CENTER, 0, 0);
 
-    /* Log */
+    /* Conversation log */
     strncpy(g_chat_log_buf, "对话记录：", sizeof(g_chat_log_buf) - 1);
     g_chat_log = lv_label_create(tile);
-    lv_obj_set_size(g_chat_log, SCREEN_W - 20, 62);
-    lv_obj_align(g_chat_log, LV_ALIGN_TOP_LEFT, 10, 88);
+    lv_obj_set_size(g_chat_log, 300, 68);
+    lv_obj_align(g_chat_log, LV_ALIGN_TOP_MID, 0, 112);
     lv_label_set_long_mode(g_chat_log, LV_LABEL_LONG_DOT);
     lv_label_set_text(g_chat_log, g_chat_log_buf);
     lv_obj_set_style_text_color(g_chat_log, COLOR_TEXT, 0);
     lv_obj_set_style_text_font(g_chat_log, &zhaoxi_font_20, 0);
 
-    /* Keyboard (sized so it does not cover the log) */
+    /* Keyboard: kept inside the lower arc and above the floating nav pill
+     * (a wider/taller keyboard would clip at the bottom corners). */
     g_chat_kb = lv_keyboard_create(tile);
-    lv_obj_set_size(g_chat_kb, SCREEN_W, 220);
-    lv_obj_align(g_chat_kb, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_set_size(g_chat_kb, 312, 160);
+    lv_obj_align(g_chat_kb, LV_ALIGN_TOP_MID, 0, 186);
+    lv_obj_set_style_radius(g_chat_kb, 16, 0);
     lv_keyboard_set_textarea(g_chat_kb, g_chat_ta);
 }
 
@@ -496,44 +569,51 @@ static void build_settings_tile(lv_obj_t *tile)
     lv_obj_set_style_bg_opa(tile, LV_OPA_COVER, 0);
     lv_obj_clear_flag(tile, LV_OBJ_FLAG_SCROLLABLE);
 
+    const int card_w = 282;
+    const int card_h = 286;
+    const int card_cy = 200;
+
     lv_obj_t *card = lv_obj_create(tile);
-    lv_obj_set_size(card, SCREEN_W - 32, 250);
-    lv_obj_align(card, LV_ALIGN_TOP_MID, 0, 24);
+    lv_obj_set_size(card, card_w, card_h);
+    lv_obj_align(card, LV_ALIGN_TOP_MID, 0, card_cy - card_h / 2);
     lv_obj_set_style_bg_color(card, COLOR_CARD, 0);
     lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(card, 0, 0);
-    lv_obj_set_style_radius(card, 20, 0);
+    lv_obj_set_style_radius(card, 26, 0);
+    lv_obj_set_style_pad_all(card, 18, 0);
     lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t *title = lv_label_create(card);
     lv_label_set_text(title, LV_SYMBOL_SETTINGS " 设备信息");
     lv_obj_set_style_text_color(title, COLOR_ACCENT, 0);
     lv_obj_set_style_text_font(title, &zhaoxi_font_24, 0);
-    lv_obj_align(title, LV_ALIGN_TOP_LEFT, 4, 0);
+    lv_obj_align(title, LV_ALIGN_TOP_LEFT, 0, 0);
 
     g_set_net_label = lv_label_create(card);
     lv_label_set_text(g_set_net_label, "网络：未知");
     lv_obj_set_style_text_color(g_set_net_label, COLOR_TEXT_DIM, 0);
     lv_obj_set_style_text_font(g_set_net_label, &zhaoxi_font_20, 0);
-    lv_obj_align(g_set_net_label, LV_ALIGN_TOP_LEFT, 4, 50);
+    lv_obj_set_width(g_set_net_label, card_w - 36);
+    lv_label_set_long_mode(g_set_net_label, LV_LABEL_LONG_DOT);
+    lv_obj_align(g_set_net_label, LV_ALIGN_TOP_LEFT, 0, 56);
 
     g_set_task_label = lv_label_create(card);
     lv_label_set_text(g_set_task_label, "待办任务：0 条");
     lv_obj_set_style_text_color(g_set_task_label, COLOR_TEXT, 0);
     lv_obj_set_style_text_font(g_set_task_label, &zhaoxi_font_20, 0);
-    lv_obj_align(g_set_task_label, LV_ALIGN_TOP_LEFT, 4, 90);
+    lv_obj_align(g_set_task_label, LV_ALIGN_TOP_LEFT, 0, 100);
 
     g_set_uptime_label = lv_label_create(card);
     lv_label_set_text(g_set_uptime_label, "运行时间：0 分 0 秒");
     lv_obj_set_style_text_color(g_set_uptime_label, COLOR_TEXT, 0);
     lv_obj_set_style_text_font(g_set_uptime_label, &zhaoxi_font_20, 0);
-    lv_obj_align(g_set_uptime_label, LV_ALIGN_TOP_LEFT, 4, 130);
+    lv_obj_align(g_set_uptime_label, LV_ALIGN_TOP_LEFT, 0, 144);
 
     lv_obj_t *note = lv_label_create(card);
     lv_label_set_text(note, "朝夕 AI 助手 · 演示版");
     lv_obj_set_style_text_color(note, COLOR_TEXT_DIM, 0);
     lv_obj_set_style_text_font(note, &zhaoxi_font_20, 0);
-    lv_obj_align(note, LV_ALIGN_TOP_LEFT, 4, 180);
+    lv_obj_align(note, LV_ALIGN_TOP_LEFT, 0, 196);
 }
 
 /* ── Nav highlight + change-only diagnostic ─────────────────── */
@@ -593,13 +673,20 @@ static void nav_btn_event_cb(lv_event_t *e)
 
 static void create_nav_bar(lv_obj_t *parent)
 {
+    /* Floating pill centered on the lower arc: a full-width bar would be
+     * clipped by the round bezel. */
+    const int nav_h = 56;
+    const int cy = 396;
+    int nav_w = circle_fit_w(cy, nav_h, 268);
+
     lv_obj_t *nav = lv_obj_create(parent);
-    lv_obj_set_size(nav, SCREEN_W, NAV_H);
-    lv_obj_align(nav, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_set_size(nav, nav_w, nav_h);
+    lv_obj_align(nav, LV_ALIGN_TOP_MID, 0, cy - nav_h / 2);
     lv_obj_set_style_bg_color(nav, COLOR_CARD, 0);
     lv_obj_set_style_bg_opa(nav, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(nav, 0, 0);
-    lv_obj_set_style_radius(nav, 0, 0);
+    lv_obj_set_style_radius(nav, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_pad_all(nav, 4, 0);
     lv_obj_set_flex_flow(nav, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(nav, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_clear_flag(nav, LV_OBJ_FLAG_SCROLLABLE);
@@ -611,13 +698,15 @@ static void create_nav_bar(lv_obj_t *parent)
     };
     static const char *labels[] = { "首页", "对话", "设置" };
 
+    /* 3 buttons must fit inside (nav_w - 2*pad) = 192 px content width. */
     for (int i = 0; i < 3; i++) {
         lv_obj_t *btn = lv_btn_create(nav);
-        lv_obj_set_size(btn, 80, 56);
+        lv_obj_set_size(btn, 56, 44);
         lv_obj_set_style_bg_color(btn, COLOR_CARD, 0);
         lv_obj_set_style_bg_opa(btn, LV_OPA_TRANSP, 0);
         lv_obj_set_style_shadow_width(btn, 0, 0);
         lv_obj_set_style_border_width(btn, 0, 0);
+        lv_obj_set_style_pad_all(btn, 0, 0);
         lv_obj_add_event_cb(btn, nav_btn_event_cb, LV_EVENT_CLICKED,
                             (void *)(intptr_t)i);
 
@@ -685,9 +774,10 @@ int main(int argc, FAR char *argv[])
     lv_obj_set_style_bg_color(scr, COLOR_BG, 0);
     lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
 
-    /* Tileview fills the area above the nav bar */
+    /* Tileview fills the whole panel; tiles lay content out against the
+     * inscribed circle and the nav bar floats above it. */
     g_tileview = lv_tileview_create(scr);
-    lv_obj_set_size(g_tileview, SCREEN_W, TILE_H);
+    lv_obj_set_size(g_tileview, SCREEN_W, SCREEN_H);
     lv_obj_align(g_tileview, LV_ALIGN_TOP_MID, 0, 0);
     lv_obj_set_style_bg_color(g_tileview, COLOR_BG, 0);
     lv_obj_set_style_bg_opa(g_tileview, LV_OPA_COVER, 0);
