@@ -41,8 +41,11 @@ contest2026_416_dianzinongmingong/
 │       └── reminder.md         # 定时提醒 Skill
 ├── board/
 │   └── contest_board/      # 组委会示例板级适配（保留）
+├── .claude/
+│   └── skills/             # ★ 开发经验技能集（6 个可复用 Skill，见第五节）
 ├── docs/
 │   ├── development_plan.md         # 完整开发计划
+│   ├── project_introduction.md    # 作品介绍（md + docx）
 │   └── BES2800BP_development_summary.md  # 硬件/构建/烧录经验总结
 ├── logs/                   # AI Coding 日志（由 contest-log-collector 自动归集）
 ├── patches/
@@ -50,9 +53,14 @@ contest2026_416_dianzinongmingong/
 │   ├── 0001-packages_ai_agent-fix-HTTP-Date-time-sync.patch
 │   ├── 0002-packages_ai_agent-mount-littlefs-on-data.patch
 │   ├── 0003-vendor_bes-enable-littlefs-driver-and-DNS.patch
-│   └── 0004-vendor_bes-boot-into-zhaoxi_ui.patch
+│   ├── 0004-vendor_bes-boot-into-zhaoxi_ui.patch
+│   ├── 0005-packages_ai_agent-add-daily-cron-schedule.patch
+│   └── 0006-packages_ai_agent-write-network-status-file.patch
 ├── tools/
-│   └── ntc_patch.py        # NTC 断言跳过补丁（符号级定位 + 0xb955 硬校验）
+│   ├── ntc_patch.py            # NTC 断言跳过补丁（符号级定位 + 0xb955 硬校验）
+│   ├── deploy_assets.ps1        # 设备端资产串口部署（回读校验 + 自动重试）
+│   ├── gen_cjk_fonts.ps1        # 中文字体子集生成
+│   └── check_cjk_coverage.ps1   # 字体覆盖率构建闸门
 ├── quickapp/
 │   └── hello_quickapp/     # 组委会示例快应用（保留）
 ├── contest2026_416_dianzinongmingong.xml  # repo manifest
@@ -73,12 +81,14 @@ repo sync -c -j8
 
 ### 4.2 应用公共仓补丁
 
-本作品对 `packages/ai_agent` 和 `vendor/bes` 两个公共仓有改动，已生成 `patches/` 目录下的 4 个补丁。正式 PR 流程进行中；如需本地复现，可按顺序应用：
+本作品对 `packages/ai_agent` 和 `vendor/bes` 两个公共仓有改动，已生成 `patches/` 目录下的 6 个补丁。正式 PR 流程进行中；如需本地复现，可按顺序应用：
 
 ```bash
 cd packages/ai_agent
 git am ../../contest2026_416_dianzinongmingong/patches/0001-*.patch
 git am ../../contest2026_416_dianzinongmingong/patches/0002-*.patch
+git am ../../contest2026_416_dianzinongmingong/patches/0005-*.patch
+git am ../../contest2026_416_dianzinongmingong/patches/0006-*.patch
 
 cd ../vendor/bes
 git am ../../contest2026_416_dianzinongmingong/patches/0003-*.patch
@@ -89,6 +99,8 @@ git am ../../contest2026_416_dianzinongmingong/patches/0004-*.patch
 - `0001` / `0002`：ai_agent 的 HTTP Date 对时 + /data LittleFS 挂载
 - `0003`：defconfig 启用 LittleFS 驱动 + DNS 服务器 223.5.5.5
 - `0004`：rcS.ap 启动 zhaoxi_ui 替代 lvgldemo
+- `0005`：cron 引擎新增 `kind:"daily"` 每日定点调度（原生仅支持 every/at，无法表达"每天早 8 点"）
+- `0006`：网络状态变化时写入 `NET_STATUS` 文件，供 UI 轮询显示
 
 ### 4.3 编译
 
@@ -187,17 +199,31 @@ nsh> renew wlan0
 
 ## 五、AI Coding 使用说明
 
-### 开发工具
+### 开发工具与工作流
 
-前一阶段开发使用 Codex CLI / Qoder 进行 AI 辅助编码，涵盖：
+全程 AI 辅助开发，使用**官方支持的 Codex CLI 与 OpenCode** 两类工具，共 34 段有效会话（均已归集至 `logs/`，由官方 `contest-log-collector` 自动采集，可验证）：
+
 - **需求拆解**：将"主动式 AI 管家"拆解为 Skill 系统 + cron 引擎 + LVGL UI 三个模块
 - **方案设计**：AI 协助设计 Skill 文件格式、cron.json 配置结构、SOUL.md 人格模板
 - **编码实现**：zhaoxi_ui.c 的 LVGL 布局代码、Skill markdown 文件、defconfig 配置
 - **调试排障**：NTC 断言崩溃的二进制补丁方案、网络对时问题的 HTTP Date 方案
 
-### 日志状态
+后期形成了一套**权限收窄的多智能体派工工作流**：主控会话先做只读调查（file:line 证据强制），再按"单文件所有权 + 禁 git"拆派子任务，由主控统一 review 后提交——该模式连同其他开发经验，已沉淀为可复用的技能库。
 
-AI 对话日志正在整理中。比赛仓已安装官方 `contest-log-collector` 工具，后续开发会话将自动归集到 `logs/` 目录。
+### 开发经验技能沉淀
+
+`.claude/skills/` 下沉淀了 **6 个开发经验 Skill**（遵循 SKILL.md 规范，可被 Claude Code 等工具直接发现加载，也可作为文档阅读）：
+
+| Skill | 内容 |
+|-------|------|
+| `openvela-dev` | 开发闭环总路由（七阶段）+ git 纪律 + WSL 要点 |
+| `board-bringup` | BES2800BP 构建、NTC 二进制补丁、AP-only 烧录红线 |
+| `evidence-driven-debugging` | DIAG 自诊断层 + 只读调查先行 + 疑难案例库 |
+| `scoped-agent-dispatch` | 权限收窄多智能体派工模式与任务书模板 |
+| `device-skill-authoring` | 设备端 Skill 编写规范 + 串口资产部署 |
+| `cjk-font-pipeline` | 中文字体子集自动提取 + 覆盖率构建闸门 |
+
+另有 4 个**设备端运行时 Skill**（`assets/agent_deploy/`，部署于设备 `/data/agent/skills/`），见第三节。
 
 ### 公共仓改动说明
 
@@ -206,4 +232,16 @@ AI 对话日志正在整理中。比赛仓已安装官方 `contest-log-collector
 | 仓库 | 补丁 | 改动内容 |
 |------|------|----------|
 | `packages/ai_agent` | 0001, 0002 | HTTP Date 对时 + LittleFS /data 挂载 |
+| `packages/ai_agent` | 0005, 0006 | cron 新增 daily 每日定点调度 + NET_STATUS 网络状态文件 |
 | `vendor/bes` | 0003, 0004 | defconfig 启用 LittleFS/DNS + rcS.ap 启动 zhaoxi_ui |
+
+## 六、未来规划
+
+当前交互以触摸键盘输入为主，语音闭环是下一阶段的重点方向：
+
+- **语音输入（ASR）**：接入麦克风阵列与端侧/云端 ASR，取代触摸键盘成为主输入通道——现有 cron 主动推送（简报/提醒）与语音输入天然互补：机器"主动说"，人"随口答"
+- **唤醒与播报（唤醒词 + TTS）**：按大赛统一唤醒词「你好，openvela」实现免触唤醒，简报与提醒由屏幕展示升级为语音播报
+- **持久化存储**：板级分区表启用 data 分区后，资产与记忆跨重启保留（当前 tmpfs 回退方案零改动切换）
+- **提醒智能排程**：基于用户作息自动避开夜间时段，实现"有分寸的主动"
+
+完整规划见 `docs/project_introduction.md` 第九节。
