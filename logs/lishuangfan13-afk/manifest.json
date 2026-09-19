@@ -1,0 +1,273 @@
+{
+  "schema_version": "1.0",
+  "team_id": "contest2026_416_dianzinongmingong",
+  "github_login": "lishuangfan13-afk",
+  "generator": "opencode-collector@1.4.0",
+  "updated_at": "2026-09-19T09:15:02.003446+00:00",
+  "sessions": [
+    {
+      "session_id": "ses_f50124904ffemsvjH5JjSjRONk",
+      "tool": "opencode",
+      "started_at": "2026-09-17T15:13:06.940Z",
+      "last_event_at": "2026-09-19T09:14:42.540Z",
+      "event_count": 2169,
+      "file_path": "logs/lishuangfan13-afk/2026-09-17/opencode__ses_f50124904ffemsvjH5JjSjRONk.jsonl",
+      "collection_mode": "backfill-sqlite",
+      "health": "ok",
+      "title": "openvela 2026 比赛文档与代码仓库了解"
+    },
+    {
+      "session_id": "ses_f4fe3e7b5ffeRfaINBCxLFQVcE",
+      "tool": "opencode",
+      "started_at": "2026-09-17T16:03:46.384Z",
+      "last_event_at": "2026-09-17T16:09:22.929Z",
+      "event_count": 60,
+      "file_path": "logs/lishuangfan13-afk/2026-09-17/opencode__ses_f4fe3e7b5ffeRfaINBCxLFQVcE.jsonl",
+      "collection_mode": "backfill-sqlite",
+      "health": "ok",
+      "title": "彻查朝夕项目完整实现 (@explore subagent)"
+    },
+    {
+      "session_id": "ses_f4fd805ddffeC02bXYqqYvkNzd",
+      "tool": "opencode",
+      "started_at": "2026-09-17T16:16:45.096Z",
+      "last_event_at": "2026-09-17T16:16:45.096Z",
+      "event_count": 1,
+      "file_path": "logs/lishuangfan13-afk/2026-09-17/opencode__ses_f4fd805ddffeC02bXYqqYvkNzd.jsonl",
+      "collection_mode": "backfill-sqlite",
+      "health": "ok",
+      "title": "修复 cron.json 与 skill 文件 (@general subagent)"
+    },
+    {
+      "session_id": "ses_f4fd4bbf4ffeZeBqOSkMRdmaPo",
+      "tool": "opencode",
+      "started_at": "2026-09-17T16:20:20.623Z",
+      "last_event_at": "2026-09-17T16:25:22.041Z",
+      "event_count": 38,
+      "file_path": "logs/lishuangfan13-afk/2026-09-17/opencode__ses_f4fd4bbf4ffeZeBqOSkMRdmaPo.jsonl",
+      "collection_mode": "backfill-sqlite",
+      "health": "ok",
+      "title": "修复 cron.json schema 不匹配 (@general subagent)"
+    },
+    {
+      "session_id": "ses_f4fd48b1affe906e87B2bjp0M1",
+      "tool": "opencode",
+      "started_at": "2026-09-17T16:20:33.129Z",
+      "last_event_at": "2026-09-17T16:21:26.226Z",
+      "event_count": 11,
+      "file_path": "logs/lishuangfan13-afk/2026-09-17/opencode__ses_f4fd48b1affe906e87B2bjp0M1.jsonl",
+      "collection_mode": "backfill-sqlite",
+      "health": "ok",
+      "title": "清除泄露的 API key (@general subagent)"
+    },
+    {
+      "session_id": "ses_f4fd429d2ffeYtMRqyrZtJPLOf",
+      "tool": "opencode",
+      "started_at": "2026-09-17T16:20:58.034Z",
+      "last_event_at": "2026-09-17T16:29:29.538Z",
+      "event_count": 57,
+      "file_path": "logs/lishuangfan13-afk/2026-09-17/opencode__ses_f4fd429d2ffeYtMRqyrZtJPLOf.jsonl",
+      "collection_mode": "backfill-sqlite",
+      "health": "ok",
+      "title": "资产部署脚本与文档 (@general subagent)"
+    },
+    {
+      "session_id": "ses_f4fd3f875ffe5J7FLRbzQQjoPd",
+      "tool": "opencode",
+      "started_at": "2026-09-17T16:21:10.680Z",
+      "last_event_at": "2026-09-17T16:23:00.895Z",
+      "event_count": 22,
+      "file_path": "logs/lishuangfan13-afk/2026-09-17/opencode__ses_f4fd3f875ffe5J7FLRbzQQjoPd.jsonl",
+      "collection_mode": "backfill-sqlite",
+      "health": "ok",
+      "title": "skill 覆盖语义文档 (@general subagent)"
+    },
+    {
+      "session_id": "ses_f4fd3a5d8ffe0uGquxl2tYT6nQ",
+      "tool": "opencode",
+      "started_at": "2026-09-17T16:21:31.825Z",
+      "last_event_at": "2026-09-17T16:24:58.028Z",
+      "event_count": 32,
+      "file_path": "logs/lishuangfan13-afk/2026-09-17/opencode__ses_f4fd3a5d8ffe0uGquxl2tYT6nQ.jsonl",
+      "collection_mode": "backfill-sqlite",
+      "health": "ok",
+      "title": "UI 接入真实待办数据 (@general subagent)"
+    },
+    {
+      "session_id": "ses_f4b7e0950ffeJoc81yHpwUKg98",
+      "tool": "opencode",
+      "started_at": "2026-09-18T12:33:31.501Z",
+      "last_event_at": "2026-09-18T12:41:21.500Z",
+      "event_count": 93,
+      "file_path": "logs/lishuangfan13-afk/2026-09-18/opencode__ses_f4b7e0950ffeJoc81yHpwUKg98.jsonl",
+      "collection_mode": "backfill-sqlite",
+      "health": "ok",
+      "title": "火山Agent配置新增deepseek-v4.1-flash"
+    },
+    {
+      "session_id": "ses_f4b43a00affeKm2KPGjqOdlH3A",
+      "tool": "opencode",
+      "started_at": "2026-09-18T13:37:19.361Z",
+      "last_event_at": "2026-09-18T13:39:46.260Z",
+      "event_count": 87,
+      "file_path": "logs/lishuangfan13-afk/2026-09-18/opencode__ses_f4b43a00affeKm2KPGjqOdlH3A.jsonl",
+      "collection_mode": "backfill-sqlite",
+      "health": "ok",
+      "title": "Generate CJK fonts and wire UI (@general subagent)"
+    },
+    {
+      "session_id": "ses_f4b439ff3ffe3xC0l77ehYEWAX",
+      "tool": "opencode",
+      "started_at": "2026-09-18T13:37:19.376Z",
+      "last_event_at": "2026-09-18T14:04:01.795Z",
+      "event_count": 245,
+      "file_path": "logs/lishuangfan13-afk/2026-09-18/opencode__ses_f4b439ff3ffe3xC0l77ehYEWAX.jsonl",
+      "collection_mode": "backfill-sqlite",
+      "health": "ok",
+      "title": "Investigate display geometry/orientation (@general subagent)"
+    },
+    {
+      "session_id": "ses_f4b439fe7ffeQ1sP4S2RcOGWo3",
+      "tool": "opencode",
+      "started_at": "2026-09-18T13:37:19.387Z",
+      "last_event_at": "2026-09-18T13:48:21.900Z",
+      "event_count": 85,
+      "file_path": "logs/lishuangfan13-afk/2026-09-18/opencode__ses_f4b439fe7ffeQ1sP4S2RcOGWo3.jsonl",
+      "collection_mode": "backfill-sqlite",
+      "health": "ok",
+      "title": "Repo housekeeping and hygiene (@general subagent)"
+    },
+    {
+      "session_id": "ses_f4b1cde93ffeZibO5TfbPWseGm",
+      "tool": "opencode",
+      "started_at": "2026-09-18T14:19:39.251Z",
+      "last_event_at": "2026-09-18T14:21:18.109Z",
+      "event_count": 85,
+      "file_path": "logs/lishuangfan13-afk/2026-09-18/opencode__ses_f4b1cde93ffeZibO5TfbPWseGm.jsonl",
+      "collection_mode": "backfill-sqlite",
+      "health": "ok",
+      "title": "Research cron_service and agent data (@explore subagent)"
+    },
+    {
+      "session_id": "ses_f4b1cde7dffecAck2bA4pnTF8L",
+      "tool": "opencode",
+      "started_at": "2026-09-18T14:19:39.270Z",
+      "last_event_at": "2026-09-18T14:21:05.999Z",
+      "event_count": 78,
+      "file_path": "logs/lishuangfan13-afk/2026-09-18/opencode__ses_f4b1cde7dffecAck2bA4pnTF8L.jsonl",
+      "collection_mode": "backfill-sqlite",
+      "health": "ok",
+      "title": "Research weather/skills/agent channels (@explore subagent)"
+    },
+    {
+      "session_id": "ses_f4b1cde6cffejiYThxaj23ygO5",
+      "tool": "opencode",
+      "started_at": "2026-09-18T14:19:39.287Z",
+      "last_event_at": "2026-09-18T14:21:21.200Z",
+      "event_count": 74,
+      "file_path": "logs/lishuangfan13-afk/2026-09-18/opencode__ses_f4b1cde6cffejiYThxaj23ygO5.jsonl",
+      "collection_mode": "backfill-sqlite",
+      "health": "ok",
+      "title": "Research LVGL nav/screens and UI constraints (@explore subagent)"
+    },
+    {
+      "session_id": "ses_f4b14c44effeisBYMq6l6znQRd",
+      "tool": "opencode",
+      "started_at": "2026-09-18T14:28:30.261Z",
+      "last_event_at": "2026-09-18T14:34:33.469Z",
+      "event_count": 128,
+      "file_path": "logs/lishuangfan13-afk/2026-09-18/opencode__ses_f4b14c44effeisBYMq6l6znQRd.jsonl",
+      "collection_mode": "backfill-sqlite",
+      "health": "ok",
+      "title": "Map UI channel and agent input (@explore subagent)"
+    },
+    {
+      "session_id": "ses_f4b14c442ffelBS8qMsTxt6BAt",
+      "tool": "opencode",
+      "started_at": "2026-09-18T14:28:30.272Z",
+      "last_event_at": "2026-09-18T14:29:16.044Z",
+      "event_count": 38,
+      "file_path": "logs/lishuangfan13-afk/2026-09-18/opencode__ses_f4b14c442ffelBS8qMsTxt6BAt.jsonl",
+      "collection_mode": "backfill-sqlite",
+      "health": "ok",
+      "title": "Map weather write_file and skills (@explore subagent)"
+    },
+    {
+      "session_id": "ses_f4b14c436ffeUH9eY36zyMIghk",
+      "tool": "opencode",
+      "started_at": "2026-09-18T14:28:30.285Z",
+      "last_event_at": "2026-09-18T14:32:12.649Z",
+      "event_count": 127,
+      "file_path": "logs/lishuangfan13-afk/2026-09-18/opencode__ses_f4b14c436ffeUH9eY36zyMIghk.jsonl",
+      "collection_mode": "backfill-sqlite",
+      "health": "ok",
+      "title": "Map LVGL version nav and widgets (@explore subagent)"
+    },
+    {
+      "session_id": "ses_f4b14c428ffejXjMmSIBIHGmvn",
+      "tool": "opencode",
+      "started_at": "2026-09-18T14:28:30.298Z",
+      "last_event_at": "2026-09-18T14:29:07.827Z",
+      "event_count": 53,
+      "file_path": "logs/lishuangfan13-afk/2026-09-18/opencode__ses_f4b14c428ffejXjMmSIBIHGmvn.jsonl",
+      "collection_mode": "backfill-sqlite",
+      "health": "ok",
+      "title": "Map cron service and delivery (@explore subagent)"
+    },
+    {
+      "session_id": "ses_f4aef3d08ffecbCs2pwVtZTYr2",
+      "tool": "opencode",
+      "started_at": "2026-09-18T15:09:29.723Z",
+      "last_event_at": "2026-09-18T15:22:28.395Z",
+      "event_count": 224,
+      "file_path": "logs/lishuangfan13-afk/2026-09-18/opencode__ses_f4aef3d08ffecbCs2pwVtZTYr2.jsonl",
+      "collection_mode": "backfill-sqlite",
+      "health": "ok",
+      "title": "Rewrite zhaoxi_ui with tileview screens (@general subagent)"
+    },
+    {
+      "session_id": "ses_f4aef3cd7ffe9nDZesNOV5y61N",
+      "tool": "opencode",
+      "started_at": "2026-09-18T15:09:29.772Z",
+      "last_event_at": "2026-09-18T15:11:09.518Z",
+      "event_count": 59,
+      "file_path": "logs/lishuangfan13-afk/2026-09-18/opencode__ses_f4aef3cd7ffe9nDZesNOV5y61N.jsonl",
+      "collection_mode": "backfill-sqlite",
+      "health": "ok",
+      "title": "Update agent assets cron and skills (@general subagent)"
+    },
+    {
+      "session_id": "ses_f4aef3cc0ffev1qjLQQI0FhLDU",
+      "tool": "opencode",
+      "started_at": "2026-09-18T15:09:29.795Z",
+      "last_event_at": "2026-09-18T15:41:12.148Z",
+      "event_count": 353,
+      "file_path": "logs/lishuangfan13-afk/2026-09-18/opencode__ses_f4aef3cc0ffev1qjLQQI0FhLDU.jsonl",
+      "collection_mode": "backfill-sqlite",
+      "health": "ok",
+      "title": "Framework patches daily cron and net status (@general subagent)"
+    },
+    {
+      "session_id": "ses_f4aef3cb3ffeUW42IbOHGYR5y6",
+      "tool": "opencode",
+      "started_at": "2026-09-18T15:09:29.808Z",
+      "last_event_at": "2026-09-18T15:11:47.046Z",
+      "event_count": 41,
+      "file_path": "logs/lishuangfan13-afk/2026-09-18/opencode__ses_f4aef3cb3ffeUW42IbOHGYR5y6.jsonl",
+      "collection_mode": "backfill-sqlite",
+      "health": "ok",
+      "title": "Auto-extract CJK font tooling (@general subagent)"
+    },
+    {
+      "session_id": "ses_f4754c278ffexwP0nIppHhduLN",
+      "tool": "opencode",
+      "started_at": "2026-09-19T07:57:05.298Z",
+      "last_event_at": "2026-09-19T07:57:23.958Z",
+      "event_count": 27,
+      "file_path": "logs/lishuangfan13-afk/2026-09-19/opencode__ses_f4754c278ffexwP0nIppHhduLN.jsonl",
+      "collection_mode": "backfill-sqlite",
+      "health": "ok",
+      "title": "Write project introduction document (@general subagent)"
+    }
+  ]
+}
