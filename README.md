@@ -161,6 +161,30 @@ nsh> wapi essid wlan0 <SSID> 1
 nsh> renew wlan0
 ```
 
+### 4.8 天气/新闻工具所需的 Tavily API Key
+
+设备端的 `get_weather` 与 `news_search` 工具默认以 **Tavily** 为主后端（工具注册见 `src/tools/tool_registry.c:191,201`），需先配置 Tavily API Key，否则天气/新闻会失败（`tool_web_search.c` 中天气链路为 Tavily → SerpAPI，新闻链路为 Tavily → NewsAPI）。
+
+配置方式（二选一，**运行期配置为推荐做法**）：
+
+- **NSH 命令行**（写入设备端 config store，重启后仍生效）：
+
+  ```text
+  nsh> set_tavily_key <YOUR_TAVILY_KEY>
+  nsh> config_show       # 可回读确认（Tavily Key 已脱敏显示）
+  ```
+
+- **设备端配置文件**：`<BASE>/config/config.json` 中的 `tavily_key` 字段（`<BASE>` 默认为 `/data/agent`，旧固件为 `/data/ai_agent`，见 4.6 节）。该文件由框架以 `0600` 权限创建。
+
+机制来源（源码实证）：
+
+- 键名宏 `AGENT_CFG_KEY_TAVILY_KEY` = `"tavily_key"`，见 `apps/packages/ai_agent/include/agent_config.h:243`。
+- 运行期从 config store 读取：`tool_web_search.c:106` 调用 `claw_config_get(AGENT_CFG_KEY_TAVILY_KEY, ...)`；配置持久化到 `AGENT_CONFIG_FILE`（`agent_config.h:96`，即 `<AGENT_DATA_DIR>/config/config.json`，`AGENT_DATA_DIR` 默认 `/data/agent`，`agent_config.h:85-89`）。
+- NSH 命令 `set_tavily_key <key>` → `cmd_set_tavily_key()`（`src/channels/nsh_commands.c:423`）→ `tool_web_search_set_tavily_key()` → `claw_config_set()`（`src/tools/tool_web_search.c:529`）。
+- 另有编译期兜底宏 `AGENT_SECRET_TAVILY_KEY`（`agent_config.h:71`），默认空字符串。
+
+> **安全红线：不要把 Tavily Key（或任何 API Key）写进源码、资产或提交进仓库。** 上述编译期宏保持默认空值，密钥只通过 NSH 命令或设备端 `config.json` 在运行时配置；`config.json` 位于设备 `/data` 下，不属于本仓库。
+
 ## 五、AI Coding 使用说明
 
 ### 开发工具
