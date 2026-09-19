@@ -2,34 +2,53 @@
   "version": 1,
   "jobs": [
     {
-      "id": "morning-briefing",
+      "id": "brief",
       "name": "每日简报",
       "kind": "every",
       "interval_s": 86400,
       "message": "早上好！对我说「今日简报」，我来为你生成今日早报 ☀️",
       "channel": "system",
       "enabled": true,
-      "description": "每天推送一次简报提醒（原设计为 action=ask 让 agent 自动生成简报，但框架 action 只接受已注册工具名，ask 不存在，故改为纯文本提醒）"
+      "action": "write_file",
+      "action_args": "{\"path\":\"/data/ai_agent/REMINDER.md\",\"content\":\"早上好！对我说「今日简报」，我来生成今日早报 ☀️\"}",
+      "description": "每24小时提醒一次；写 REMINDER.md 让 UI 可见，用户回复后由 LLM 生成真实简报"
     },
     {
-      "id": "sedentary-reminder",
+      "id": "sedent",
       "name": "久坐提醒",
       "kind": "every",
       "interval_s": 5400,
       "message": "坐了挺久了，起来活动一下吧！",
       "channel": "system",
-      "enabled": false,
-      "description": "每90分钟久坐提醒，默认禁用，用户说「开启久坐提醒」时由 agent 用 cron_add 重新创建"
+      "enabled": true,
+      "action": "write_file",
+      "action_args": "{\"path\":\"/data/ai_agent/REMINDER.md\",\"content\":\"久坐提醒：坐了挺久了，起来活动一下吧！\"}",
+      "description": "每90分钟久坐提醒，写 REMINDER.md 供 UI 展示"
     },
     {
-      "id": "water-reminder",
+      "id": "water",
       "name": "饮水提醒",
       "kind": "every",
       "interval_s": 7200,
       "message": "记得喝口水 💧",
       "channel": "system",
-      "enabled": false,
-      "description": "每2小时饮水提醒，默认禁用（原设计为 action=notify，notify 不是注册工具，故去掉 action，框架会直接推送 message）"
+      "enabled": true,
+      "action": "write_file",
+      "action_args": "{\"path\":\"/data/ai_agent/REMINDER.md\",\"content\":\"饮水提醒：记得喝口水 💧\"}",
+      "description": "每2小时饮水提醒，写 REMINDER.md 供 UI 展示"
+    },
+    {
+      "id": "wake",
+      "name": "早安闹钟",
+      "kind": "daily",
+      "hour": 8,
+      "minute": 0,
+      "message": "早安！新的一天开始了，需要我帮你看看今天的安排吗？",
+      "channel": "system",
+      "enabled": true,
+      "action": "write_file",
+      "action_args": "{\"path\":\"/data/ai_agent/REMINDER.md\",\"content\":\"早安！新的一天开始了，需要我帮你看看今天的安排吗？\"}",
+      "description": "每天8:00早安提醒；kind=daily 需框架补丁，未打补丁时本任务被跳过，不影响其他任务"
     }
   ]
 }

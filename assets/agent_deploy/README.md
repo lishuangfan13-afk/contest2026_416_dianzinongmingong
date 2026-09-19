@@ -42,6 +42,34 @@
 - `cron.json` 由 cron_service 加载（schema 见 `cron_service.c` 的 `cron_parse_job_item`：`id`/`name`/`kind`/`message` 必填）。到期触发时，若 job 带 `action` 则直接执行同名**已注册工具**；无 `action` 则把 `message` 原文推送到 channel——**cron 触发不经过 LLM**。因此每日简报任务推的是引导文案，用户回复后由 LLM 匹配到 daily-briefing skill 生成真实简报——**cron 是触发器，skill 是执行脚本**。
 - 各 skill 内部的步骤（读写 MEMORY.md、cron_add 创建提醒等）与上述文件协同，因此部署时建议整套一起推送，避免版本错配。
 
+### 可见提醒：`action:"write_file"` 数据流
+
+`channel:"system"` 只写 syslog，**用户与 UI 都看不到**。要让提醒真正显示，cron job 必须带 `action:"write_file"`，把文案写到 UI 轮询的文件里（`tool_write_file_execute` 接受 JSON `{"path":"<abs path>","content":"<text>"}`，仅允许写 `/data/ai_agent/` 之下）：
+
+| UI 消费的文件 | 写入方 | UI 行为 |
+|---------------|--------|---------|
+| `/data/ai_agent/WEATHER.md` | 每日简报 skill 的 `get_weather` 步骤 | 天气卡片显示第一个非空行 |
+| `/data/ai_agent/REMINDER.md` | cron `brief`/`sedent`/`water`/`wake` 的 `write_file` | 聊天界面显示第一个非空行 |
+| `/data/ai_agent/NET_STATUS` | agent 侧补丁（本资产不写） | 显示 `CONNECTED <ip>` / `DISCONNECTED` |
+
+注意 `action_args` 是 `char[256]` 的 **JSON 字符串**，在 cron.json 里必须转义（见下），且总长应远小于 256 字节（中文按 3 字节/字符计）。
+
+```json
+"action": "write_file",
+"action_args": "{\"path\":\"/data/ai_agent/REMINDER.md\",\"content\":\"久坐提醒：坐了挺久了，起来活动一下吧！\"}"
+```
+
+### cron job 约束
+
+- **`id` 最长 8 字符**：`cron_job_t.id` 为 `char id[9]`，超长会被 `strncpy` 静默截断（如 `sedentary-reminder` → `sedentar`），删除/更新任务时会找不到。本资产统一用 `brief`/`sedent`/`water`/`wake`。
+- `kind` 当前框架只认 `"every"`（`interval_s`）和 `"at"`（`at_epoch`）。`kind:"daily"`（`hour`/`minute`）**需要框架补丁**，未打补丁时该 job 在 `cron_parse_job_item` 处校验失败被**跳过**，不影响其余 job；core demo 不依赖它。
+- `kind:"every"` 是纯间隔重复，从进程启动时刻起算，**无时段过滤**，可能在深夜触发。
+- `action_args` 里若含 `..` 或路径不在 `/data/ai_agent/` 下会被 `validate_path` 拒绝；`SOUL.md`/`USER.md`/`config.json` 是写保护文件。
+
+### tmpfs 与重启
+
+`/data` 当前为 tmpfs（LittleFS 未启用），**重启后 cron.json、REMINDER.md、WEATHER.md 全部丢失**，必须重新运行 `tools/deploy_assets.ps1` 推送。这是预期行为，不是部署失败。
+
 ## 部署验证
 
 推送后可通过以下方式确认生效：
