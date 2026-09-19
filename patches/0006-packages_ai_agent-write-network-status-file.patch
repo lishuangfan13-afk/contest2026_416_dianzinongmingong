@@ -1,0 +1,123 @@
+From 75674db058f96ec43ef232e907fd6cd8ab3b0b87 Mon Sep 17 00:00:00 2001
+From: lishuangfan13-afk <lishuangfan13@gmail.com>
+Date: Sat, 19 Sep 2026 13:44:59 +0800
+Subject: [PATCH] feat(net): publish network status file for the UI
+
+The LVGL UI (zhaoxi_ui) runs as a separate task and cannot call
+network_is_connected() directly.  Publish the state to
+AGENT_DATA_DIR/NET_STATUS so the UI can poll it:
+
+    CONNECTED <ip>
+    DISCONNECTED
+
+- network_publish_status(): writes the file only on state transitions,
+  best-effort (open failure is ignored, never fatal)
+- hooked into both return paths of network_is_connected()
+- the always-running cron thread also calls network_is_connected() each
+  tick so the file exists shortly after boot even without a state change
+- compiled unconditionally (a listener-based variant only existed under
+  CONFIG_AI_AGENT_NET_RPMSG, which is not enabled on this board)
+
+Signed-off-by: lishuangfan13-afk <lishuangfan13@gmail.com>
+---
+ src/infra/cron_service.c    |  7 +++++++
+ src/infra/network_manager.c | 34 ++++++++++++++++++++++++++++++++++
+ 2 files changed, 41 insertions(+)
+
+diff --git a/src/infra/cron_service.c b/src/infra/cron_service.c
+index 103ef80..841421f 100644
+--- a/src/infra/cron_service.c
++++ b/src/infra/cron_service.c
+@@ -21,6 +21,7 @@
+  */
+ 
+ #include "infra/cron_service.h"
++#include "infra/network_manager.h"
+ #include "core/message_bus.h"
+ #include "tools/tool_registry.h"
+ #include "agent_config.h"
+@@ -538,6 +539,12 @@ static void* cron_task_main(void* arg)
+         pthread_mutex_unlock(&s_cron_lock);
+ 
+         cron_process_due_jobs();
++
++        /* Refresh the UI-visible network status file.  This thread always
++         * runs (cron does not require network), so it guarantees the file
++         * exists shortly after boot even if the interface never changes
++         * state.  network_is_connected() publishes only on transitions. */
++        network_is_connected();
+     }
+ 
+     return NULL;
+diff --git a/src/infra/network_manager.c b/src/infra/network_manager.c
+index 00cc296..cc548ae 100644
+--- a/src/infra/network_manager.c
++++ b/src/infra/network_manager.c
+@@ -15,11 +15,13 @@
+  */
+ 
+ #include "network_manager.h"
++#include "agent_config.h"
+ #include "agent_compat.h"
+ 
+ #include <arpa/inet.h>
+ #include <ifaddrs.h>
+ #include <netinet/in.h>
++#include <stdio.h>
+ #include <string.h>
+ #include <sys/socket.h>
+ #include <sys/types.h>
+@@ -30,6 +32,36 @@ static const char* TAG = "netmgr";
+ 
+ static char s_ip_str[INET_ADDRSTRLEN] = "0.0.0.0";
+ 
++static int s_last_published_state = -1; /* -1 = unknown, 0 = down, 1 = up */
++
++/* Publish the current network state to a file so that a separate process
++ * (the zhaoxi_ui LVGL task) can display it without calling into this
++ * module.  The UI reads the first line: "CONNECTED <ip>" or
++ * "DISCONNECTED".  Only writes on state change to avoid hammering the
++ * filesystem from the 500 ms polling paths.  Failure is never fatal.
++ */
++static void network_publish_status(bool connected)
++{
++    int state = connected ? 1 : 0;
++    if (state == s_last_published_state) {
++        return;
++    }
++
++    FILE* f = fopen(AGENT_DATA_DIR "/NET_STATUS", "w");
++    if (f == NULL) {
++        return;
++    }
++
++    if (connected) {
++        fprintf(f, "CONNECTED %s\n", s_ip_str);
++    } else {
++        fprintf(f, "DISCONNECTED\n");
++    }
++
++    fclose(f);
++    s_last_published_state = state;
++}
++
+ bool network_is_connected(void)
+ {
+     struct ifaddrs* ifa_list = NULL;
+@@ -55,11 +87,13 @@ bool network_is_connected(void)
+             syslog(LOG_INFO, "[%s] Found iface %s addr %s\n", TAG,
+                 ifa->ifa_name ? ifa->ifa_name : "?", s_ip_str);
+             freeifaddrs(ifa_list);
++            network_publish_status(true);
+             return true;
+         }
+         freeifaddrs(ifa_list);
+     }
+ 
++    network_publish_status(false);
+     return false;
+ }
+ 
+-- 
+2.34.1
+

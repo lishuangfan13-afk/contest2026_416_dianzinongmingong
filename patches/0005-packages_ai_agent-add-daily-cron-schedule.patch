@@ -1,0 +1,382 @@
+From c37c55de4a59e8472649ad248cf2349d6de7b08f Mon Sep 17 00:00:00 2001
+From: lishuangfan13-afk <lishuangfan13@gmail.com>
+Date: Sat, 19 Sep 2026 13:44:58 +0800
+Subject: [PATCH] feat(cron): add daily fixed-time schedule kind
+
+Add a third cron schedule kind, CRON_KIND_DAILY, which fires once per
+day at a fixed local hour:minute.
+
+- cron_service.h: add CRON_KIND_DAILY and daily_hour/daily_min fields
+- cron_parse_job_item(): accept kind="daily" with integer hour (0-23)
+  and minute (0-59); reject out-of-range values with a clear log
+- cron_save_jobs(): serialize daily as kind="daily" plus hour/minute
+  (previously the every/at ternary would have written a bogus kind)
+- cron_next_daily_run(): compute the next occurrence using a fixed
+  UTC+8 offset + gmtime_r(), matching the convention in
+  tool_get_time.c and avoiding localtime_r()/mktime() zoneinfo issues
+- compute_initial_next_run(): arm daily jobs at load/add time
+- cron_process_due_jobs(): advance daily jobs to the next day instead
+  of treating them as one-shot or adding interval_s
+- cron_service_start(): reschedule missed daily occurrences instead of
+  disabling them as stale
+- tool_cron.c/h: parse_daily_schedule() accepts schedule_type="daily"
+  with hour/minute; update help text and list output
+- tool_registry.c: document daily and hour/minute in cron_add schema
+- warn and truncate deterministically when a persisted job id is
+  longer than the 8-char storage buffer
+
+Existing every/at behavior is unchanged.
+
+Signed-off-by: yuk1-r <yuk1-r@users.noreply.github.com>
+---
+ src/infra/cron_service.c  | 112 +++++++++++++++++++++++++++++++++++++-
+ src/infra/cron_service.h  |   3 +
+ src/tools/tool_cron.c     |  55 ++++++++++++++++++-
+ src/tools/tool_cron.h     |   9 ++-
+ src/tools/tool_registry.c |   8 ++-
+ 5 files changed, 180 insertions(+), 7 deletions(-)
+
+diff --git a/src/infra/cron_service.c b/src/infra/cron_service.c
+index 34509d7..103ef80 100644
+--- a/src/infra/cron_service.c
++++ b/src/infra/cron_service.c
+@@ -40,6 +40,8 @@ static const char* TAG = "cron";
+ 
+ static bool cron_sanitize_destination(cron_job_t* job);
+ static void cron_generate_id(char* id_buf);
++static const char* cron_kind_name(cron_kind_t kind);
++static int64_t cron_next_daily_run(uint8_t hour, uint8_t min, time_t now);
+ static int cron_load_jobs(void);
+ static int cron_save_jobs(void);
+ static int cron_parse_job_item(cJSON* item, cron_job_t* job);
+@@ -96,6 +98,55 @@ static void cron_generate_id(char* id_buf)
+     snprintf(id_buf, AGENT_CRON_ID_LEN, "%08x", (unsigned int)r);
+ }
+ 
++/* Human-readable name for a schedule kind (for logs / serialization). */
++static const char* cron_kind_name(cron_kind_t kind)
++{
++    switch (kind) {
++        case CRON_KIND_EVERY:
++            return "every";
++        case CRON_KIND_AT:
++            return "at";
++        case CRON_KIND_DAILY:
++            return "daily";
++        default:
++            return "unknown";
++    }
++}
++
++/*
++ * Compute the next occurrence (UTC epoch) of a daily job targeting the
++ * local hour:minute.  The codebase deliberately avoids localtime_r()/
++ * mktime() because NuttX tries to open zoneinfo/<TZ> from romfs, which
++ * fails for POSIX TZ strings like AGENT_TIMEZONE ("CST-8") and spams
++ * errors.  Following the convention in tool_get_time.c we apply the
++ * fixed UTC+8 offset manually:
++ *     local_epoch = utc_epoch + AGENT_TZ_OFFSET_SEC
++ *     local fields = gmtime_r(&local_epoch)
++ * and subtract the offset again to return a UTC epoch.
++ * Assumption: AGENT_TIMEZONE is a fixed "CST-8" (UTC+8, no DST).
++ */
++#define AGENT_TZ_OFFSET_SEC (8 * 3600)
++
++static int64_t cron_next_daily_run(uint8_t hour, uint8_t min, time_t now)
++{
++    struct tm local;
++    time_t local_now = now + AGENT_TZ_OFFSET_SEC;
++
++    if (!gmtime_r(&local_now, &local)) {
++        return 0;
++    }
++
++    int32_t now_sec = local.tm_hour * 3600 + local.tm_min * 60 + local.tm_sec;
++    int32_t target_sec = (int32_t)hour * 3600 + (int32_t)min * 60;
++    int32_t delta = target_sec - now_sec;
++
++    if (delta <= 0) {
++        delta += 86400;
++    }
++
++    return (int64_t)(now + delta);
++}
++
+ /* Parse a single JSON object into a cron_job_t.
+  * Returns OK on success, ERROR if the item should be skipped. */
+ static int cron_parse_job_item(cJSON* item, cron_job_t* job)
+@@ -112,6 +163,15 @@ static int cron_parse_job_item(cJSON* item, cron_job_t* job)
+     }
+ 
+     memset(job, 0, sizeof(cron_job_t));
++
++    /* id is stored in a fixed 8-char + NUL buffer.  Reject nothing, but
++     * warn and truncate deterministically so lookups stay consistent. */
++    if (strlen(id) >= sizeof(job->id)) {
++        syslog(LOG_WARNING,
++            "[%s] Job id '%s' longer than %d chars, truncating to '%.8s'\n",
++            TAG, id, (int)(sizeof(job->id) - 1), id);
++    }
++
+     strncpy(job->id, id, sizeof(job->id) - 1);
+     strncpy(job->name, name, sizeof(job->name) - 1);
+     strncpy(job->message, message, sizeof(job->message) - 1);
+@@ -137,6 +197,33 @@ static int cron_parse_job_item(cJSON* item, cron_job_t* job)
+         job->at_epoch = (at_epoch && cJSON_IsNumber(at_epoch))
+             ? (int64_t)at_epoch->valuedouble
+             : 0;
++    } else if (strcmp(kind_str, "daily") == 0) {
++        job->kind = CRON_KIND_DAILY;
++
++        cJSON* hour_j = cJSON_GetObjectItem(item, "hour");
++        cJSON* min_j = cJSON_GetObjectItem(item, "minute");
++
++        if (!hour_j || !cJSON_IsNumber(hour_j)
++            || !min_j || !cJSON_IsNumber(min_j)) {
++            syslog(LOG_WARNING,
++                "[%s] Job '%s': 'daily' requires numeric hour and minute\n",
++                TAG, name);
++            return ERROR;
++        }
++
++        int hour = (int)hour_j->valuedouble;
++        int minute = (int)min_j->valuedouble;
++
++        if (hour < 0 || hour > 23 || minute < 0 || minute > 59) {
++            syslog(LOG_WARNING,
++                "[%s] Job '%s': daily time %02d:%02d out of range "
++                "(hour 0-23, minute 0-59)\n",
++                TAG, name, hour, minute);
++            return ERROR;
++        }
++
++        job->daily_hour = (uint8_t)hour;
++        job->daily_min = (uint8_t)minute;
+     } else {
+         return ERROR;
+     }
+@@ -259,11 +346,13 @@ static int cron_save_jobs(void)
+         cJSON_AddStringToObject(item, "id", job->id);
+         cJSON_AddStringToObject(item, "name", job->name);
+         cJSON_AddBoolToObject(item, "enabled", job->enabled);
+-        cJSON_AddStringToObject(item, "kind",
+-            job->kind == CRON_KIND_EVERY ? "every" : "at");
++        cJSON_AddStringToObject(item, "kind", cron_kind_name(job->kind));
+ 
+         if (job->kind == CRON_KIND_EVERY) {
+             cJSON_AddNumberToObject(item, "interval_s", job->interval_s);
++        } else if (job->kind == CRON_KIND_DAILY) {
++            cJSON_AddNumberToObject(item, "hour", job->daily_hour);
++            cJSON_AddNumberToObject(item, "minute", job->daily_min);
+         } else {
+             cJSON_AddNumberToObject(item, "at_epoch", (double)job->at_epoch);
+         }
+@@ -415,6 +504,9 @@ static void cron_process_due_jobs(void)
+                 job->enabled = false;
+                 job->next_run = 0;
+             }
++        } else if (job->kind == CRON_KIND_DAILY) {
++            job->next_run = cron_next_daily_run(job->daily_hour,
++                job->daily_min, now);
+         } else {
+             job->next_run = now + job->interval_s;
+         }
+@@ -464,6 +556,9 @@ static void compute_initial_next_run(cron_job_t* job)
+             job->next_run = 0;
+             job->enabled = false;
+         }
++    } else if (job->kind == CRON_KIND_DAILY) {
++        job->next_run = cron_next_daily_run(job->daily_hour, job->daily_min,
++            now);
+     }
+ }
+ 
+@@ -491,6 +586,17 @@ int cron_service_start(void)
+             continue;
+         }
+ 
++        /* Daily jobs are fixed time-of-day recurrences: a missed
++         * occurrence is not stale, just advance to the next one. */
++        if (job->kind == CRON_KIND_DAILY) {
++            if (job->next_run <= now) {
++                job->next_run = cron_next_daily_run(job->daily_hour,
++                    job->daily_min, now);
++                changed = true;
++            }
++            continue;
++        }
++
+         /* Stale job: next_run already set but in the past.
+          * interval_s is relative to the previous action completion
+          * (e.g. music playback end), so rescheduling to now+interval
+@@ -574,7 +680,7 @@ int cron_add_job(cron_job_t* job)
+     syslog(LOG_INFO,
+         "[%s] Added job: %s (%s) kind=%s "
+         "next=%lld ch=%s:%s\n",
+-        TAG, job->name, job->id, job->kind == CRON_KIND_EVERY ? "every" : "at",
++        TAG, job->name, job->id, cron_kind_name(job->kind),
+         (long long)job->next_run, job->channel, job->chat_id);
+     return OK;
+ }
+diff --git a/src/infra/cron_service.h b/src/infra/cron_service.h
+index d0db191..127aacc 100644
+--- a/src/infra/cron_service.h
++++ b/src/infra/cron_service.h
+@@ -34,6 +34,7 @@
+ typedef enum {
+     CRON_KIND_EVERY = 0,   /* Recurring interval in seconds */
+     CRON_KIND_AT    = 1,   /* One-shot at unix timestamp */
++    CRON_KIND_DAILY = 2,   /* Recurring daily at local hour:minute */
+ } cron_kind_t;
+ 
+ /* A single cron job */
+@@ -44,6 +45,8 @@ typedef struct {
+     cron_kind_t kind;
+     uint32_t interval_s;   /* For EVERY: interval in seconds */
+     int64_t at_epoch;      /* For AT: unix timestamp */
++    uint8_t daily_hour;    /* For DAILY: local hour 0-23 */
++    uint8_t daily_min;     /* For DAILY: local minute 0-59 */
+     char message[256];     /* Message text (reminder) or fallback */
+     char channel[16];      /* Reply channel (default "system") */
+     char chat_id[64];      /* Reply chat_id (default "cron") */
+diff --git a/src/tools/tool_cron.c b/src/tools/tool_cron.c
+index f5b743d..648fd3c 100644
+--- a/src/tools/tool_cron.c
++++ b/src/tools/tool_cron.c
+@@ -37,6 +37,8 @@ static int parse_every_schedule(cJSON* root, cron_job_t* job,
+     char* output, size_t output_size);
+ static int parse_at_schedule(cJSON* root, cron_job_t* job,
+     char* output, size_t output_size);
++static int parse_daily_schedule(cJSON* root, cron_job_t* job,
++    char* output, size_t output_size);
+ 
+ /* -- Private Functions ------------------------------------------- */
+ 
+@@ -119,6 +121,38 @@ static int parse_at_schedule(cJSON* root, cron_job_t* job,
+     return OK;
+ }
+ 
++static int parse_daily_schedule(cJSON* root, cron_job_t* job,
++    char* output, size_t output_size)
++{
++    bool ok_hour;
++    bool ok_min;
++    double hour = get_numeric_value(
++        cJSON_GetObjectItem(root, "hour"), &ok_hour);
++    double minute = get_numeric_value(
++        cJSON_GetObjectItem(root, "minute"), &ok_min);
++
++    if (!ok_hour || !ok_min) {
++        snprintf(output, output_size,
++            "Error: 'daily' requires numeric 'hour' (0-23) and "
++            "'minute' (0-59)");
++        return ERROR;
++    }
++
++    if (hour < 0 || hour > 23 || minute < 0 || minute > 59) {
++        snprintf(output, output_size,
++            "Error: daily time %02d:%02d out of range "
++            "(hour 0-23, minute 0-59)",
++            (int)hour, (int)minute);
++        return ERROR;
++    }
++
++    job->kind = CRON_KIND_DAILY;
++    job->daily_hour = (uint8_t)hour;
++    job->daily_min = (uint8_t)minute;
++    job->delete_after_run = false;
++    return OK;
++}
++
+ /* -- Public Functions -------------------------------------------- */
+ 
+ int tool_cron_add_execute(const char* input_json,
+@@ -211,9 +245,11 @@ int tool_cron_add_execute(const char* input_json,
+         ret = parse_every_schedule(root, &job, output, output_size);
+     } else if (strcmp(schedule_type, "at") == 0) {
+         ret = parse_at_schedule(root, &job, output, output_size);
++    } else if (strcmp(schedule_type, "daily") == 0) {
++        ret = parse_daily_schedule(root, &job, output, output_size);
+     } else {
+         snprintf(output, output_size,
+-            "Error: schedule_type must be 'every' or 'at'");
++            "Error: schedule_type must be 'every', 'at' or 'daily'");
+         cJSON_Delete(root);
+         return ERROR;
+     }
+@@ -239,6 +275,13 @@ int tool_cron_add_execute(const char* input_json,
+             job.name, job.id,
+             (unsigned long)job.interval_s,
+             (long long)job.next_run);
++    } else if (job.kind == CRON_KIND_DAILY) {
++        snprintf(output, output_size,
++            "OK: Added daily job '%s' (id=%s), "
++            "runs every day at %02u:%02u local. Next run at epoch %lld.",
++            job.name, job.id,
++            (unsigned)job.daily_hour, (unsigned)job.daily_min,
++            (long long)job.next_run);
+     } else {
+         snprintf(output, output_size,
+             "OK: Added one-shot job '%s' (id=%s), "
+@@ -285,6 +328,16 @@ int tool_cron_list_execute(const char* input_json,
+                 (long long)j->next_run,
+                 (long long)j->last_run,
+                 j->channel, j->chat_id);
++        } else if (j->kind == CRON_KIND_DAILY) {
++            off += snprintf(output + off, output_size - off,
++                "  %d. [%s] \"%s\" daily at %02u:%02u, %s, "
++                "next=%lld, last=%lld, ch=%s:%s\n",
++                i + 1, j->id, j->name,
++                (unsigned)j->daily_hour, (unsigned)j->daily_min,
++                j->enabled ? "enabled" : "disabled",
++                (long long)j->next_run,
++                (long long)j->last_run,
++                j->channel, j->chat_id);
+         } else {
+             off += snprintf(output + off, output_size - off,
+                 "  %d. [%s] \"%s\" at %lld, %s, "
+diff --git a/src/tools/tool_cron.h b/src/tools/tool_cron.h
+index 98ecdce..97a10ff 100644
+--- a/src/tools/tool_cron.h
++++ b/src/tools/tool_cron.h
+@@ -31,8 +31,15 @@
+ 
+ /**
+  * Add a scheduled cron job.
+- * Input JSON: { name, schedule_type ("every"/"at"), interval_s, at_epoch,
++ * Input JSON: { name, schedule_type ("every"/"at"/"daily"),
++ *               interval_s, at_epoch, hour, minute,
+  *               message, channel?, chat_id? }
++ *
++ * schedule_type:
++ *   "every" — recurring, requires interval_s (seconds)
++ *   "at"    — one-shot, requires at_epoch (unix timestamp)
++ *   "daily" — fixed time of day, requires hour (0-23) and minute (0-59)
++ *             interpreted in local time (AGENT_TIMEZONE, UTC+8)
+  */
+ int tool_cron_add_execute(const char *input_json, char *output, size_t output_size);
+ 
+diff --git a/src/tools/tool_registry.c b/src/tools/tool_registry.c
+index 33583e7..4f783af 100644
+--- a/src/tools/tool_registry.c
++++ b/src/tools/tool_registry.c
+@@ -251,10 +251,14 @@ int tool_registry_init(void)
+         "Steps: get_current_time→compute at_epoch→call this. "
+         "at_epoch must be plain integer. "
+         "Recurring: schedule_type='every', interval_s=seconds. "
++        "Daily fixed time: schedule_type='daily', hour=0-23, minute=0-59 "
++        "(local time). "
+         "Action: set action=tool_name, action_args=JSON.",
+         TOOL_SCHEMA_BEGIN()
+-            TOOL_PARAM_STR("name", "Job name") "," TOOL_PARAM_ENUM("schedule_type", "Schedule type", "\"every\",\"at\"") "," TOOL_PARAM_NUM("interval_s", "Interval in seconds (for every)") "," TOOL_PARAM_NUM("at_epoch",
+-                "Target UNIX timestamp as a plain integer") "," TOOL_PARAM_STR("message",
++            TOOL_PARAM_STR("name", "Job name") "," TOOL_PARAM_ENUM("schedule_type", "Schedule type", "\"every\",\"at\",\"daily\"") "," TOOL_PARAM_NUM("interval_s", "Interval in seconds (for every)") "," TOOL_PARAM_NUM("at_epoch",
++                "Target UNIX timestamp as a plain integer") "," TOOL_PARAM_NUM("hour",
++                "Hour of day 0-23 (for daily)") "," TOOL_PARAM_NUM("minute",
++                "Minute of hour 0-59 (for daily)") "," TOOL_PARAM_STR("message",
+                 "Notification message sent to user when job fires") "," TOOL_PARAM_STR("channel", "Reply channel (default system)") "," TOOL_PARAM_STR("chat_id", "Reply chat_id") "," TOOL_PARAM_STR("action",
+                 "Tool name to execute when job fires (e.g. music_play)") "," TOOL_PARAM_STR("action_args",
+                 "JSON arguments for the action tool")
+-- 
+2.34.1
+
