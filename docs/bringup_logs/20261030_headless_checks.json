@@ -1,0 +1,41 @@
+{
+  "profile": "passed",
+  "board_operations": false,
+  "commands": "PASS: routes, UTF-8, validation, full queue, pre-init, shutdown and audio API error propagation.",
+  "shutdown": "passed: 40 teardown/re-init cycles with concurrent producers or consumers",
+  "arm_object": "compiled; not a complete flashable firmware",
+  "updated_at": "2026-10-30T11:00:20.530732+00:00",
+  "scope": "Source integration and host tests only; no full firmware link, board flashing, live LLM/ASR/TTS or scheduled audio verification in this change.",
+  "agent_base": "e65550f18759f086d7f544edcf17d1e31223244f",
+  "vendor_base": "36465377d944a575ce8a0c7ba45259f5c6c61ea8",
+  "host_compiler": "WSL Ubuntu cc, -Wall -Wextra -Werror, ASan and UBSan",
+  "target_compiler": "openvela arm-none-eabi GCC 13.4.0; Cortex-M55 object only",
+  "asset_rendering": "passed: six assets at each of /data/agent and /data/ai_agent; invalid root rejected",
+  "powershell_deploy_syntax": "passed; no serial port opened",
+  "patch_application": {
+    "0008": "git apply --check passed on pristine pinned source",
+    "0009": "git apply --check passed on pristine pinned source"
+  },
+  "input_paths": [
+    "ask",
+    "note add/list",
+    "todo add/list/done",
+    "remind add/list/cancel",
+    "listen start/stop",
+    "status",
+    "stop"
+  ],
+  "patch_sha256": {
+    "0008-packages_ai_agent-headless-entry.patch": "427e68b10632af2ec93e92d6b01c27405ce26c95e23b9558568087f386d0d476",
+    "0009-vendor_bes-headless-startup.patch": "589084bddd252e9367a487f4faa115723a28dfb87ad3dd4e8d93c422c868cc9b"
+  },
+  "remaining_acceptance": [
+    "full BES AP firmware link with the actual BSP and verified audio backend",
+    "board question and answer",
+    "memo save and readback",
+    "two tasks with one completed by ID",
+    "audible due reminder and cancellation test"
+  ],
+  "build_environment": "Existing WSL BSP/toolchain present; packages/ai_agent missing in that workspace. New full image not built.",
+  "skill_profile": "passed: core-only discovery, legacy file exclusion, deployed asset preservation, standard profile and summary bounds"
+}

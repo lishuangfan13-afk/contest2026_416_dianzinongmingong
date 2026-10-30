@@ -1,78 +1,28 @@
-# agent_deploy · 设备端 Agent 部署资产
+# 朝夕无屏核心资产
 
-本目录是「朝夕」Agent 的完整部署资产，刷机后用 `tools/deploy_assets.ps1` 推送到开发板即可使用。
+当前仅部署问答所需的人格配置、智能记事本和智能提醒。默认 cron.json 是空任务列表；每日简报、喝水和久坐等扩展资产保存在 legacy/agent_extensions，首版不部署。启用无屏配置后，原生 Skill 加载器只安装并发现 note-taker 与 reminder；设备残留的旧扩展文件不会进入当前摘要。
 
-> **数据根目录**：ai_agent 的数据根目录（下称 `<BASE>`）在旧固件为 `/data/ai_agent`，工作区最新源码已改为 `/data/agent`（`agent_config.h`）。部署脚本会自动探测，下表以 `<BASE>` 代指。
+## 部署清单
 
-## 文件清单
+| 文件 | 设备路径 |
+| --- | --- |
+| SOUL.md、USER.md | <BASE>/config/ |
+| MEMORY.md | <BASE>/memory/MEMORY.md |
+| cron.json | <BASE>/cron.json |
+| note-taker.md、reminder.md | <BASE>/skills/ |
 
-| 文件 | 部署路径 | 用途 |
-|------|----------|------|
-| `SOUL.md` | `<BASE>/config/SOUL.md` | Agent 人格设定（语气、价值观、行为准则） |
-| `USER.md` | `<BASE>/config/USER.md` | 用户信息模板（姓名、城市、职业、偏好） |
-| `MEMORY.md` | `<BASE>/memory/MEMORY.md` | 长期记忆模板（项目信息、用户习惯，Agent 运行时读写） |
-| `cron.json` | `<BASE>/cron.json` | 定时任务配置（每日简报、久坐提醒、饮水提醒） |
-| `daily-briefing.md` | `<BASE>/skills/daily-briefing.md` | 每日简报 Skill（覆盖内置同名） |
-| `reminder.md` | `<BASE>/skills/reminder.md` | 定时提醒 Skill（覆盖内置同名） |
-| `note-taker.md` | `<BASE>/skills/note-taker.md` | 语音记事 Skill（覆盖内置同名） |
-| `health-reminder.md` | `<BASE>/skills/health-reminder.md` | 健康提醒 Skill（纯新增，内置无此 skill） |
+<BASE> 使用设备实际配置的 /data/ai_agent 或 /data/agent。资产中的 {{AGENT_DATA_DIR}} 是部署占位符，tools/deploy_assets.ps1 会在写入和回读校验时替换为同一个实际根目录。
 
-## Skill 加载原理
+## 业务执行
 
-框架的 skill 机制在 `packages/ai_agent/src/tools/skill_loader.c`，流程为：
+问答复用原 AI Agent；记事由现有 read_file、write_file 执行；提醒由 cron_add、cron_list、cron_remove 执行，到期消息通过 channel=voice 进入原语音输出。创建普通提醒不再使用屏幕文件作为出口。
 
-1. **启动写入**：`skill_loader_init()` 将 10 个内置 skill（weather、daily-briefing、skill-creator、system-health、reminder、note-taker、translate、news-digest、feishu-test、task-manager）写入 `/data/agent/skills/`；**若同名文件已存在则直接跳过，不会覆盖**（`install_builtin()` 中 `fopen(path, "r")` 成功即返回）。
-2. **摘要注入**：每次构建 system prompt 时，`skill_loader_build_summary()` 扫描 skills 目录全部 `.md`，取每个文件的标题（`# 首行`）和首段描述（标题到首个空行之间）拼成 skill 清单注入提示词。
-3. **意图匹配执行**：LLM 根据摘要匹配用户意图，再用 `read_file` 读取对应 skill 全文并照其步骤执行。
-4. **热加载**：`skill_loader_check_changed()` 对目录内文件名 + size + mtime 做哈希，检测到变化即重建摘要，无需重启 Agent。
+部署前先执行 zhaoxi stop 并等待 Shutdown complete；部署后重新运行 ai_agent --headless &，使调度列表重新加载。首次尚未启动时可直接部署。不要同时启动两个 Agent。
 
-## 同名覆盖语义
+部署会覆盖同名资产，包括当前 cron.json 调度列表。需要保留已有任务时，先备份并合并调度列表。tmpfs 上的资产和记录不能保证跨重启保留。
 
-团队自研的 `daily-briefing.md`、`reminder.md`、`note-taker.md` 与内置 skill 同名，`health-reminder.md` 为纯新增。
+## 入口
 
-**覆盖依赖于"内置只写不覆盖"这一行为**：由于 `install_builtin()` 对已存在的同名文件直接跳过，只要团队版先于 Agent 首次启动部署到 `<BASE>/skills/`，内置版就永远不会被写入，等效于屏蔽。
+应用 assets 部署完成并配置好原模型与语音服务后，以 ai_agent --headless 启动后台 Agent，并使用 zhaoxi 命令或原语音输入通道提交请求。--headless 和总线就绪检查需要 patches/0008。
 
-**注意**：若 Agent 已启动过，设备上可能已存在内置版同名文件。用 `deploy_assets.ps1` 部署时首条写入以 `>` 覆盖，会整体替换设备端文件内容，因此任何时机部署都能得到团队版；若用其他方式（如手工追加写入）部署，则需先删除设备上的同名文件再写入，确保落盘的是团队版。
-
-`health-reminder.md` 与内置列表不重名，直接放入 skills 目录即为纯新增，无任何冲突。
-
-## 与 cron / SOUL / USER / MEMORY 的关系
-
-- `SOUL.md`、`USER.md`、`MEMORY.md` 不走 skill 机制，由 `context_builder.c` 直接拼入 system prompt（人格、用户、长期记忆），路径见上表。
-- `cron.json` 由 cron_service 加载（schema 见 `cron_service.c` 的 `cron_parse_job_item`：`id`/`name`/`kind`/`message` 必填）。到期触发时，若 job 带 `action` 则直接执行同名**已注册工具**；无 `action` 则把 `message` 原文推送到 channel——**cron 触发不经过 LLM**。因此每日简报任务推的是引导文案，用户回复后由 LLM 匹配到 daily-briefing skill 生成真实简报——**cron 是触发器，skill 是执行脚本**。
-- 各 skill 内部的步骤（读写 MEMORY.md、cron_add 创建提醒等）与上述文件协同，因此部署时建议整套一起推送，避免版本错配。
-
-### 可见提醒：`action:"write_file"` 数据流
-
-`channel:"system"` 只写 syslog，**用户与 UI 都看不到**。要让提醒真正显示，cron job 必须带 `action:"write_file"`，把文案写到 UI 轮询的文件里（`tool_write_file_execute` 接受 JSON `{"path":"<abs path>","content":"<text>"}`，仅允许写 `/data/ai_agent/` 之下）：
-
-| UI 消费的文件 | 写入方 | UI 行为 |
-|---------------|--------|---------|
-| `/data/ai_agent/WEATHER.md` | 每日简报 skill 的 `get_weather` 步骤 | 天气卡片显示第一个非空行 |
-| `/data/ai_agent/REMINDER.md` | cron `brief`/`sedent`/`water`/`wake` 的 `write_file` | 聊天界面显示第一个非空行 |
-| `/data/ai_agent/NET_STATUS` | agent 侧补丁（本资产不写） | 显示 `CONNECTED <ip>` / `DISCONNECTED` |
-
-注意 `action_args` 是 `char[256]` 的 **JSON 字符串**，在 cron.json 里必须转义（见下），且总长应远小于 256 字节（中文按 3 字节/字符计）。
-
-```json
-"action": "write_file",
-"action_args": "{\"path\":\"/data/ai_agent/REMINDER.md\",\"content\":\"久坐提醒：坐了挺久了，起来活动一下吧！\"}"
-```
-
-### cron job 约束
-
-- **`id` 最长 8 字符**：`cron_job_t.id` 为 `char id[9]`，超长会被 `strncpy` 静默截断（如 `sedentary-reminder` → `sedentar`），删除/更新任务时会找不到。本资产统一用 `brief`/`sedent`/`water`/`wake`。
-- `kind` 当前框架只认 `"every"`（`interval_s`）和 `"at"`（`at_epoch`）。`kind:"daily"`（`hour`/`minute`）**需要框架补丁**，未打补丁时该 job 在 `cron_parse_job_item` 处校验失败被**跳过**，不影响其余 job；core demo 不依赖它。
-- `kind:"every"` 是纯间隔重复，从进程启动时刻起算，**无时段过滤**，可能在深夜触发。
-- `action_args` 里若含 `..` 或路径不在 `/data/ai_agent/` 下会被 `validate_path` 拒绝；`SOUL.md`/`USER.md`/`config.json` 是写保护文件。
-
-### tmpfs 与重启
-
-`/data` 当前为 tmpfs（LittleFS 未启用），**重启后 cron.json、REMINDER.md、WEATHER.md 全部丢失**，必须重新运行 `tools/deploy_assets.ps1` 推送。这是预期行为，不是部署失败。
-
-## 部署验证
-
-推送后可通过以下方式确认生效：
-
-1. 查看日志确认内置安装跳过：目标 skill 出现 `Skill exists: <BASE>/skills/daily-briefing.md` 而非 `Installed built-in skill`。
-2. 直接向 Agent 说"给我一份今日简报"，观察执行步骤是否为团队版（读取 USER.md 偏好、推送格式等）。
+首版成功的定义是实际工具完成操作、问答返回真实内容、到期提醒能听见。串口显示请求已提交只说明进入了消息队列。

@@ -1,0 +1,13 @@
+# Merge into the working BES AP configuration; keep the verified audio backend.
+CONFIG_EXAMPLES_AI_AGENT_VELA=y
+CONFIG_EXAMPLES_AI_AGENT_VELA_PROGNAME="ai_agent"
+CONFIG_EXAMPLES_AI_AGENT_VELA_DATA_DIR="/data/agent"
+CONFIG_EXAMPLES_ZHAOXI=y
+# CONFIG_EXAMPLES_ZHAOXI_UI is not set
+# CONFIG_AI_AGENT_LVGL_UI is not set
+# CONFIG_GRAPHICS_LVGL is not set
+# CONFIG_AI_AGENT_FEISHU is not set
+# CONFIG_AI_AGENT_WEIXIN is not set
+# CONFIG_AI_AGENT_MQTT is not set
+# CONFIG_AI_AGENT_SKILL_SYNC is not set
+# CONFIG_FEATURE_SYSTEM_VELACLAW is not set

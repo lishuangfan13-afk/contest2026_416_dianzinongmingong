@@ -9,21 +9,18 @@
       powershell -File tools\deploy_assets.ps1 -Port COM20 -Baud 921600
       powershell -File tools\deploy_assets.ps1 -NoVerify       # 跳过 cat 回读校验
 
-  实现策略说明（为什么不用 vela> CLI 的 install_skill / memory_write）：
-  - 已核实 packages/ai_agent/src/channels/nsh_commands.c：
-    * install_skill <name> <url> 只接受 https:// URL，帮助里的 stdin 模式("-")并未实现；
-    * memory_write 经 tokenise() 按空白分词后只取 argv[1]，且行缓冲 LINE_LEN=256，
-      无法写入多行中文 MEMORY.md；
-    * ask + LLM write_file 依赖网络与模型行为，不可靠。
-  - 因此选择在 NSH 控制台（nsh>）下用 `echo "行" >> 文件` 逐行写文件：
-    内容无 $ 与反斜杠（已扫描确认），只需把 " 转义为 \"；
-    CONFIG_LINE_MAX=256，长行按 UTF-8 字符边界切成 <=160 字节块，
-    中间块用 `echo -n`（不换行）、最后一块用 `echo` 换行。
-  - 若控制台当前在 vela>（ai_agent 前台运行），脚本会先发送 quit 退回 nsh>。
-  - 注意：内置 skill 是“只写不覆盖”（skill_loader.c install_builtin），
-    本脚本需在 ai_agent 首次启动前部署，同名团队版 skill 才能屏蔽内置版。
+  部署六个无屏核心资产，逐行写入后 cat 回读校验。
+  命令按当前板端短行缓冲分块，避免截断多字节中文。
+  资产中的 {{AGENT_DATA_DIR}} 会按目标根目录替换。
 
-  /data 当前为 tmpfs（LittleFS 分区未启用），每次重启/烧录后需重新运行本脚本。
+  运行本脚本前，后台 Agent 用 zhaoxi stop 请求停止，并等待
+  Shutdown complete。原 vela> 前台 CLI 可以用 quit 退出。
+  脚本不会自动停止后台 Agent；NSH 提示符不代表后台没有 Agent。
+  部署完成后运行 ai_agent --headless &，重新加载业务 Skill 和 cron.json。
+
+  旧版固件可能使用 /data/ai_agent，新源码默认 /data/agent。
+  建议按实际配置显式传入 -BaseDir；auto 仅用于已有单一数据目录。
+  若 /data 使用 tmpfs，板子重启/烧录后需重新部署。
 #>
 
 [CmdletBinding()]
@@ -31,6 +28,7 @@ param(
     [string]$Port = 'COM3',
     [int]$Baud = 921600,
     [string]$AssetsDir = '',
+    [ValidateSet('auto', '/data/agent', '/data/ai_agent')]
     [string]$BaseDir = 'auto',
     [switch]$NoVerify
 )
@@ -52,8 +50,9 @@ if ([string]::IsNullOrEmpty($AssetsDir)) {
 # 映射关系（<BASE> 为探测到的数据根目录）：
 #   SOUL.md   → <BASE>/config/SOUL.md      USER.md  → <BASE>/config/USER.md
 #   MEMORY.md → <BASE>/memory/MEMORY.md    cron.json → <BASE>/cron.json（cron_service 读这里，不是 config/ 下）
-#   4 个 skill → <BASE>/skills/
-$AssetNames = @('SOUL.md', 'USER.md', 'MEMORY.md', 'cron.json', 'daily-briefing.md', 'health-reminder.md', 'note-taker.md', 'reminder.md')
+#   2 个核心 skill → <BASE>/skills/
+. (Join-Path $PSScriptRoot 'asset_profile.ps1')
+$AssetNames = @(Get-ZhaoxiCoreAssets)
 
 function Get-RemotePath([string]$base, [string]$name) {
     switch ($name) {
@@ -154,7 +153,7 @@ function Escape-Nsh([string]$s) {
 }
 
 function Deploy-File([System.IO.Ports.SerialPort]$sp, [string]$local, [string]$remote) {
-    $text = [System.IO.File]::ReadAllText($local, (New-Object System.Text.UTF8Encoding($false)))
+    $text = Read-ZhaoxiAssetText $local $BaseDir
     $text = $text -replace "`r`n", "`n" -replace "`r", "`n"
     $lines = $text.Split("`n")
     # 去掉末尾因文件结尾换行产生的空元素
@@ -278,7 +277,7 @@ try {
     }
 
     # 确保目录存在（目录已存在时报 EEXIST=17，属预期，静默放行）
-    foreach ($dir in @('/data', $BaseDir, "$BaseDir/config", "$BaseDir/memory", "$BaseDir/skills")) {
+    foreach ($dir in @('/data', $BaseDir, "$BaseDir/config", "$BaseDir/memory", "$BaseDir/memory/daily", "$BaseDir/skills")) {
         Send-Nsh $sp "mkdir $dir" 5000 'failed: 17' | Out-Null
     }
 
@@ -317,7 +316,7 @@ try {
             $got = $got -replace '(?s)^.*?cat [^\n]*\n', ''
             $got = $got -replace '(?s)(nsh|ap)>[\s\x1b\[\]0-9;A-Za-z]*$', ''
             $got = ($got -replace "`r`n", "`n" -replace "`r", "`n").Trim("`n", " ", "`t")
-            $expected = ([System.IO.File]::ReadAllText($local, (New-Object System.Text.UTF8Encoding($false))) `
+            $expected = ((Read-ZhaoxiAssetText $local $BaseDir) `
                 -replace "`r`n", "`n" -replace "`r", "`n").Trim("`n", " ", "`t")
             if ($got -eq $expected) {
                 Write-Host "  OK   $name" -ForegroundColor Green
@@ -332,8 +331,8 @@ try {
         Fail "以下文件经 $maxAttempts 轮仍校验失败：$($pending -join ', ')。串口链路误码率偏高，请检查 USB 线/接地后重试。"
     }
 
-    Write-Host "`n全部 8 个资产部署完成。现在可以在 nsh> 启动 ai_agent（内置 skill 将因同名文件已存在而被跳过）。"
-    Write-Host "注意：/data 为 tmpfs，板子重启后需重新运行本脚本。"
+    Write-Host "`n全部 $($AssetNames.Count) 个核心资产部署完成。现在可以在 nsh> 启动 ai_agent --headless &，重新加载业务 Skill 和提醒列表。"
+    Write-Host "注意：若 /data 为 tmpfs，板子重启后需重新运行本脚本。"
 } finally {
     if ($sp.IsOpen) { $sp.Close() }
 }

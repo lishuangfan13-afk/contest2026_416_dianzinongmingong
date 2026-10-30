@@ -1,0 +1,363 @@
+From: lishuangfan13-afk <lishuangfan13@gmail.com>
+Subject: [PATCH] ai_agent: support screen-free external command submissions
+
+Add --headless to leave NSH input to the product frontend. Reject messages
+before initialization or during shutdown, preserve rejected message ownership,
+and wait for active queue operations before teardown. Headless mode leaves
+background heartbeat disabled; user-created cron reminders remain enabled.
+The Zhaoxi profile installs and advertises only note-taker and reminder skills.
+No provider is changed.
+Based on packages_ai_agent e65550f18759f086d7f544edcf17d1e31223244f.
+
+diff --git a/src/core/message_bus.c b/src/core/message_bus.c
+--- a/src/core/message_bus.c
++++ b/src/core/message_bus.c
+@@ -28,6 +28,7 @@
+ #include <string.h>
+ #include <time.h>
+ #include <pthread.h>
++#include <stdatomic.h>
+ 
+ static const char *TAG = "bus";
+ 
+@@ -48,7 +49,27 @@
+ static msg_queue_t g_inbound_queue;
+ static msg_queue_t g_outbound_queue;
+ static bool g_initialized = false;
+-static volatile bool g_bus_shutdown = false;
++static atomic_bool g_bus_shutdown = false;
++/* Protect initialization/teardown against external command submissions. */
++static pthread_mutex_t g_lifecycle_lock = PTHREAD_MUTEX_INITIALIZER;
++static pthread_cond_t g_idle = PTHREAD_COND_INITIALIZER;
++static unsigned int g_active_operations;
++
++static bool bus_enter(void)
++{
++    pthread_mutex_lock(&g_lifecycle_lock);
++    bool ready = g_initialized && !atomic_load(&g_bus_shutdown);
++    if (ready) g_active_operations++;
++    pthread_mutex_unlock(&g_lifecycle_lock);
++    return ready;
++}
++
++static void bus_leave(void)
++{
++    pthread_mutex_lock(&g_lifecycle_lock);
++    if (--g_active_operations == 0) pthread_cond_broadcast(&g_idle);
++    pthread_mutex_unlock(&g_lifecycle_lock);
++}
+ 
+ /* -- Private Functions ---------------------------------------------------- */
+ 
+@@ -62,6 +83,11 @@
+ 
+ static void msg_queue_destroy(msg_queue_t *queue)
+ {
++    while (queue->count > 0) {
++        message_bus_msg_free(&queue->items[queue->head]);
++        queue->head = (queue->head + 1) % AGENT_BUS_QUEUE_LEN;
++        queue->count--;
++    }
+     pthread_mutex_destroy(&queue->lock);
+     pthread_cond_destroy(&queue->not_empty);
+     pthread_cond_destroy(&queue->not_full);
+@@ -75,6 +101,10 @@
+ 
+     pthread_mutex_lock(&queue->lock);
+ 
++    if (g_bus_shutdown) {
++        pthread_mutex_unlock(&queue->lock);
++        return ERROR;
++    }
+     if (queue->count >= AGENT_BUS_QUEUE_LEN) {
+         if (timeout_ms == 0) {
+             pthread_mutex_unlock(&queue->lock);
+@@ -90,7 +120,7 @@
+         }
+ 
+         /* Wait for space */
+-        while (queue->count >= AGENT_BUS_QUEUE_LEN) {
++        while (queue->count >= AGENT_BUS_QUEUE_LEN && !g_bus_shutdown) {
+             if (pthread_cond_timedwait(&queue->not_full, &queue->lock, &ts) != 0) {
+                 pthread_mutex_unlock(&queue->lock);
+                 syslog(LOG_WARNING, "[%s] Queue full, dropping message\n", TAG);
+@@ -99,6 +129,10 @@
+         }
+     }
+ 
++    if (g_bus_shutdown) {
++        pthread_mutex_unlock(&queue->lock);
++        return ERROR;
++    }
+     queue->items[queue->tail] = *msg;
+     queue->tail = (queue->tail + 1) % AGENT_BUS_QUEUE_LEN;
+     queue->count++;
+@@ -168,79 +202,96 @@
+ 
+ int message_bus_init(void)
+ {
++    pthread_mutex_lock(&g_lifecycle_lock);
+     if (g_initialized) {
+-        return OK;
+-    }
+-
++        int result = g_bus_shutdown ? ERROR : OK;
++        pthread_mutex_unlock(&g_lifecycle_lock);
++        return result;
++    }
+     msg_queue_init(&g_inbound_queue);
+     msg_queue_init(&g_outbound_queue);
+     g_bus_shutdown = false;
+     g_initialized = true;
+-
++    pthread_mutex_unlock(&g_lifecycle_lock);
+     syslog(LOG_INFO, "[%s] Message bus initialized (depth %d)\n",
+            TAG, AGENT_BUS_QUEUE_LEN);
+     return OK;
+ }
+ 
++/* Caller holds the lifecycle lock. Wake producers as well as consumers. */
++static void bus_wakeup_locked(void)
++{
++    g_bus_shutdown = true;
++    pthread_mutex_lock(&g_inbound_queue.lock);
++    pthread_cond_broadcast(&g_inbound_queue.not_empty);
++    pthread_cond_broadcast(&g_inbound_queue.not_full);
++    pthread_mutex_unlock(&g_inbound_queue.lock);
++    pthread_mutex_lock(&g_outbound_queue.lock);
++    pthread_cond_broadcast(&g_outbound_queue.not_empty);
++    pthread_cond_broadcast(&g_outbound_queue.not_full);
++    pthread_mutex_unlock(&g_outbound_queue.lock);
++}
++
+ void message_bus_destroy(void)
+ {
++    pthread_mutex_lock(&g_lifecycle_lock);
+     if (!g_initialized) {
++        pthread_mutex_unlock(&g_lifecycle_lock);
+         return;
+     }
+-
++    bus_wakeup_locked();
++    while (g_active_operations) pthread_cond_wait(&g_idle, &g_lifecycle_lock);
+     msg_queue_destroy(&g_inbound_queue);
+     msg_queue_destroy(&g_outbound_queue);
+     g_initialized = false;
+-
++    pthread_mutex_unlock(&g_lifecycle_lock);
+     syslog(LOG_INFO, "[%s] Message bus destroyed\n", TAG);
+ }
+ 
+ void message_bus_wakeup(void)
+ {
+-    g_bus_shutdown = true;
+-
+-    pthread_mutex_lock(&g_inbound_queue.lock);
+-    pthread_cond_broadcast(&g_inbound_queue.not_empty);
+-    pthread_mutex_unlock(&g_inbound_queue.lock);
+-
+-    pthread_mutex_lock(&g_outbound_queue.lock);
+-    pthread_cond_broadcast(&g_outbound_queue.not_empty);
+-    pthread_mutex_unlock(&g_outbound_queue.lock);
++    pthread_mutex_lock(&g_lifecycle_lock);
++    if (g_initialized) bus_wakeup_locked();
++    pthread_mutex_unlock(&g_lifecycle_lock);
++}
++
++bool message_bus_is_ready(void)
++{
++    pthread_mutex_lock(&g_lifecycle_lock);
++    bool ready = g_initialized && !atomic_load(&g_bus_shutdown);
++    pthread_mutex_unlock(&g_lifecycle_lock);
++    return ready;
+ }
+ 
+ int message_bus_push_inbound(const agent_msg_t *msg)
+ {
+-    if (msg == NULL) {
+-        return ERROR;
+-    }
+-
+-    return msg_queue_push(&g_inbound_queue, msg, AGENT_BUS_PUSH_TIMEOUT_MS);
++    if (msg == NULL || !bus_enter()) return ERROR;
++    int result = msg_queue_push(&g_inbound_queue, msg, AGENT_BUS_PUSH_TIMEOUT_MS);
++    bus_leave();
++    return result;
+ }
+ 
+ int message_bus_pop_inbound(agent_msg_t *msg, uint32_t timeout_ms)
+ {
+-    if (msg == NULL) {
+-        return ERROR;
+-    }
+-
+-    return msg_queue_pop(&g_inbound_queue, msg, timeout_ms);
++    if (msg == NULL || !bus_enter()) return ERROR;
++    int result = msg_queue_pop(&g_inbound_queue, msg, timeout_ms);
++    bus_leave();
++    return result;
+ }
+ 
+ int message_bus_push_outbound(const agent_msg_t *msg)
+ {
+-    if (msg == NULL) {
+-        return ERROR;
+-    }
+-
+-    return msg_queue_push(&g_outbound_queue, msg, AGENT_BUS_PUSH_TIMEOUT_MS);
++    if (msg == NULL || !bus_enter()) return ERROR;
++    int result = msg_queue_push(&g_outbound_queue, msg, AGENT_BUS_PUSH_TIMEOUT_MS);
++    bus_leave();
++    return result;
+ }
+ 
+ int message_bus_pop_outbound(agent_msg_t *msg, uint32_t timeout_ms)
+ {
+-    if (msg == NULL) {
+-        return ERROR;
+-    }
+-
+-    return msg_queue_pop(&g_outbound_queue, msg, timeout_ms);
+-}
+-
++    if (msg == NULL || !bus_enter()) return ERROR;
++    int result = msg_queue_pop(&g_outbound_queue, msg, timeout_ms);
++    bus_leave();
++    return result;
++}
++
+diff --git a/src/core/message_bus.h b/src/core/message_bus.h
+--- a/src/core/message_bus.h
++++ b/src/core/message_bus.h
+@@ -45,6 +45,9 @@
+ /** Initialise inbound and outbound queues. */
+ int message_bus_init(void);
+ 
++/** Whether submission is possible; this is not an LLM/network health check. */
++bool message_bus_is_ready(void);
++
+ /** Destroy queues and release synchronisation resources. */
+ void message_bus_destroy(void);
+ 
+diff --git a/src/agent_main.c b/src/agent_main.c
+--- a/src/agent_main.c
++++ b/src/agent_main.c
+@@ -466,8 +466,11 @@
+ 
+ int ai_agent_main(int argc, char* argv[])
+ {
+-    (void)argc;
+-    (void)argv;
++    bool headless = argc == 2 && strcmp(argv[1], "--headless") == 0;
++    if (argc > 1 && !headless) {
++        printf("Usage: ai_agent [--headless]\n");
++        return argc == 2 && strcmp(argv[1], "--help") == 0 ? 0 : 2;
++    }
+ 
+     g_shutdown_requested = false;
+ 
+@@ -634,8 +637,8 @@
+ 
+     /* Cron + heartbeat don't need network */
+     cron_service_start();
+-    heartbeat_start();
+-    BOOT_LOG(&t0, "P5", "cron + heartbeat started");
++    if (!headless) heartbeat_start();
++    BOOT_LOG(&t0, "P5", "cron started (heartbeat disabled in headless mode)");
+ 
+ #ifdef CONFIG_AI_AGENT_LVGL_UI
+     if (lvgl_ui_channel_start() != OK)
+@@ -692,13 +695,13 @@
+     BOOT_LOG(&t0, "P5", "network_watch thread started (async)");
+ 
+     /* ── Phase 6: CLI thread — all services now in known state ── */
+-    {
++    if (!headless) {
+         int rc = nsh_commands_start();
+         BOOT_LOG_RC(&t0, "P6", "nsh_commands_start", rc);
+     }
+ 
+-    syslog(LOG_INFO, "[%s] [boot +%ldms] AI Agent ready. Type 'help' in NSH for commands.\n",
+-        TAG, boot_ms(&t0));
++    syslog(LOG_INFO, "[%s] [boot +%ldms] AI Agent ready (headless=%d).\n",
++        TAG, boot_ms(&t0), headless);
+ 
+     /* Block main thread until shutdown is requested */
+     while (!g_shutdown_requested) {
+@@ -734,7 +737,7 @@
+ 
+     /* Phase 5 services (non-network) */
+     cron_service_stop();
+-    heartbeat_stop();
++    if (!headless) heartbeat_stop();
+ 
+     /* Give threads a moment to notice and exit */
+     usleep(500 * 1000);
+diff --git a/src/tools/skill_loader.c b/src/tools/skill_loader.c
+--- a/src/tools/skill_loader.c
++++ b/src/tools/skill_loader.c
+@@ -251,6 +251,10 @@
+     mkdir(AGENT_SKILLS_DIR, 0755);
+ 
+     for (size_t i = 0; i < NUM_BUILTINS; i++) {
++#ifdef CONFIG_EXAMPLES_ZHAOXI
++        if (strcmp(s_builtins[i].filename, "note-taker") != 0 &&
++            strcmp(s_builtins[i].filename, "reminder") != 0) continue;
++#endif
+         install_builtin(&s_builtins[i]);
+     }
+ 
+@@ -318,8 +322,20 @@
+     out[off] = '\0';
+ }
+ 
++/* Also filter legacy files that remain on an existing device. */
++static bool skill_in_profile(const char *name)
++{
++#ifdef CONFIG_EXAMPLES_ZHAOXI
++    return strcmp(name, "note-taker.md") == 0 || strcmp(name, "reminder.md") == 0;
++#else
++    (void)name;
++    return true;
++#endif
++}
++
+ size_t skill_loader_build_summary(char *buf, size_t size)
+ {
++    if (!buf || !size) return 0;
+     /*
+      * On Vela/NuttX we have real directories, so we can simply opendir
+      * on the skills directory and iterate over .md files.
+@@ -337,6 +353,7 @@
+ 
+     while ((ent = readdir(dir)) != NULL && off < size - 1) {
+         const char *name = ent->d_name;
++        if (!skill_in_profile(name)) continue;
+         size_t name_len = strlen(name);
+ 
+         /* Match .md files only */
+@@ -369,9 +386,15 @@
+         fclose(f);
+ 
+         /* Append to summary */
+-        off += snprintf(buf + off, size - off,
++        int written = snprintf(buf + off, size - off,
+             "- **%s**: %s (read with: read_file %s)\n",
+             title, desc, full_path);
++        if (written < 0) break;
++        if ((size_t)written >= size - off) {
++            off = size - 1;
++            break;
++        }
++        off += (size_t)written;
+     }
+ 
+     closedir(dir);
+@@ -398,6 +421,7 @@
+ 
+     while ((ent = readdir(dir)) != NULL) {
+         const char *name = ent->d_name;
++        if (!skill_in_profile(name)) continue;
+         size_t name_len = strlen(name);
+ 
+         if (name_len < 4 || strcmp(name + name_len - 3, ".md") != 0) {

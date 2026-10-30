@@ -1,0 +1,8 @@
+config EXAMPLES_ZHAOXI
+    bool "Zhaoxi headless assistant"
+    default n
+    depends on EXAMPLES_AI_AGENT_VELA && BUILD_FLAT
+    ---help---
+        Screen-free entry for questions, notes, tasks and reminders.
+        Uses the existing AI Agent message bus and voice output.
+        Requires patches/0008 for bus readiness and --headless startup.
