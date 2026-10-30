@@ -1,0 +1,159 @@
+--- a/src/infra/cron_service.c
++++ b/src/infra/cron_service.c
+@@ -168,9 +168,14 @@
+ 
+ static int cron_load_jobs(void)
+ {
++    /* Recover an interrupted replacement without formatting or discarding jobs. */
++    if (access(AGENT_CRON_FILE, F_OK) != 0 && errno == ENOENT &&
++        access(AGENT_CRON_FILE ".bak", F_OK) == 0 &&
++        rename(AGENT_CRON_FILE ".bak", AGENT_CRON_FILE) != 0) return ERROR;
+     FILE* f = fopen(AGENT_CRON_FILE, "r");
+ 
+     if (!f) {
++        if (errno != ENOENT) return ERROR;
+         syslog(LOG_INFO, "[%s] No cron file, starting fresh\n", TAG);
+         s_job_count = 0;
+         return OK;
+@@ -183,8 +188,7 @@
+     if (fsize <= 0 || fsize > AGENT_CRON_FILE_MAX_SIZE) {
+         syslog(LOG_WARNING, "[%s] Cron file invalid size: %ld\n", TAG, fsize);
+         fclose(f);
+-        s_job_count = 0;
+-        return OK;
++        return ERROR;
+     }
+ 
+     char* buf = malloc(fsize + 1);
+@@ -202,17 +206,15 @@
+     free(buf);
+ 
+     if (!root) {
+-        syslog(LOG_WARNING, "[%s] Failed to parse cron JSON\n", TAG);
+-        s_job_count = 0;
+-        return OK;
++        syslog(LOG_ERR, "[%s] Invalid cron JSON; refusing to discard saved jobs\n", TAG);
++        return ERROR;
+     }
+ 
+     cJSON* jobs_arr = cJSON_GetObjectItem(root, "jobs");
+ 
+     if (!jobs_arr || !cJSON_IsArray(jobs_arr)) {
+         cJSON_Delete(root);
+-        s_job_count = 0;
+-        return OK;
++        return ERROR;
+     }
+ 
+     s_job_count = 0;
+@@ -293,22 +295,28 @@
+         return ERROR;
+     }
+ 
+-    FILE* f = fopen(AGENT_CRON_FILE, "w");
+-
+-    if (!f) {
+-        syslog(LOG_ERR, "[%s] Cannot open %s for write\n", TAG, AGENT_CRON_FILE);
+-        free(json_str);
+-        return ERROR;
+-    }
+-
++    FILE* f = fopen(AGENT_CRON_FILE ".tmp", "w");
++    if (!f) { free(json_str); return ERROR; }
+     size_t len = strlen(json_str);
+-    size_t written = fwrite(json_str, 1, len, f);
+-    fclose(f);
++    int failed = fwrite(json_str, 1, len, f) != len;
++    if (fflush(f) != 0) failed = 1;
++    if (!failed && fsync(fileno(f)) != 0) failed = 1;
++    if (fclose(f) != 0) failed = 1;
+     free(json_str);
+-
+-    if (written != len) {
+-        syslog(LOG_ERR, "[%s] Cron save incomplete: %d/%d bytes\n", TAG,
+-            (int)written, (int)len);
++    if (failed) {
++        unlink(AGENT_CRON_FILE ".tmp");
++        return ERROR;
++    }
++
++    /* FatFs rename does not replace an existing destination. Keep the old
++     * complete file as a recovery copy until the next successful update. */
++    bool had_old = access(AGENT_CRON_FILE, F_OK) == 0;
++    if (had_old) {
++        if (unlink(AGENT_CRON_FILE ".bak") != 0 && errno != ENOENT) return ERROR;
++        if (rename(AGENT_CRON_FILE, AGENT_CRON_FILE ".bak") != 0) return ERROR;
++    }
++    if (rename(AGENT_CRON_FILE ".tmp", AGENT_CRON_FILE) != 0) {
++        if (had_old) rename(AGENT_CRON_FILE ".bak", AGENT_CRON_FILE);
+         return ERROR;
+     }
+ 
+@@ -564,7 +572,12 @@
+     s_jobs[s_job_count] = *job;
+     s_job_count++;
+ 
+-    cron_save_jobs();
++    if (cron_save_jobs() != OK) {
++        s_job_count--;
++        job->id[0] = '\0';
++        pthread_mutex_unlock(&s_cron_lock);
++        return ERROR;
++    }
+ 
+     /* Wake the cron thread so it re-evaluates with the new job */
+     pthread_cond_signal(&s_cron_wake);
+@@ -588,12 +601,16 @@
+             syslog(LOG_INFO, "[%s] Removing job: %s (%s)\n", TAG, s_jobs[i].name,
+                 job_id);
+ 
+-            for (int j = i; j < s_job_count - 1; j++) {
+-                s_jobs[j] = s_jobs[j + 1];
++            cron_job_t removed = s_jobs[i];
++            for (int j = i; j < s_job_count - 1; j++) s_jobs[j] = s_jobs[j + 1];
++            s_job_count--;
++            if (cron_save_jobs() != OK) {
++                for (int j = s_job_count; j > i; j--) s_jobs[j] = s_jobs[j - 1];
++                s_jobs[i] = removed;
++                s_job_count++;
++                pthread_mutex_unlock(&s_cron_lock);
++                return ERROR;
+             }
+-            s_job_count--;
+-
+-            cron_save_jobs();
+             pthread_mutex_unlock(&s_cron_lock);
+             return OK;
+         }
+--- a/src/tools/tool_files.c
++++ b/src/tools/tool_files.c
+@@ -208,9 +208,12 @@
+ 
+     size_t len     = strlen(content);
+     size_t written = fwrite(content, 1, len, f);
+-    fclose(f);
+-
+-    if (written != len) {
++    int save_failed = written != len;
++    if (fflush(f) != 0) save_failed = 1;
++    if (!save_failed && fsync(fileno(f)) != 0) save_failed = 1;
++    if (fclose(f) != 0) save_failed = 1;
++
++    if (save_failed) {
+         snprintf(output, output_size,
+                  "Error: wrote %d of %d bytes to %s", (int)written, (int)len, path);
+         cJSON_Delete(root);
+--- a/src/agent_main.c
++++ b/src/agent_main.c
+@@ -590,6 +590,11 @@
+ 
+         rc = cron_service_init();
+         BOOT_LOG_RC(&t0, "P3", "cron_service_init", rc);
++        if (rc != OK) {
++            message_bus_destroy();
++            printf("ZHAOXI: saved reminders could not be loaded; Agent not started.\n");
++            return ERROR;
++        }
+ 
+         rc = heartbeat_init();
+         BOOT_LOG_RC(&t0, "P3", "heartbeat_init", rc);

@@ -1,41 +1,46 @@
 # 朝夕集成补丁
 
-当前无屏配置使用 0008、0009，分别修改 AI Agent 和 BES 启动入口。所有文件属于针对特定基线的源码补丁，不应把整个目录按数字顺序无条件应用。
+当前完整无屏固件包含 SDK 与 BES 启动/挂载两组补丁。它们针对不同仓库，不能把整个目录无条件按数字顺序应用。
 
-## 当前补丁和固定基线
+## SDK 固定基线与顺序
 
-| 补丁 | 仓库与已检查基线 | 作用 |
-| --- | --- | --- |
-| 0008-packages_ai_agent-headless-entry.patch | open-vela/packages_ai_agent · e65550f18759f086d7f544edcf17d1e31223244f | --headless；关闭后台 heartbeat；只安装和发现核心 Skill；可查询的消息总线状态；关闭时停止接收请求并等待队列操作退出 |
-| 0009-vendor_bes-headless-startup.patch | open-vela/vendor_bes · 36465377d944a575ce8a0c7ba45259f5c6c61ea8 | 配置启用 zhaoxi 时启动后台 Agent；其他配置保留原启动行为 |
+基线：`open-vela/packages_ai_agent`，`e65550f18759f086d7f544edcf17d1e31223244f`。以下序列已逐个应用到原始源码副本，并与实际编译源码逐文件比较。0008 的结尾已按真实归档修正。
 
-上述两份补丁均在对应原始源码上执行 git apply --check。0009 是可选的自动启动方式；第一次部署资产时可先只使用 0008，从串口手动启动。
+| 顺序 | 作用 |
+| --- | --- |
+| 0008 | 无屏入口、核心 Skill 与消息总线 |
+| 0010 | BES 真实 PCM 后端与构建适配 |
+| 0011 | MiMo ASR/TTS 后端和失败传播 |
+| 0012 | 检查真实 WAPI 命令返回值，先启动核心业务循环 |
+| 0013 | 真实 exFAT 持久挂载和 /emmc/zhaoxi |
+| 0014 | checked 写入、fsync、cron 回滚与恢复副本 |
+| 0015 | 不依赖 rand 的唯一提醒编号 |
+| 0017 | 核心八项工具、RTC 和未授时保护 |
+| 0018 | 保留已连接网络，不重复 DHCP |
+| 0019 | 无线就绪等待与自动重连 |
+| 0020 | station/carrier 检查、IPv4 DNS 与 TCP 截止时间 |
+| 0021 | 单实例、worker 退出屏障、cron 停止唤醒，产品不启动 WS/阻塞 CLI |
+
+后续补丁依赖前面的源码状态，逐个 `git apply --check /path/to/patch` 后再 `git apply /path/to/patch`。不要把历史 0001～0007 无条件叠加到此基线。
 
 ```bash
-# 在已经同步的 openvela 工作区；先确认各仓库版本与本地改动。
-cd packages/ai_agent
-git apply --check ../../contest2026_416_dianzinongmingong/patches/0008-packages_ai_agent-headless-entry.patch
-git apply ../../contest2026_416_dianzinongmingong/patches/0008-packages_ai_agent-headless-entry.patch
-
-cd ../../vendor/bes
-git apply --check ../../contest2026_416_dianzinongmingong/patches/0009-vendor_bes-headless-startup.patch
-git apply ../../contest2026_416_dianzinongmingong/patches/0009-vendor_bes-headless-startup.patch
+python3 tools/check_agent_patches.py \
+  --pristine-agent /path/to/pristine-e65550f \
+  --patched-agent /path/to/openvela/packages/ai_agent
 ```
 
-若本地 AI Agent 比固定提交早，先检查 voice 接口、message_bus 和 agent_main 的差异，再移植相同改动；不能靠强行忽略补丁冲突判断兼容。既有 0004 的 UI 启动改动需要先按实际差异撤掉，再集成 0009。
+此检查使用临时副本，不修改原始基线。完整构建与固件封装见 [构建脚本](../tools/build_bes_headless.py)。
 
-## 既有公共仓库修改
+## BES 启动与挂载
 
-这些补丁保留供对应历史基线复现。当前 SDK 是否已包含修复，必须检查实际源码；未在本轮重新验证它们对新基线的全部应用组合。
+公共源码基线：`open-vela/vendor_bes`，`36465377d944a575ce8a0c7ba45259f5c6c61ea8`。0009 负责产品后台启动；0016 负责产品不自动格式化持久存储。已有显示启动修改应先按实际差异撤下。
 
-| 编号 | 修改位置 | 内容 | 当前用途 |
-| --- | --- | --- | --- |
-| 0001 | packages/ai_agent | HTTP Date 时间同步及构建时间回退 | 按实际基线核对时间能力 |
-| 0002 | packages/ai_agent | /data LittleFS 挂载与 tmpfs 回退 | 按实际基线核对存储 |
-| 0003 | vendor/bes | LittleFS 与 DNS 配置 | 原配置参考；合并后以无屏 fragment 覆盖显示选项 |
-| 0005 | packages/ai_agent | daily 固定时刻调度 | 可选；只有工具 schema 支持才开放对应提醒 |
-| 0007 | packages/ai_agent | cron socket 与 MiMo thinking 修复 | 原运行修复，按实际源码保留 |
+实际 BSP 库来自本地已匹配配置，SHA256 和本地非公开提交边界见 [来源清单](../configs/bes_headless.sources.json)。不能仅凭公共 manifest 宣称得到相同完整工作区。
 
-纯显示启动 0004 和写 NET_STATUS 给 UI 轮询的 0006 移至 legacy/display/patches。当前无屏版本不应用它们。
+修改嵌套 `.ap` 启动文件后须触碰顶层 `rcS`/`rc.sysinit` 并检查封装 ROMFS；新构建脚本包含此操作。更改已有构建的 defconfig 后须 resetconfig。
 
-模型、ASR/TTS 的凭据继续存于设备配置，不进入补丁。完整固件仍需在真实 BSP、原音频配置和当前构建工具链中链接和验收。
+## 历史与验收
+
+0001～0003、0005、0007 保留历史时间、存储、DNS、daily 调度和模型适配的追溯用途，按各自基线核对。纯显示的 0004/0006 已转入 legacy，不属于当前序列。
+
+API key、Wi-Fi 凭据及录音不进入补丁。当前已生成并烧录完整镜像，但板端云问答和完整语音业务尚未通过；见 [构建与验收](../docs/BES固件构建与验收.md) 和 [Wi-Fi 审计](../docs/WiFi固件审计.md)。

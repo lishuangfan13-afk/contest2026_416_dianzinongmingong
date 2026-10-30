@@ -1,0 +1,105 @@
+--- a/src/infra/network_manager.c
++++ b/src/infra/network_manager.c
+@@ -827,50 +827,28 @@
+     syslog(LOG_INFO, "[%s] Connecting WiFi SSID=%s on %s\n", TAG, ssid, dev);
+ 
+     snprintf(cmd, sizeof(cmd), "ifup %s", dev); /* bring up iface first */
+-    system(cmd);
++    if (system(cmd) != 0) return ERROR;
+     usleep(500000); /* wait for driver ready */
+ 
+     snprintf(cmd, sizeof(cmd), "wapi mode %s 2", dev); /* MANAGED */
+-    system(cmd);
++    if (system(cmd) != 0) return ERROR;
+ 
+     if (pass && pass[0]) {
+         snprintf(cmd, sizeof(cmd), "wapi psk %s %s 3", dev, q_pass);
+-        system(cmd);
++        if (system(cmd) != 0) return ERROR;
+     }
+ 
+     snprintf(cmd, sizeof(cmd), "wapi essid %s %s 1", dev, q_ssid);
+-    system(cmd);
+-    usleep(2000000); /* wait for AP association */
+-
+-    /* P1: verify WiFi association before requesting DHCP.
+-     * 'wapi status' always exits 0 (it just prints iface state), so
+-     * checking its return code is useless. Instead, parse the output
+-     * for "Not-Associated" which wapi prints when no AP is joined.
+-     * If popen fails we fall through and let network_wait_connected
+-     * handle the timeout. */
+-    {
+-        bool associated = true;
+-        snprintf(cmd, sizeof(cmd), "wapi status %s", dev);
+-        FILE* fp = popen(cmd, "r");
+-        if (fp) {
+-            char line[256];
+-            while (fgets(line, sizeof(line), fp)) {
+-                if (strstr(line, "Not-Associated")) {
+-                    associated = false;
+-                    break;
+-                }
+-            }
+-            pclose(fp);
+-        }
+-        if (!associated) {
+-            syslog(LOG_ERR,
+-                "[%s] WiFi not associated (no carrier), skipping DHCP\n", TAG);
+-            return ERROR;
+-        }
+-    }
+-
+-    snprintf(cmd, sizeof(cmd), "renew %s", dev); /* DHCP */
+-    system(cmd);
++    /* On BES this command blocks until association succeeds or fails.
++     * Do not run the nonexistent `wapi status` subcommand or request DHCP
++     * after a failed association. The assigned IP is the final check. */
++    if (system(cmd) != 0) {
++        syslog(LOG_ERR, "[%s] WiFi association failed\n", TAG);
++        return ERROR;
++    }
++    usleep(2000000);
++    snprintf(cmd, sizeof(cmd), "renew %s", dev);
++    if (system(cmd) != 0) return ERROR;
+ 
+     /* Persist credentials.
+      * P2: always write the PSK slot — even when pass is empty — so that
+--- a/src/agent_main.c
++++ b/src/agent_main.c
+@@ -119,7 +119,9 @@
+ #ifdef CONFIG_AI_AGENT_FEISHU
+         feishu_bot_start();
+ #endif
++#ifndef CONFIG_EXAMPLES_ZHAOXI
+         agent_loop_start();
++#endif
+         ws_server_start();
+ #ifdef CONFIG_AI_AGENT_NODE
+         node_client_start();
+@@ -166,8 +168,10 @@
+         if (feishu_bot_start() != OK)
+             syslog(LOG_WARNING, "[%s] feishu_bot_start failed\n", TAG);
+ #endif
++#ifndef CONFIG_EXAMPLES_ZHAOXI
+         if (agent_loop_start() != OK)
+             syslog(LOG_WARNING, "[%s] agent_loop_start failed\n", TAG);
++#endif
+         if (ws_server_start() != OK)
+             syslog(LOG_WARNING, "[%s] ws_server_start failed\n", TAG);
+ #ifdef CONFIG_AI_AGENT_NODE
+@@ -625,6 +629,15 @@
+     }
+     BOOT_LOG(&t0, "P5", "outbound dispatch thread started");
+ 
++#ifdef CONFIG_EXAMPLES_ZHAOXI
++    /* Requests must return errors rather than remain queued behind WiFi. */
++    if (agent_loop_start() != OK) {
++        agent_request_shutdown();
++        return ERROR;
++    }
++    BOOT_LOG(&t0, "P5", "headless agent loop started");
++#endif
++
+ #ifdef CONFIG_FEATURE_SYSTEM_VELACLAW
+     /* Quickapp mqueue listener - receives requests from quickapp process */
+     if (agent_task_create(quickapp_mq_listener_task, "qapp_mq",

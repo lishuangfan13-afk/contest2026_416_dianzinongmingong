@@ -11,7 +11,7 @@
 | cron.json | <BASE>/cron.json |
 | note-taker.md、reminder.md | <BASE>/skills/ |
 
-<BASE> 使用设备实际配置的 /data/ai_agent 或 /data/agent。资产中的 {{AGENT_DATA_DIR}} 是部署占位符，tools/deploy_assets.ps1 会在写入和回读校验时替换为同一个实际根目录。
+当前实板 <BASE> 是持久存储 /emmc/zhaoxi；历史固件可能使用 /data/ai_agent 或 /data/agent。资产中的 {{AGENT_DATA_DIR}} 是部署占位符，tools/deploy_assets.ps1 会在写入和回读校验时替换为同一个实际根目录。
 
 ## 业务执行
 
@@ -19,7 +19,7 @@
 
 部署前先执行 zhaoxi stop 并等待 Shutdown complete；部署后重新运行 ai_agent --headless &，使调度列表重新加载。首次尚未启动时可直接部署。不要同时启动两个 Agent。
 
-部署会覆盖同名资产，包括当前 cron.json 调度列表。需要保留已有任务时，先备份并合并调度列表。tmpfs 上的资产和记录不能保证跨重启保留。
+部署更新人格配置和业务 Skill；MEMORY.md、cron.json 仅在目标文件不存在时初始化，已有用户数据保留。当前固件使用实测 exFAT 挂载；历史 tmpfs 上的资产和记录不能保证跨重启保留。
 
 ## 入口
 

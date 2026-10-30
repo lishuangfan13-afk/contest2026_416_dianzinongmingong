@@ -47,10 +47,10 @@ zhaoxi remind cancel a123b4
 2. 按 [补丁说明](patches/README.md) 应用当前无屏补丁，核对 AI Agent 与 BES BSP 的基线版本。
 3. 合并 [无屏配置](configs/bes_headless.fragment)。当前入口要求 flat 构建，与 Agent 共用地址空间；不适用于独立进程构建。
 4. 构建实际 AP 固件，完成原模型、联网及语音服务配置。
-5. 停止后台 Agent，等待 `Shutdown complete`，然后运行部署脚本。本无屏配置显式使用 `/data/agent`，历史固件应按其实际配置指定根目录：
+5. 当前无屏配置使用实际挂载的持久存储 `/emmc/zhaoxi`。停止后台 Agent，等待日志中的实际退出确认后，再更新资产；已有备忘和提醒默认保留：
 
 ```powershell
-powershell -File tools/deploy_assets.ps1 -Port COM3 -Baud 921600 -BaseDir /data/agent
+pwsh -File tools/deploy_assets.ps1 -Port COM3 -Baud 921600 -BaseDir /emmc/zhaoxi
 ```
 
 部署后重新运行 `ai_agent --headless &`，让 Skill 和提醒列表重新加载。不要同时启动第二个 Agent 实例。完整步骤、数据保留规则及验收场景见 [无屏核心功能](docs/无屏核心功能.md)。
@@ -69,4 +69,6 @@ powershell -File tools/deploy_assets.ps1 -Port COM3 -Baud 921600 -BaseDir /data/
 
 命令入口已经做 Cortex-M55 对象编译；主机测试连接真实上游消息总线，覆盖业务路由、中文、错误输入、队列满和关闭期间并发请求；两种数据根目录的资产渲染与部署脚本语法也有检查。原生 Skill 加载检查确认旧扩展不会进入当前配置，普通配置仍保留原功能。重现方法见 [应用说明](app/zhaoxi/README.md)。
 
-本轮没有生成新的完整可烧录固件，也没有把新功能烧录到实物。三项功能的板上验收仍包括真实问答、文件回读及到期语音播报。历史硬件试验与本轮代码检查分别记录，不能相互替代。
+完整 AP 固件已编译、烧录。当前实板版本为 headless_r8：本机音频发声、持久化文件、按编号取消提醒、真实定时投递、RTC、单实例及退出后重启已有实测；Pro 热点曾取得 IP，但 DNS/互联网尚未通过，板端联网问答和完整语音业务仍待验收。工具诊断通过不等于自然语言业务已经完成。
+
+[完整构建、镜像校验和实板结果](docs/BES固件构建与验收.md) · [Wi-Fi 独立审计](docs/WiFi固件审计.md)

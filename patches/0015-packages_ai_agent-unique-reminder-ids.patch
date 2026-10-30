@@ -1,0 +1,26 @@
+--- a/src/infra/cron_service.c
++++ b/src/infra/cron_service.c
+@@ -91,9 +91,20 @@
+ 
+ static void cron_generate_id(char* id_buf)
+ {
+-    uint32_t r = ((uint32_t)rand());
+-
+-    snprintf(id_buf, AGENT_CRON_ID_LEN, "%08x", (unsigned int)r);
++    /* Called under s_cron_lock. Unseeded embedded rand() can return zero
++     * repeatedly, so IDs must be checked against the active persistent set. */
++    static uint32_t sequence;
++    uint32_t now = (uint32_t)time(NULL);
++    if (sequence < now) sequence = now;
++    for (;;) {
++        if (++sequence == 0) ++sequence;
++        snprintf(id_buf, AGENT_CRON_ID_LEN, "%08x", (unsigned int)sequence);
++        bool duplicate = false;
++        for (int i = 0; i < s_job_count; i++) {
++            if (strcmp(s_jobs[i].id, id_buf) == 0) { duplicate = true; break; }
++        }
++        if (!duplicate) return;
++    }
+ }
+ 
+ /* Parse a single JSON object into a cron_job_t.

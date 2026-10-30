@@ -1,0 +1,43 @@
+From: lishuangfan13-afk <lishuangfan13@gmail.com>
+Subject: [PATCH] ai_agent: allow direct BES PCM and optional MQTT dependency
+
+Use the verified product HAL adapter when CONFIG_ZHAOXI_BES_AUDIO is selected.
+Do not require an unconfigured MQTT target in the core-only build.
+Based on packages_ai_agent e65550f18759f086d7f544edcf17d1e31223244f.
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -70,6 +70,11 @@
+     src/ui/qrcode_display.c
+   )
+ 
++  # This board uses its verified HAL path instead of the media-service PCM backend.
++  if(CONFIG_ZHAOXI_BES_AUDIO)
++    list(REMOVE_ITEM AGENT_SRCS src/voice/audio_capture.c src/voice/audio_playback.c)
++  endif()
++
+   # Optional modules
+   if(CONFIG_AI_AGENT_FEISHU)
+     list(APPEND AGENT_SRCS
+@@ -199,6 +204,11 @@
+     list(APPEND AGENT_INCDIRS ${ALSA_DIRECT_INC})
+   endif()
+ 
++  set(AGENT_DEPS)
++  if(CONFIG_AI_AGENT_MQTT AND CONFIG_NETUTILS_MQTTC)
++    list(APPEND AGENT_DEPS mqttc)
++  endif()
++
+   nuttx_add_application(
+     NAME
+       ${CONFIG_EXAMPLES_AI_AGENT_VELA_PROGNAME}
+@@ -207,7 +217,7 @@
+     INCLUDE_DIRECTORIES
+       ${AGENT_INCDIRS}
+     DEPENDS
+-      mqttc
++      ${AGENT_DEPS}
+     STACKSIZE
+       ${CONFIG_EXAMPLES_AI_AGENT_VELA_STACKSIZE}
+     PRIORITY

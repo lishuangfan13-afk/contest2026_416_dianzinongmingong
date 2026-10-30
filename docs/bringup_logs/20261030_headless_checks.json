@@ -1,41 +1,28 @@
 {
   "profile": "passed",
   "board_operations": false,
-  "commands": "PASS: routes, UTF-8, validation, full queue, pre-init, shutdown and audio API error propagation.",
-  "shutdown": "passed: 40 teardown/re-init cycles with concurrent producers or consumers",
-  "arm_object": "compiled; not a complete flashable firmware",
-  "updated_at": "2026-10-30T11:00:20.530732+00:00",
-  "scope": "Source integration and host tests only; no full firmware link, board flashing, live LLM/ASR/TTS or scheduled audio verification in this change.",
-  "agent_base": "e65550f18759f086d7f544edcf17d1e31223244f",
-  "vendor_base": "36465377d944a575ce8a0c7ba45259f5c6c61ea8",
-  "host_compiler": "WSL Ubuntu cc, -Wall -Wextra -Werror, ASan and UBSan",
-  "target_compiler": "openvela arm-none-eabi GCC 13.4.0; Cortex-M55 object only",
-  "asset_rendering": "passed: six assets at each of /data/agent and /data/ai_agent; invalid root rejected",
-  "powershell_deploy_syntax": "passed; no serial port opened",
-  "patch_application": {
-    "0008": "git apply --check passed on pristine pinned source",
-    "0009": "git apply --check passed on pristine pinned source"
-  },
-  "input_paths": [
-    "ask",
-    "note add/list",
-    "todo add/list/done",
-    "remind add/list/cancel",
-    "listen start/stop",
-    "status",
-    "stop"
-  ],
+  "commands": "passed",
+  "shutdown": "40 concurrent message-bus teardown/re-init cycles passed",
+  "worker_lifecycle": "50 single-instance/drain cycles, network-first barrier and late-worker refusal passed",
+  "skill_profile": "core-only and standard profile checks passed",
+  "cron_persistence": "real cron implementation: checked saves, failure rollback, backup recovery, corrupt refusal, unique IDs passed",
+  "arm_object": "passed; separate complete firmware link and board evidence in 20261030_headless_board.json",
+  "asset_rendering": "/emmc/zhaoxi and two historical data roots passed",
+  "scope": "Host checks; actual board acceptance recorded separately",
   "patch_sha256": {
-    "0008-packages_ai_agent-headless-entry.patch": "427e68b10632af2ec93e92d6b01c27405ce26c95e23b9558568087f386d0d476",
-    "0009-vendor_bes-headless-startup.patch": "589084bddd252e9367a487f4faa115723a28dfb87ad3dd4e8d93c422c868cc9b"
-  },
-  "remaining_acceptance": [
-    "full BES AP firmware link with the actual BSP and verified audio backend",
-    "board question and answer",
-    "memo save and readback",
-    "two tasks with one completed by ID",
-    "audible due reminder and cancellation test"
-  ],
-  "build_environment": "Existing WSL BSP/toolchain present; packages/ai_agent missing in that workspace. New full image not built.",
-  "skill_profile": "passed: core-only discovery, legacy file exclusion, deployed asset preservation, standard profile and summary bounds"
+    "0008-packages_ai_agent-headless-entry.patch": "ea6c16a65a42b0e0df8a699eafaeb1843f9e032b781e7dd572a36a15ddb02314",
+    "0009-vendor_bes-headless-startup.patch": "589084bddd252e9367a487f4faa115723a28dfb87ad3dd4e8d93c422c868cc9b",
+    "0010-packages_ai_agent-bes-pcm-build.patch": "6d17d6ed41fd2f7f6b15bc154473fe51684861b4e6b46777e1a2b7c356dcf306",
+    "0011-packages_ai_agent-mimo-voice-provider.patch": "bff45ce2b002cac42823c75c24cbc7cdb2b672e5988b539bbbbf046d3c9a52d3",
+    "0012-packages_ai_agent-headless-network-errors.patch": "b35c951c85f951f7e95e0d4196804a9be8be58d6afb342e28d7865d7ffdb2f35",
+    "0013-packages_ai_agent-persistent-storage.patch": "5f8d01fe942c809e591690b0e55e9a7144267377104a1eda51971108a68e0d12",
+    "0014-packages_ai_agent-checked-save-results.patch": "24dd52ad36d828e38acdcd9c87311ed2cf3a5250aaf8fa1f0f12990b96abf151",
+    "0015-packages_ai_agent-unique-reminder-ids.patch": "47887acb025ae5307e56de0e3e3d247999d8a4187263715bd512092e00b03a0b",
+    "0016-vendor_bes-preserve-product-storage.patch": "0a8cbcf6209743921f92e3ee122b3529ecda522a48f79c495c7d9faddf1c2d8f",
+    "0017-packages_ai_agent-core-tools-and-clock.patch": "4298ee7a869d853d0eea8c95ba00b1737e680514862b774ad5df752c1307985d",
+    "0018-packages_ai_agent-preserve-connected-network.patch": "2b1d0a9c0a4145693c3b75a65a6ce255fe333bb95327646dc012050a05b7ff47",
+    "0019-packages_ai_agent-headless-wifi-retry.patch": "ed80fa2ee6d5ff2c99e5cbbab9358e84cba80c31f25f10feb735b049b4da248a",
+    "0020-packages_ai_agent-station-readiness-and-tcp-timeout.patch": "fa41a037a0af17b3323d2eca4875337078d01963465989595532ecf78e5bdd38",
+    "0021-packages_ai_agent-single-instance-and-worker-teardown.patch": "007a15df5d1337ad8550dbf9fc8b5afe569035911d07f5a24033bfb9d0b81864"
+  }
 }

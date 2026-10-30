@@ -1,0 +1,82 @@
+{
+  "as_of": "2026-10-31T00:28:21.969709+08:00",
+  "image": {
+    "name": "nuttx_ap_headless.bin",
+    "runtime_version": "headless_r8",
+    "size": 1300672,
+    "sha256": "450d7b8113f8846cfb3cd09d8dfdc4587cd55e431acce5520b218998734afc48",
+    "flash_address": "0x30190000",
+    "full_link_exit_code": 0,
+    "programming_succeeded": true,
+    "last_update_used_software_reset": true
+  },
+  "board_operations": true,
+  "full_three_feature_acceptance_complete": false,
+  "speaker": {
+    "real_pcm_dma_test_passed": true,
+    "user_confirmed_clear_tone": true,
+    "confirmed_on": "headless_v4; same adapter retained"
+  },
+  "storage": {
+    "image": "nuttx_ap_headless_r5.bin",
+    "board_operations": true,
+    "llm_intent_path_tested": false,
+    "checks": [
+      "remove_known_old_validation_job",
+      "memo_write_and_readback",
+      "todo_two_entries_and_complete_only_id_1",
+      "two_simultaneous_reminders_have_distinct_ids",
+      "cancel_only_selected_reminder",
+      "real_scheduler_due_delivery_and_cancelled_job_does_not_fire"
+    ],
+    "isolated_test_dir": "/emmc/zhaoxi/validation-2f0e1526",
+    "persistent_job_id": "6ae4b36f",
+    "cancelled_job_id": "6ae4b370",
+    "due_job_id": "6ae4b374",
+    "ready_for_reboot_retention_check": true
+  },
+  "retention": {
+    "memo_todo_and_reminder_survived_reset_and_ap_update": true,
+    "private_config_retained": true,
+    "user_data_overwritten_for_validation": false
+  },
+  "rtc": {
+    "warm_reset_retention": true,
+    "complete_power_loss_retention": false,
+    "manual_resync_used_after_usb_replug": true
+  },
+  "lifecycle": {
+    "duplicate_start_rejected": true,
+    "shutdown_verified_by_actual_log_and_ps": true,
+    "restart_after_worker_exit_passed": true,
+    "r7_shutdown_elapsed_seconds": 2.23
+  },
+  "network": {
+    "priority": "phone hotspot",
+    "association_and_dhcp_observed": true,
+    "stable_connectivity_verified": false,
+    "native_cloud_request_success": false,
+    "r7_question_result": "explicit failure after about 15 seconds; DNS resolution failed",
+    "gateway_dns_alternative_test": "failed to resolve",
+    "radio_mac_rc": 0,
+    "kernel_mac_rc": 0,
+    "radio_and_kernel_mac_equal": true,
+    "ps_255": "valid use-default sentinel in inspected APC1 library"
+  },
+  "cloud_pc_control": {
+    "text_http_status": 200,
+    "same_bearer_as_sdk_http_status": 200,
+    "same_bearer_answer": "2",
+    "asr_http_status": 200,
+    "tts_http_status": 200,
+    "tts_native_pcm16_protocol_passed": true
+  },
+  "not_yet_passed": [
+    "board-native Q&A answer",
+    "natural-language note and todo acceptance",
+    "board-native ASR/TTS",
+    "audible due reminder",
+    "stable Internet and automatic time sync"
+  ],
+  "privacy": "No API keys, Wi-Fi passwords, raw private config or recordings included."
+}

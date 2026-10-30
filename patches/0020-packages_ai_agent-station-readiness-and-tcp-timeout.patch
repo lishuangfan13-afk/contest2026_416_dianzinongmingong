@@ -1,0 +1,195 @@
+--- a/src/infra/network_manager.c
++++ b/src/infra/network_manager.c
+@@ -19,6 +19,7 @@
+ 
+ #include <arpa/inet.h>
+ #include <ifaddrs.h>
++#include <net/if.h>
+ #include <netinet/in.h>
+ #include <string.h>
+ #include <sys/socket.h>
+@@ -42,6 +43,14 @@
+             if (ifa->ifa_name && strncmp(ifa->ifa_name, "lo", 2) == 0)
+                 continue;
+ 
++#ifdef CONFIG_EXAMPLES_ZHAOXI
++            /* A SoftAP address or an IP left on a down interface cannot
++             * satisfy the product's station-link readiness check. */
++            if (!ifa->ifa_name || strcmp(ifa->ifa_name, "wlan0") != 0 ||
++                (ifa->ifa_flags & (IFF_UP | IFF_RUNNING)) != (IFF_UP | IFF_RUNNING))
++                continue;
++#endif
++
+             struct sockaddr_in* sin = (struct sockaddr_in*)ifa->ifa_addr;
+             uint32_t addr = ntohl(sin->sin_addr.s_addr);
+             if ((addr >> 24) == 127)
+@@ -70,7 +79,7 @@
+     }
+ 
+     struct timespec deadline;
+-    clock_gettime(CLOCK_REALTIME, &deadline);
++    clock_gettime(CLOCK_MONOTONIC, &deadline);
+     deadline.tv_sec += (time_t)(timeout_ms / 1000);
+     deadline.tv_nsec += (long)((timeout_ms % 1000) * 1000000L);
+     if (deadline.tv_nsec >= 1000000000L) {
+@@ -85,7 +94,7 @@
+         }
+ 
+         struct timespec now;
+-        clock_gettime(CLOCK_REALTIME, &now);
++        clock_gettime(CLOCK_MONOTONIC, &now);
+         if (now.tv_sec > deadline.tv_sec || (now.tv_sec == deadline.tv_sec && now.tv_nsec >= deadline.tv_nsec)) {
+             syslog(LOG_WARNING, "[%s] Timed out waiting for network\n", TAG);
+             return ERROR;
+--- a/src/infra/vela_tls.c
++++ b/src/infra/vela_tls.c
+@@ -21,6 +21,8 @@
+ 
+ #ifdef CONFIG_AI_AGENT_NET_RPMSG
+ #include "network/network_manager.h"
++#elif defined(CONFIG_ZHAOXI_BES_AUDIO)
++#include "infra/network_manager.h"
+ #endif
+ 
+ #include <errno.h>
+@@ -32,6 +34,7 @@
+ /* POSIX networking */
+ #include <netdb.h>
+ #include <sys/socket.h>
++#include <sys/select.h>
+ #include <sys/types.h>
+ #include <unistd.h>
+ 
+@@ -248,6 +251,66 @@
+     pthread_mutex_unlock(&s_pool_lock);
+ }
+ 
++#ifdef CONFIG_ZHAOXI_BES_AUDIO
++/* Proposed helper for CONFIG_ZHAOXI_BES_AUDIO only.
++ * DNS retains NuttX's configured retry bound; the deadline below applies to
++ * the TCP stage after resolution. The product sets IPv4 DNS once at startup. */
++static int zhaoxi_tcp_connect(mbedtls_net_context *net, const char *host,
++                              const char *port, unsigned timeout_ms)
++{
++    struct addrinfo hints = {0}, *addresses = NULL;
++    hints.ai_family = AF_INET;
++    hints.ai_socktype = SOCK_STREAM;
++    hints.ai_protocol = IPPROTO_TCP;
++    if (getaddrinfo(host, port, &hints, &addresses) != 0)
++        return MBEDTLS_ERR_NET_UNKNOWN_HOST;
++
++    struct timespec start;
++    clock_gettime(CLOCK_MONOTONIC, &start);
++    int64_t deadline = (int64_t)start.tv_sec * 1000 + start.tv_nsec / 1000000 + timeout_ms;
++    int result = MBEDTLS_ERR_NET_CONNECT_FAILED;
++    for (struct addrinfo *at = addresses; at; at = at->ai_next) {
++        int fd = socket(at->ai_family, at->ai_socktype, at->ai_protocol);
++        if (fd < 0) continue;
++        int flags = fcntl(fd, F_GETFL, 0);
++        if (flags < 0 || fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0) {
++            close(fd);
++            continue;
++        }
++        int rc = connect(fd, at->ai_addr, at->ai_addrlen);
++        if (rc != 0 && errno == EINPROGRESS) {
++            for (;;) {
++                struct timespec now;
++                clock_gettime(CLOCK_MONOTONIC, &now);
++                int64_t left = deadline - (int64_t)now.tv_sec * 1000 - now.tv_nsec / 1000000;
++                if (left <= 0) { rc = -1; errno = ETIMEDOUT; break; }
++                fd_set writefds;
++                FD_ZERO(&writefds);
++                FD_SET(fd, &writefds);
++                struct timeval tv = { .tv_sec = left / 1000,
++                                      .tv_usec = (left % 1000) * 1000 };
++                rc = select(fd + 1, NULL, &writefds, NULL, &tv);
++                if (rc < 0 && errno == EINTR) continue;
++                if (rc <= 0) { if (!rc) errno = ETIMEDOUT; rc = -1; break; }
++                int error = 0;
++                socklen_t size = sizeof(error);
++                rc = getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &size);
++                if (rc == 0 && error) { errno = error; rc = -1; }
++                break;
++            }
++        }
++        if (rc == 0 && fcntl(fd, F_SETFL, flags) == 0) {
++            net->fd = fd;
++            result = 0;
++            break;
++        }
++        close(fd);
++    }
++    freeaddrinfo(addresses);
++    return result;
++}
++#endif
++
+ static int tls_ctx_connect(tls_ctx_t* ctx, const char* host, const char* port)
+ {
+     int ret;
+@@ -256,6 +319,13 @@
+     mbedtls_ssl_config_init(&ctx->cfg);
+     mbedtls_net_init(&ctx->net);
+     mbedtls_ctr_drbg_init(&ctx->ctr_drbg);
++
++#ifdef CONFIG_ZHAOXI_BES_AUDIO
++    if (!network_is_connected()) {
++        syslog(LOG_WARNING, "[%s] WiFi station is not ready\n", TAG);
++        return VELA_TLS_ERR_CONNECT;
++    }
++#endif
+ 
+     /* Seed RNG directly with our robust function */
+     const char* pers = "vela_tls";
+@@ -299,9 +369,12 @@
+         syslog(LOG_INFO, "[%s] Using proxy tunnel fd=%d for %s:%s\n",
+             TAG, tunnel_fd, host, port);
+     } else {
+-        if ((ret = mbedtls_net_connect(&ctx->net, host, port,
+-                 MBEDTLS_NET_PROTO_TCP))
+-            != 0) {
++#ifdef CONFIG_ZHAOXI_BES_AUDIO
++        ret = zhaoxi_tcp_connect(&ctx->net, host, port, 15000);
++#else
++        ret = mbedtls_net_connect(&ctx->net, host, port, MBEDTLS_NET_PROTO_TCP);
++#endif
++        if (ret != 0) {
+             syslog(LOG_ERR, "[%s] net_connect %s:%s ret=0x%x\n",
+                 TAG, host, port, -ret);
+             return VELA_TLS_ERR_CONNECT;
+@@ -331,6 +404,9 @@
+             struct timeval ctv = { .tv_sec = timeout_sec, .tv_usec = 0 };
+             setsockopt(ctx->net.fd, SOL_SOCKET, SO_SNDTIMEO, &ctv, sizeof(ctv));
+         }
++#elif defined(CONFIG_ZHAOXI_BES_AUDIO)
++        struct timeval send_tv = { .tv_sec = 15, .tv_usec = 0 };
++        setsockopt(ctx->net.fd, SOL_SOCKET, SO_SNDTIMEO, &send_tv, sizeof(send_tv));
+ #endif
+     }
+ 
+--- a/src/agent_main.c
++++ b/src/agent_main.c
+@@ -34,6 +34,11 @@
+ 
+ #include "agent_compat.h"
+ #include "agent_config.h"
++#if defined(CONFIG_ZHAOXI_BES_AUDIO) && defined(CONFIG_NETDB_DNSCLIENT)
++#include <nuttx/net/dns.h>
++#include <sys/socket.h>
++#endif
++
+ 
+ #include "core/agent_loop.h"
+ #include "core/message_bus.h"
+@@ -522,6 +527,11 @@
+     tzset();
+ #endif
+     BOOT_LOG(&t0, "P0", "timezone set");
++#if defined(CONFIG_ZHAOXI_BES_AUDIO) && defined(CONFIG_NETDB_DNSCLIENT)
++    /* Keep the BSP's dual-stack ABI, but this product uses IPv4 DHCP.
++     * getaddrinfo(AF_INET) alone does not suppress AAAA queries in NuttX. */
++    dns_set_queryfamily(AF_INET);
++#endif
+ #ifdef CONFIG_ZHAOXI_BES_AUDIO
+     extern int zhaoxi_clock_init(void);
+     int clock_result = zhaoxi_clock_init();

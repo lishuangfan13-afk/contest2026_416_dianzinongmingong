@@ -1,0 +1,7 @@
+{
+  "board_operations": false,
+  "tests": {
+    "test_network_readiness": "PASS: station-only readiness, stale/down IP rejection, SoftAP exclusion, loopback/zero IP rejection and getifaddrs failure. Fixture only.",
+    "test_tcp_connect": "PASS: TCP immediate success, SO_ERROR refusal, timeout, EINTR remaining budget, DNS failure and descriptor cleanup. POSIX boundary fixture only."
+  }
+}

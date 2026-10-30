@@ -18,7 +18,7 @@
   脚本不会自动停止后台 Agent；NSH 提示符不代表后台没有 Agent。
   部署完成后运行 ai_agent --headless &，重新加载业务 Skill 和 cron.json。
 
-  旧版固件可能使用 /data/ai_agent，新源码默认 /data/agent。
+  当前实板固件使用持久存储 /emmc/zhaoxi；旧版可能使用 /data/ai_agent 或 /data/agent。
   建议按实际配置显式传入 -BaseDir；auto 仅用于已有单一数据目录。
   若 /data 使用 tmpfs，板子重启/烧录后需重新部署。
 #>
@@ -28,8 +28,8 @@ param(
     [string]$Port = 'COM3',
     [int]$Baud = 921600,
     [string]$AssetsDir = '',
-    [ValidateSet('auto', '/data/agent', '/data/ai_agent')]
-    [string]$BaseDir = 'auto',
+    [ValidateSet('auto', '/emmc/zhaoxi', '/data/agent', '/data/ai_agent')]
+    [string]$BaseDir = '/emmc/zhaoxi',
     [switch]$NoVerify
 )
 
@@ -270,6 +270,13 @@ try {
     }
     Write-Host "目标数据根目录: $BaseDir"
 
+    if ($BaseDir -eq '/emmc/zhaoxi') {
+        Send-Nsh $sp 'mount' | Out-Null
+        if ($Script:Buffer.ToString() -notmatch '/emmc type fatfs') {
+            Fail '持久存储 /emmc 未挂载，停止部署；不会格式化设备。'
+        }
+    }
+
     # 构建文件映射
     $FileMap = [ordered]@{}
     foreach ($name in $AssetNames) {
@@ -277,8 +284,19 @@ try {
     }
 
     # 确保目录存在（目录已存在时报 EEXIST=17，属预期，静默放行）
-    foreach ($dir in @('/data', $BaseDir, "$BaseDir/config", "$BaseDir/memory", "$BaseDir/memory/daily", "$BaseDir/skills")) {
+    foreach ($dir in @($BaseDir, "$BaseDir/config", "$BaseDir/memory", "$BaseDir/memory/daily", "$BaseDir/skills", "$BaseDir/sessions")) {
         Send-Nsh $sp "mkdir $dir" 5000 'failed: 17' | Out-Null
+    }
+
+    # These two assets are initial defaults, not updates to user data.
+    # Existing reminders and long-term memory must survive an asset refresh.
+    foreach ($name in @('MEMORY.md', 'cron.json')) {
+        $remote = $FileMap[$name]
+        Send-Nsh $sp "ls $remote" 5000 'failed: 2' | Out-Null
+        if ($Script:Buffer.ToString() -notmatch '(?m)^nsh:') {
+            Write-Host "保留已有用户数据: $remote"
+            $FileMap.Remove($name)
+        }
     }
 
     # 逐文件部署 + 校验，校验失败的文件自动重试（921600 串口偶有单比特传输错误，
@@ -332,7 +350,7 @@ try {
     }
 
     Write-Host "`n全部 $($AssetNames.Count) 个核心资产部署完成。现在可以在 nsh> 启动 ai_agent --headless &，重新加载业务 Skill 和提醒列表。"
-    Write-Host "注意：若 /data 为 tmpfs，板子重启后需重新运行本脚本。"
+    Write-Host "当前 /emmc/zhaoxi 用于持久保存。历史固件若使用 tmpfs，重启后资产会丢失。"
 } finally {
     if ($sp.IsOpen) { $sp.Close() }
 }

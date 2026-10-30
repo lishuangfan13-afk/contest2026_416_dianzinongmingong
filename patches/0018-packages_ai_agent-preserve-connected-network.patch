@@ -1,0 +1,27 @@
+--- a/src/agent_main.c
++++ b/src/agent_main.c
+@@ -153,7 +153,7 @@
+     (void)arg;
+     syslog(LOG_INFO, "[%s] Network watcher started\n", TAG);
+ 
+-    network_wifi_reconnect();
++    if (!network_is_connected()) network_wifi_reconnect();
+ 
+     if (network_wait_connected(30000) == OK) {
+         syslog(LOG_INFO, "[%s] Network connected: %s\n", TAG, network_get_ip());
+--- a/src/infra/network_manager.c
++++ b/src/infra/network_manager.c
+@@ -847,8 +847,11 @@
+         return ERROR;
+     }
+     usleep(2000000);
+-    snprintf(cmd, sizeof(cmd), "renew %s", dev);
+-    if (system(cmd) != 0) return ERROR;
++    /* BES performs DHCP inside its synchronous association call. */
++    if (!network_is_connected()) {
++        snprintf(cmd, sizeof(cmd), "renew %s", dev);
++        if (system(cmd) != 0) return ERROR;
++    }
+ 
+     /* Persist credentials.
+      * P2: always write the PSK slot — even when pass is empty — so that

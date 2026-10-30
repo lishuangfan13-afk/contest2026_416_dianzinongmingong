@@ -1,0 +1,252 @@
+/* SPDX-License-Identifier: Apache-2.0
+ * BES1700 AP direct PCM adapter, using the HAL ABI verified by P27/P30.
+ * It deliberately bypasses audio_fake and the absent media service.
+ */
+#include "voice/audio_capture.h"
+#include "voice/audio_playback.h"
+#include <errno.h>
+#include <pthread.h>
+#include <stdatomic.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+#include <unistd.h>
+
+extern int codec_int_open(void), codec_int_close(void);
+extern int codec_int_stream_open(unsigned), codec_int_stream_close(unsigned);
+extern int codec_int_stream_setup(unsigned, const void *);
+extern int codec_int_stream_start(unsigned), codec_int_stream_stop(unsigned);
+extern void hal_codec_dac_mute(int);
+extern int codec_int_stream_set_chan_vol(unsigned, unsigned, unsigned);
+extern int hal_codec_get_dac_volume(unsigned);
+extern unsigned analog_codec_get_dac_dev(void);
+extern uint8_t hal_dma_get_chan(unsigned, unsigned);
+extern int hal_dma_start(const void *), hal_dma_chan_busy(uint8_t);
+extern unsigned hal_dma_cancel(uint8_t);
+extern void hal_dma_free_chan(uint8_t);
+extern void hal_dma_sync_for_cpu(const void *, unsigned);
+extern void hal_dma_sync_for_device(const void *, unsigned);
+
+/* Exact layout used by the best1700 prebuilt HAL in the verified BSP. */
+struct codec_config {
+    uint32_t bits, rate, channels, map;
+    uint8_t dma_volume, path, pad[2];
+    uint32_t flags;
+};
+struct dma_config {
+    uint8_t channel, burst;
+    uint16_t count;
+    uint8_t src_width, dst_width, src_burst, dst_burst, flow, src_periph, dst_periph, pad;
+    uint32_t src, dst, handler, start;
+};
+_Static_assert(sizeof(struct codec_config) == 24, "BES codec ABI");
+_Static_assert(sizeof(struct dma_config) == 28, "BES DMA ABI");
+
+struct completion { atomic_bool done; unsigned remain, error; };
+static struct completion completion[2];
+static pthread_mutex_t owner_lock = PTHREAD_MUTEX_INITIALIZER;
+static int owner = -1;
+
+struct pcm_session {
+    struct dma_config dma;
+    void *allocation;
+    int16_t *buffer;
+    atomic_bool aborted;
+    unsigned direction, phase, rate;
+    uint8_t channel;
+};
+struct audio_capture { struct pcm_session pcm; float previous, filtered; };
+struct audio_playback { struct pcm_session pcm; };
+
+static unsigned milliseconds(void)
+{
+    struct timespec t;
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    return (unsigned)t.tv_sec * 1000u + (unsigned)t.tv_nsec / 1000000u;
+}
+
+static void capture_done(uint8_t ch, unsigned remain, unsigned error, void *next)
+{
+    (void)ch; (void)next;
+    completion[1].remain = remain; completion[1].error = error;
+    atomic_store(&completion[1].done, true);
+}
+static void playback_done(uint8_t ch, unsigned remain, unsigned error, void *next)
+{
+    (void)ch; (void)next;
+    completion[0].remain = remain; completion[0].error = error;
+    atomic_store(&completion[0].done, true);
+}
+
+static void close_session(struct pcm_session *s)
+{
+    if (!s) return;
+    if (s->direction == 0 && s->phase >= 2) hal_codec_dac_mute(1);
+    if (s->channel != 255) hal_dma_cancel(s->channel);
+    if (s->phase >= 3) codec_int_stream_stop(s->direction);
+    if (s->phase >= 2) codec_int_stream_close(s->direction);
+    if (s->phase >= 1) codec_int_close();
+    if (s->channel != 255) hal_dma_free_chan(s->channel);
+    free(s->allocation);
+    s->allocation = NULL; s->channel = 255; s->phase = 0;
+    pthread_mutex_lock(&owner_lock);
+    if (owner == (int)s->direction) owner = -1;
+    pthread_mutex_unlock(&owner_lock);
+}
+
+static int open_session(struct pcm_session *s, unsigned direction, unsigned rate)
+{
+    memset(s, 0, sizeof(*s));
+    s->direction = direction; s->channel = 255; s->rate = rate;
+    pthread_mutex_lock(&owner_lock);
+    if (owner != -1) { pthread_mutex_unlock(&owner_lock); return -EBUSY; }
+    owner = (int)direction;
+    pthread_mutex_unlock(&owner_lock);
+    s->allocation = malloc(3200 + 64);
+    if (!s->allocation) { close_session(s); return -ENOMEM; }
+    s->buffer = (int16_t *)(((uintptr_t)s->allocation + 63) & ~(uintptr_t)63);
+    memset(s->buffer, 0, 3200);
+    int result = codec_int_open();
+    if (result) goto failed;
+    s->phase = 1;
+    result = codec_int_stream_open(direction);
+    if (result) goto failed;
+    s->phase = 2;
+    struct codec_config config = {16, rate, 1, direction ? 4096 : 1,
+                                  direction ? 33 : 3, direction ? 1 : 0, {0, 0}, 0};
+    result = codec_int_stream_setup(direction, &config);
+    if (result) goto failed;
+    if (!direction) {
+        hal_codec_dac_mute(1);
+    }
+    s->channel = hal_dma_get_chan(direction ? 70 : 71, 0);
+    if (s->channel == 255) { result = -EBUSY; goto failed; }
+    s->dma = (struct dma_config){s->channel, 0, 0, 1, 1, 1, 1,
+                                direction ? 2 : 1, direction ? 70 : 0,
+                                direction ? 0 : 71, 0, 0, 0,
+                                (uint32_t)(uintptr_t)(direction ? capture_done : playback_done), 0};
+    printf("BESPCM open direction=%u rate=%u dma=%u real_hal=1\n", direction, rate, s->channel);
+    return 0;
+failed:
+    close_session(s);
+    return result < 0 ? result : -EIO;
+}
+
+static int start_session(struct pcm_session *s)
+{
+    if (s->phase == 3) return 0;
+    if (s->phase != 2) return -EINVAL;
+    int result = codec_int_stream_start(s->direction);
+    if (result) return -EIO;
+    s->phase = 3;
+    if (s->direction) {
+        usleep(100000);
+        volatile uint32_t *codec = (volatile uint32_t *)0x50300000;
+        codec[1] |= 3; usleep(1000); codec[1] &= ~3u;
+    } else {
+        /* BSP volume 16 is approximately -36 dB, not unity gain.
+         * Find 0 dB through the public volume-table API, then apply it after
+         * start just as in the audible P30 diagnostic. */
+        unsigned level;
+        for (level = 0; level <= 127; level++) {
+            if (hal_codec_get_dac_volume(level) == 0) break;
+        }
+        if (level > 127) return -ENOTSUP;
+        hal_codec_dac_mute(0);
+        result = codec_int_stream_set_chan_vol(0, 1, level);
+        if (result) return -EIO;
+        unsigned gain = *(volatile unsigned *)0x503000b4 & 0xfffff;
+        printf("BESPCM playback volume_index=%u gain_code=%u expected=16384\n", level, gain);
+        if (gain != 16384) return -EIO;
+    }
+    return 0;
+}
+
+static int transfer(struct pcm_session *s, unsigned samples)
+{
+    if (atomic_load(&s->aborted)) return -ECANCELED;
+    s->dma.count = samples;
+    if (s->direction) s->dma.dst = (uint32_t)(uintptr_t)s->buffer;
+    else s->dma.src = (uint32_t)(uintptr_t)s->buffer;
+    struct completion *done = &completion[s->direction];
+    done->remain = done->error = ~0u; atomic_store(&done->done, false);
+    hal_dma_sync_for_device(s->buffer, samples * 2);
+    if (hal_dma_start(&s->dma)) return -EIO;
+    unsigned start = milliseconds();
+    while (!atomic_load(&done->done)) {
+        if (atomic_load(&s->aborted)) { hal_dma_cancel(s->channel); return -ECANCELED; }
+        if (milliseconds() - start > 750) { hal_dma_cancel(s->channel); return -ETIMEDOUT; }
+        usleep(500);
+    }
+    if (done->remain || done->error || hal_dma_chan_busy(s->channel)) return -EIO;
+    if (s->direction) hal_dma_sync_for_cpu(s->buffer, samples * 2);
+    return 0;
+}
+
+audio_capture_t *audio_capture_open(const char *path, unsigned rate, unsigned channels, unsigned bits)
+{
+    (void)path;
+    if (rate != 16000 || channels != 1 || bits != 16) { errno = ENOTSUP; return NULL; }
+    audio_capture_t *cap = calloc(1, sizeof(*cap));
+    if (!cap) return NULL;
+    int result = open_session(&cap->pcm, 1, rate);
+    if (result) { free(cap); errno = -result; return NULL; }
+    return cap;
+}
+int audio_capture_start(audio_capture_t *cap) { return cap ? start_session(&cap->pcm) : -EINVAL; }
+int audio_capture_read(audio_capture_t *cap, void *buffer, size_t length)
+{
+    if (!cap || !buffer || length < 2 || length % 2 || cap->pcm.phase != 3) return -EINVAL;
+    unsigned samples = length / 2; if (samples > 1600) samples = 1600;
+    int result = transfer(&cap->pcm, samples);
+    if (result) return result;
+    int16_t *out = buffer;
+    for (unsigned i = 0; i < samples; i++) {
+        float input = cap->pcm.buffer[i];
+        cap->filtered = input - cap->previous + 0.96f * cap->filtered;
+        cap->previous = input;
+        float value = cap->filtered * 100.0f;
+        if (value > 30000) value = 30000;
+        if (value < -30000) value = -30000;
+        out[i] = (int16_t)value;
+    }
+    return samples * 2;
+}
+int audio_capture_abort(audio_capture_t *cap)
+{
+    if (!cap) return -EINVAL;
+    atomic_store(&cap->pcm.aborted, true);
+    return 0;
+}
+void audio_capture_close(audio_capture_t *cap) { if (cap) { close_session(&cap->pcm); free(cap); } }
+
+audio_playback_t *audio_playback_open(const char *path, unsigned rate, unsigned channels, unsigned bits)
+{
+    (void)path;
+    if ((rate != 16000 && rate != 24000 && rate != 48000) || channels != 1 || bits != 16 || analog_codec_get_dac_dev() != 4) {
+        errno = ENOTSUP; return NULL;
+    }
+    audio_playback_t *pb = calloc(1, sizeof(*pb));
+    if (!pb) return NULL;
+    int result = open_session(&pb->pcm, 0, rate);
+    if (result) { free(pb); errno = -result; return NULL; }
+    return pb;
+}
+int audio_playback_write(audio_playback_t *pb, const void *buffer, size_t length)
+{
+    if (!pb || !buffer || length % 2) return -EINVAL;
+    int result = start_session(&pb->pcm); if (result) return result;
+    const int16_t *in = buffer;
+    size_t used = 0;
+    while (used < length / 2) {
+        unsigned samples = length / 2 - used; if (samples > 1600) samples = 1600;
+        for (unsigned i = 0; i < samples; i++) pb->pcm.buffer[i] = in[used+i] / 4;
+        result = transfer(&pb->pcm, samples); if (result) return result;
+        used += samples;
+    }
+    return (int)length;
+}
+void audio_playback_stop(audio_playback_t *pb) { if (pb) atomic_store(&pb->pcm.aborted, true); }
+void audio_playback_close(audio_playback_t *pb) { if (pb) { close_session(&pb->pcm); free(pb); } }
