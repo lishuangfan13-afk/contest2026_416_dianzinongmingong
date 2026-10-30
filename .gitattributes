@@ -1,0 +1,4 @@
+# Keep the bytes used by the fixed diagnostic source checks consistent on Windows and Linux.
+/diagnostics/bes_audio/** text eol=lf
+/tools/bes_audio/*.py text eol=lf
+/firmware/*.tar.xz binary

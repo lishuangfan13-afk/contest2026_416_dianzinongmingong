@@ -1,0 +1,69 @@
+{
+  "date": "2026-10-30",
+  "historical_test_date": "2026-10-27",
+  "board": "BES2800BP V1.2",
+  "base_image": "nuttx_ap_p17_original_for_recovery.bin",
+  "layout": {
+    "image_size": 957832,
+    "base_sha256": "c92cc6515ba9cde2414b0025574efc8774c39884a88739020dace81f22160cc9",
+    "flash_address": 806944768,
+    "runtime_base": 270073856,
+    "entry_address": 270299520,
+    "capacity": 1876
+  },
+  "bundle": {
+    "path": "firmware/bes_audio_diagnostics_20261027.tar.xz",
+    "size": 584884,
+    "sha256": "eeea95742b423b0580e068af40e307d68ff66483beaa8303342f0a225f7fa3a7"
+  },
+  "bundle_members": {
+    "base_symbols.elf": {
+      "size": 558832,
+      "sha256": "d70e051fc4f29e4513e677e12c776b5741f28c75e609fb9fd10b1375401872c9"
+    },
+    "nuttx_ap_p17_original_for_recovery.bin": {
+      "size": 957832,
+      "sha256": "c92cc6515ba9cde2414b0025574efc8774c39884a88739020dace81f22160cc9"
+    },
+    "nuttx_ap_realmic_p27_20261027.bin": {
+      "size": 957832,
+      "sha256": "e24a91fd81de392c8f523f42d048e34fac33a6fb1426725454a7a4586a16b74d"
+    },
+    "nuttx_ap_dacprobe_p30_20261027.bin": {
+      "size": 957832,
+      "sha256": "f1067aa32ae2b088eb95f1e3034d8892bb3b675df5f44d562a4eec8c0ea8d9e7"
+    }
+  },
+  "sources": {
+    "diagnostics/bes_audio/pdm_capture_p27.c": {
+      "size": 5113,
+      "sha256": "268a3329b2b13f6b7cde56442ba58cd7c039436d2364c2cc0121bafe4454a82f"
+    },
+    "diagnostics/bes_audio/speaker_tone_p30.c": {
+      "size": 4460,
+      "sha256": "7cebb0b6d3e601e3e9b417b7ea6d3f2d10be06d38c54bc837f66f118d64dc01b"
+    },
+    "diagnostics/bes_audio/probe.ld": {
+      "size": 163,
+      "sha256": "ebaa0586c9d1b0416350c7abfbed7ffa15234365997635ea1e9cc3ad000246a8"
+    }
+  },
+  "variants": {
+    "p27": {
+      "source": "diagnostics/bes_audio/pdm_capture_p27.c",
+      "image": "nuttx_ap_realmic_p27_20261027.bin",
+      "sha256": "e24a91fd81de392c8f523f42d048e34fac33a6fb1426725454a7a4586a16b74d",
+      "payload_size": 1444,
+      "payload_sha256": "1079c9ef1856b1f8639e86b30d9bb677ab3f28538993c8f1d5dffd17c48acc85"
+    },
+    "p30": {
+      "source": "diagnostics/bes_audio/speaker_tone_p30.c",
+      "image": "nuttx_ap_dacprobe_p30_20261027.bin",
+      "sha256": "f1067aa32ae2b088eb95f1e3034d8892bb3b675df5f44d562a4eec8c0ea8d9e7",
+      "payload_size": 1332,
+      "payload_sha256": "c606f0f223a011791d9e30f18f3a7f59190cf81b00ce4d5df342ddb8b131a7ed"
+    }
+  },
+  "toolchain": "arm-none-eabi-gcc (GCC) 13.4.0",
+  "verification_scope": "Historical images passed separate physical microphone and tone tests. This archive does not claim a unified record/playback application."
+}

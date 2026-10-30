@@ -1,0 +1,110 @@
+{
+  "board_operations": false,
+  "commands": [
+    {
+      "command": [
+        "${ARM_TOOLCHAIN}/arm-none-eabi-gcc",
+        "--version"
+      ],
+      "returncode": 0,
+      "stdout": "arm-none-eabi-gcc (GCC) 13.4.0\nCopyright (C) 2023 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "${ARM_TOOLCHAIN}/arm-none-eabi-gcc",
+        "-mthumb",
+        "-mcpu=cortex-m33",
+        "-Os",
+        "-ffreestanding",
+        "-fno-builtin",
+        "-fno-unwind-tables",
+        "-fno-asynchronous-unwind-tables",
+        "-nostdlib",
+        "-Wl,--build-id=none",
+        "-Wl,--just-symbols=./out/bes_audio/baseline/base_symbols.elf",
+        "-Wl,-T,./diagnostics/bes_audio/probe.ld",
+        "./diagnostics/bes_audio/pdm_capture_p27.c",
+        "-o",
+        "./out/bes_audio/p27.elf"
+      ],
+      "returncode": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "${ARM_TOOLCHAIN}/arm-none-eabi-objcopy",
+        "-O",
+        "binary",
+        "--only-section=.text",
+        "./out/bes_audio/p27.elf",
+        "./out/bes_audio/p27.payload.bin"
+      ],
+      "returncode": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "${ARM_TOOLCHAIN}/arm-none-eabi-gcc",
+        "-mthumb",
+        "-mcpu=cortex-m33",
+        "-Os",
+        "-ffreestanding",
+        "-fno-builtin",
+        "-fno-unwind-tables",
+        "-fno-asynchronous-unwind-tables",
+        "-nostdlib",
+        "-Wl,--build-id=none",
+        "-Wl,--just-symbols=./out/bes_audio/baseline/base_symbols.elf",
+        "-Wl,-T,./diagnostics/bes_audio/probe.ld",
+        "./diagnostics/bes_audio/speaker_tone_p30.c",
+        "-o",
+        "./out/bes_audio/p30.elf"
+      ],
+      "returncode": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "${ARM_TOOLCHAIN}/arm-none-eabi-objcopy",
+        "-O",
+        "binary",
+        "--only-section=.text",
+        "./out/bes_audio/p30.elf",
+        "./out/bes_audio/p30.payload.bin"
+      ],
+      "returncode": 0,
+      "stdout": "",
+      "stderr": ""
+    }
+  ],
+  "artifacts": [
+    {
+      "variant": "p27",
+      "filename": "nuttx_ap_realmic_p27_20261027.bin",
+      "size": 957832,
+      "sha256": "e24a91fd81de392c8f523f42d048e34fac33a6fb1426725454a7a4586a16b74d",
+      "matches_verified_image": true
+    },
+    {
+      "variant": "p30",
+      "filename": "nuttx_ap_dacprobe_p30_20261027.bin",
+      "size": 957832,
+      "sha256": "f1067aa32ae2b088eb95f1e3034d8892bb3b675df5f44d562a4eec8c0ea8d9e7",
+      "matches_verified_image": true
+    }
+  ],
+  "archive_verified": true,
+  "compiler": "arm-none-eabi-gcc (GCC) 13.4.0",
+  "result": "both rebuilt images match the archived verified images byte for byte",
+  "date": "2026-10-30",
+  "hardware_tests": "No new physical board test in this source rebuild.",
+  "unit_tests": {
+    "command": "python -m unittest discover -s tools/bes_audio -p 'test_*.py' -v",
+    "passed": 4,
+    "failed": 0
+  }
+}
