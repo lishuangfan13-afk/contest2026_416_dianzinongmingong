@@ -1,0 +1,48 @@
+--- a/src/agent_main.c
++++ b/src/agent_main.c
+@@ -29,6 +29,7 @@
+ 
+ #include <sys/mount.h>
+ #include <sys/stat.h>
++#include <sys/statfs.h>
+ #include <unistd.h>
+ 
+ #include "agent_compat.h"
+@@ -496,18 +497,29 @@
+ 
+     /* ── Phase 0: Storage Bootstrapping (Auto-mount & Mkdir) ── */
+ 
++#ifdef CONFIG_ZHAOXI_BES_AUDIO
++    /* The physical product must never confirm saves into a volatile fallback. */
++    struct statfs storage;
++    if (statfs("/emmc", &storage) != 0 || storage.f_type != FATFS_SUPER_MAGIC) {
++        printf("ZHAOXI: persistent exFAT storage is not mounted; Agent not started.\n");
++        return ERROR;
++    }
++#else
+     struct stat st;
+     if (stat("/data", &st) != 0) {
+-        syslog(LOG_INFO, "[%s] Mounting /data as tmpfs for simulation...\n", TAG);
+         mount(NULL, "/data", "tmpfs", 0, NULL);
+     }
+-
+-    /* Ensure directory structure exists (No more manual mkdir needed!) */
+-    mkdir("/data/agent", 0755);
+-    mkdir("/data/agent/config", 0755);
+-    mkdir("/data/agent/memory", 0755);
+-    mkdir("/data/agent/sessions", 0755);
+-    mkdir("/data/agent/skills", 0755);
++#endif
++    const char *directories[] = {
++        AGENT_DATA_DIR, AGENT_CONFIG_DIR, AGENT_MEMORY_DIR,
++        AGENT_SESSION_DIR, AGENT_DATA_DIR "/skills"
++    };
++    for (size_t i = 0; i < sizeof(directories) / sizeof(directories[0]); i++) {
++        if (mkdir(directories[i], 0755) != 0 && errno != EEXIST) {
++            printf("ZHAOXI: cannot prepare data directory (errno=%d).\n", errno);
++            return ERROR;
++        }
++    }
+     BOOT_LOG(&t0, "P0", "storage ready");
+ 
+     /* Memory info */

@@ -6,3 +6,19 @@ config EXAMPLES_ZHAOXI
         Screen-free entry for questions, notes, tasks and reminders.
         Uses the existing AI Agent message bus and voice output.
         Requires patches/0008 for bus readiness and --headless startup.
+
+config ZHAOXI_BES_AUDIO
+    bool "Use the verified BES direct PCM paths"
+    default n
+    depends on EXAMPLES_ZHAOXI && ARCH_CORTEXM55
+    ---help---
+        Direct PDM capture and internal DAC playback for the BES2800BP
+        board. Requires the matched best1700 HAL ABI and patch 0010.
+
+config ZHAOXI_MIMO_VOICE
+    bool "Use Xiaomi MiMo ASR and TTS"
+    default n
+    depends on EXAMPLES_ZHAOXI && CRYPTO_MBEDTLS && NETUTILS_CJSON
+    ---help---
+        Use the runtime MiMo key for cloud speech via chat/completions.
+        Requires patch 0011. No credentials are embedded in the image.

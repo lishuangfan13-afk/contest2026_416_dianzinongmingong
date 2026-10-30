@@ -1,0 +1,109 @@
+From: lishuangfan13-afk <lishuangfan13@gmail.com>
+Subject: [PATCH] ai_agent: route registered MiMo speech provider correctly
+
+Keep non-Volc ASR on its batch interface, select the product MiMo provider,
+and propagate PCM playback failures instead of reporting speech success.
+The product's MiMo PCM buffer holds up to sixteen seconds of input.
+Based on packages_ai_agent e65550f18759f086d7f544edcf17d1e31223244f.
+
+diff --git a/src/voice/voice_asr.c b/src/voice/voice_asr.c
+--- a/src/voice/voice_asr.c
++++ b/src/voice/voice_asr.c
+@@ -113,6 +113,7 @@
+         return NULL;
+     }
+ 
++    if (strcmp(s_active->name, "volcengine") != 0) return NULL;
+     volc_asr_stream_t* inner = volc_asr_stream_open();
+ 
+     if (!inner) {
+diff --git a/src/voice/voice_tts.c b/src/voice/voice_tts.c
+--- a/src/voice/voice_tts.c
++++ b/src/voice/voice_tts.c
+@@ -110,6 +110,11 @@
+         return -ENODEV;
+     }
+ 
++#ifdef CONFIG_ZHAOXI_MIMO_VOICE
++    extern int zhaoxi_mimo_tts_stream(const char *, voice_tts_chunk_cb, void *);
++    if (strcmp(s_active->name, "mimo") == 0)
++        return zhaoxi_mimo_tts_stream(text, cb, user_data);
++#endif
+     return volc_tts_ws_synthesize_stream(text,
+         (volc_tts_chunk_cb)cb, user_data);
+ }
+diff --git a/src/voice/voice_channel.c b/src/voice/voice_channel.c
+--- a/src/voice/voice_channel.c
++++ b/src/voice/voice_channel.c
+@@ -555,6 +555,7 @@
+ 
+ static struct timespec s_tts_start;
+ static int s_tts_first_chunk;
++static int s_tts_playback_error;
+ static struct timespec s_asr_done_ts;
+ 
+ static void tts_stream_cb(const unsigned char* pcm_data,
+@@ -577,7 +578,11 @@
+                 TAG, ms);
+             s_tts_first_chunk = 1;
+         }
+-        audio_playback_write(pb, pcm_data, pcm_len);
++        int written = audio_playback_write(pb, pcm_data, pcm_len);
++        if (written < 0 || (size_t)written != pcm_len) {
++            s_tts_playback_error = written < 0 ? written : -EIO;
++            s_voice.tts_abort = 1;
++        }
+     }
+ 
+     (void)is_last;
+@@ -603,9 +608,18 @@
+     if (!s_backends_registered) {
+         volc_tts_register();
+         volc_asr_register();
++#ifdef CONFIG_ZHAOXI_MIMO_VOICE
++        extern int zhaoxi_mimo_register(void);
++        int rc = zhaoxi_mimo_register();
++        if (rc) return rc;
++#endif
+         s_backends_registered = 1;
+     }
+ 
++#ifdef CONFIG_ZHAOXI_MIMO_VOICE
++    voice_asr_set_backend("mimo");
++    voice_tts_set_backend("mimo");
++#endif
+     return 0;
+ }
+ 
+@@ -1044,6 +1058,7 @@
+ 
+     clock_gettime(CLOCK_MONOTONIC, &s_tts_start);
+     s_tts_first_chunk = 0;
++    s_tts_playback_error = 0;
+ 
+     if (s_asr_done_ts.tv_sec > 0) {
+         long llm_ms = (s_tts_start.tv_sec - s_asr_done_ts.tv_sec) * 1000
+@@ -1081,6 +1096,8 @@
+         + (tts_net.tv_nsec - s_tts_start.tv_nsec) / 1000000;
+     syslog(LOG_INFO, "[%s] TTS network done: %ldms\n", TAG, net_ms);
+ 
++    if (!ret && s_tts_playback_error) ret = s_tts_playback_error;
++    if (!ret && s_voice.tts_abort) ret = -ECANCELED;
+     /* Unregister active playback */
+     pthread_mutex_lock(&s_voice.lock);
+     s_voice.tts_pb = NULL;
+diff --git a/include/agent_config.h b/include/agent_config.h
+--- a/include/agent_config.h
++++ b/include/agent_config.h
+@@ -368,7 +368,11 @@
+  * 128KB PCM ≈ 4s at 16kHz/16bit/mono; enough for typical TTS output.
+  * Recording uses the same cap; 128KB ≈ 4s of audio which is fine for
+  * short voice commands.  For longer recordings, increase as needed. */
++#ifdef CONFIG_ZHAOXI_MIMO_VOICE
++#define AGENT_VOICE_PCM_BUF_SIZE (512 * 1024)
++#else
+ #define AGENT_VOICE_PCM_BUF_SIZE (128 * 1024)
++#endif
+ #define AGENT_VOICE_RESP_BUF_SIZE (128 * 1024)
+ #define AGENT_VOICE_B64_BUF_SIZE (96 * 1024)
+ 

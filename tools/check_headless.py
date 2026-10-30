@@ -22,6 +22,7 @@ def main():
     parser.add_argument("--agent-root", type=Path)
     parser.add_argument("--cc", default="cc")
     parser.add_argument("--arm-prefix")
+    parser.add_argument("--cjson-root", type=Path)
     options = parser.parse_args()
     manifest = ET.parse(ROOT / "contest2026_416_dianzinongmingong.xml")
     for link in manifest.iter("linkfile"):
@@ -64,6 +65,13 @@ def main():
              str(ROOT / "tests/headless/test_bus_shutdown.c"), "-pthread", "-o", str(shutdown_test)])
         run([str(shutdown_test)])
         report["shutdown"] = "passed: 40 teardown/re-init cycles with concurrent producers or consumers"
+        lifecycle_source = agent / "src/infra/task_lifecycle.c"
+        if lifecycle_source.is_file():
+            lifecycle_test = output / "test_lifecycle"
+            run([options.cc, *flags, *sanitizers, "-I" + str(agent / "src"),
+                 str(lifecycle_source), str(ROOT / "tests/headless/test_lifecycle.c"),
+                 "-pthread", "-o", str(lifecycle_test)])
+            report["worker_lifecycle"] = run([str(lifecycle_test)]).strip()
         for core_only in (True, False):
             # The native loader uses 128-byte paths; use a short runtime root.
             with tempfile.TemporaryDirectory(prefix="zhaoxi-skills-") as temporary:
@@ -76,6 +84,20 @@ def main():
                      "-o", str(executable)])
                 run([str(executable)])
         report["skill_profile"] = "passed: core-only discovery, legacy file exclusion, deployed asset preservation, standard profile and summary bounds"
+        cjson = options.cjson_root or agent.parents[1] / "apps/netutils/cjson/cJSON"
+        if (cjson / "cJSON.c").is_file():
+            with tempfile.TemporaryDirectory(prefix="zhaoxi-cron-") as temporary:
+                data = Path(temporary) / "data"
+                executable = Path(temporary) / "test_cron"
+                run([options.cc, *flags, *sanitizers, *include,
+                     "-include", str(ROOT / "tests/headless/cron_support.h"),
+                     "-I" + str(cjson), '-DAGENT_DATA_DIR="' + str(data) + '"',
+                     str(agent / "src/infra/cron_service.c"),
+                     str(ROOT / "tests/headless/test_cron_persistence.c"),
+                     str(cjson / "cJSON.c"), "-pthread", "-lm", "-o", str(executable)])
+                report["cron_persistence"] = run([str(executable)]).strip().splitlines()[-1]
+        else:
+            report["cron_persistence"] = "not run: cJSON source missing; pass --cjson-root"
         if options.arm_prefix:
             target = output / "zhaoxi_arm.o"
             run([options.arm_prefix + "gcc", "-mthumb", "-mcpu=cortex-m55", *flags, *include,

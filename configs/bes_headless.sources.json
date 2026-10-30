@@ -1,0 +1,70 @@
+{
+  "nuttx_commit": "76354c637858ecb0aa4601629327acb6f44a26bb",
+  "apps_commit": "550cd3ba60a03f8ebf9ac7b72f6eed6aea3bedbe",
+  "vendor_bes_local_commit": "9d0bcadc9dc204487c6bc0e95a310020da91a1f7",
+  "vendor_local_commit_is_publicly_fetchable": false,
+  "agent_commit": "e65550f18759f086d7f544edcf17d1e31223244f",
+  "bsp_archives": [
+    {
+      "path": "vendor/bes/boards/best1700_ep/aos_evb/configs/apaudio3/libnx_bestbsp_ap.a",
+      "size": 5509456,
+      "sha256": "1de52dd3ec2af4069eec824bcd3ce8f8e1b535bedeaadc2329bbe55f8e32d9b2"
+    },
+    {
+      "path": "vendor/bes/boards/best1700_ep/aos_evb/configs/apaudio3/libbesboard_apaudio3.a",
+      "size": 1777734,
+      "sha256": "7b2845b39733b8945b4570ab660132c863f18d04ba88d2f0fe516c853da8dfcf"
+    },
+    {
+      "path": "vendor/bes/boards/best1700_ep/aos_evb/configs/apaudio3/libbeschip_apaudio3.a",
+      "size": 193196,
+      "sha256": "ee11b17a93725b2f4e195958e0ffa7f172dad01c1686130c4fabbf5c225982d7"
+    }
+  ],
+  "dependencies": [
+    {
+      "repo": "apps_netutils_cjson_cJSON",
+      "sha": "48ab0a605ddab58ae91c8bc4a6c47191502a2971",
+      "archive_sha256": "5f6acabc60754954d99e214a2ebfa244042d09b140c60da0bcaa212ad180224d",
+      "size": 354870
+    },
+    {
+      "repo": "apps_crypto_mbedtls",
+      "sha": "8dc7407815e718db0a96ac53793c9438894c33aa",
+      "archive_sha256": "8a91da0ad2b0893c8ebaeb393e243d862c60178a8070c6c2106c2f82a0d1d2a3",
+      "size": 5165932
+    },
+    {
+      "repo": "frameworks_system_topics",
+      "sha": "7b0641123a205d7012959f2efad81e1ac39a0aee",
+      "archive_sha256": "62c3f579df1cac16a3ad166a9016bfe712da2e51e5900bdeab84c70d6c70edd9",
+      "size": 16092
+    },
+    {
+      "repo": "frameworks_multimedia_media",
+      "sha": "6700872e02752527f356abd81386a6017f150ae5",
+      "archive_sha256": "01426262612241649584112c049044ba899c5383b19f8c67be21cee89f926268",
+      "size": 1064351
+    },
+    {
+      "repo": "frameworks_system_vibrator",
+      "sha": "bae02204c0af9ff7eaccf677ece6dee5af3e6ef8",
+      "archive_sha256": "6d21765c35b4c1e470fb2a221003db0d35abe48be2fa4e4ed69d6369648da647",
+      "size": 25835
+    }
+  ],
+  "fatfs": {
+    "repo": "open-vela/nuttx_fs_fatfs",
+    "revision": "6e433f195f15e0f5d8a3b170f53694b9c4dc6f4b",
+    "archive_size": 2284414,
+    "sha256": "dba20080fa02761925827742fc6bd985ba801fa99c54b7f84567aba00037d9ea"
+  },
+  "known_build": {
+    "compiler": "ARM GCC 13.4.0",
+    "cmake": "3.22.1",
+    "ninja": "1.10.1",
+    "profile": "apheadless",
+    "bsp_library_profile": "apaudio3",
+    "target": "AP at 0x30190000"
+  }
+}

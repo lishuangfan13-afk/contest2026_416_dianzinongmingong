@@ -52,6 +52,13 @@ int main(void)
     assert(zhaoxi_main(3, stop) == 0);
     assert(started == 2 && stopped == 1);
     no_message();
+    char *say[] = {"zhaoxi", "say", "speaker test"};
+    agent_msg_t spoken = {0};
+    assert(zhaoxi_main(3, say) == 0);
+    assert(message_bus_pop_outbound(&spoken, 0) == 0);
+    assert(!strcmp(spoken.channel, "voice") && !strcmp(spoken.content, "speaker test"));
+    message_bus_msg_free(&spoken);
+    no_message();
     expect(4, ask, "voice", "hello world");
     char *text[] = {"zhaoxi", "--text", "ask", "你好"};
     expect(4, text, "cli", "你好");

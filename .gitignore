@@ -13,6 +13,8 @@ out/
 *.elf
 *.hex
 *.map
+__pycache__/
+*.pyc
 
 # Editor / OS junk
 *.swp

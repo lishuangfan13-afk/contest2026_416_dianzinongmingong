@@ -4,8 +4,8 @@ function Get-ZhaoxiCoreAssets {
 }
 
 function Read-ZhaoxiAssetText([string]$Path, [string]$DataRoot) {
-    if ($DataRoot -notin @('/data/agent', '/data/ai_agent')) {
-        throw 'DataRoot must be /data/agent or /data/ai_agent.'
+    if ($DataRoot -notin @('/emmc/zhaoxi', '/data/agent', '/data/ai_agent')) {
+        throw 'DataRoot must be /emmc/zhaoxi, /data/agent or /data/ai_agent.'
     }
     $text = [System.IO.File]::ReadAllText($Path, (New-Object System.Text.UTF8Encoding($false)))
     $text = $text.Replace('{{AGENT_DATA_DIR}}', $DataRoot)

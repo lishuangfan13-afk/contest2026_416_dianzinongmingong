@@ -1,0 +1,42 @@
+{
+  "image": "nuttx_ap_headless.bin",
+  "size": 1300672,
+  "sha256": "450d7b8113f8846cfb3cd09d8dfdc4587cd55e431acce5520b218998734afc48",
+  "flash_address": "0x30190000",
+  "ntc_patch": {
+    "offset": 18364,
+    "from": "0xb955",
+    "to": "0xe011"
+  },
+  "startup_in_packaged_romfs_verified": true,
+  "persistent_data_root": "/emmc/zhaoxi",
+  "credentials_source": "runtime device config, not build options",
+  "hardware_functional_acceptance_complete": false,
+  "app_sources": {
+    "app/zhaoxi/CMakeLists.txt": "8e666cf4578f17279d7b02ced4b6e687696923b0b2953ab61e65fafc8c9e6eac",
+    "app/zhaoxi/Kconfig": "18b7407180279284da6177f1b058976da8efa116001d0ede103ff127ae0a9c5c",
+    "app/zhaoxi/Make.defs": "4b383b583ca2cac953df60dafcd5eee42ae1a1e52e448f085110960d7b006a93",
+    "app/zhaoxi/Makefile": "957b85dfcb2ca901270c85de320f8214cd10ef3b5dfc9e701724da8bca579026",
+    "app/zhaoxi/README.md": "8d49998776b96e4abfa25ae6dc264e87e27a747273762a9e76e3cc402ed24229",
+    "app/zhaoxi/bes_audio.c": "9acf416e364f5bbf1a0eee1587fa8360a19b6651f3fe31f143df4068fd683d8b",
+    "app/zhaoxi/bes_clock.c": "75966f28160828c958ea59b1444b138f032fb92ef69f02c68bbae73ee81a075b",
+    "app/zhaoxi/mimo_voice.c": "9a9cdbf637f7c4944df65dac204b4bcd42ffd5fe88605c3db3c0521516a3a3cb",
+    "app/zhaoxi/zhaoxi_main.c": "b99f819836fe0d3e6494839b0a9469cd7e5eab3fbc945a5772352068c5e0e452"
+  },
+  "patches": {
+    "0008-packages_ai_agent-headless-entry.patch": "ea6c16a65a42b0e0df8a699eafaeb1843f9e032b781e7dd572a36a15ddb02314",
+    "0009-vendor_bes-headless-startup.patch": "589084bddd252e9367a487f4faa115723a28dfb87ad3dd4e8d93c422c868cc9b",
+    "0010-packages_ai_agent-bes-pcm-build.patch": "6d17d6ed41fd2f7f6b15bc154473fe51684861b4e6b46777e1a2b7c356dcf306",
+    "0011-packages_ai_agent-mimo-voice-provider.patch": "bff45ce2b002cac42823c75c24cbc7cdb2b672e5988b539bbbbf046d3c9a52d3",
+    "0012-packages_ai_agent-headless-network-errors.patch": "b35c951c85f951f7e95e0d4196804a9be8be58d6afb342e28d7865d7ffdb2f35",
+    "0013-packages_ai_agent-persistent-storage.patch": "5f8d01fe942c809e591690b0e55e9a7144267377104a1eda51971108a68e0d12",
+    "0014-packages_ai_agent-checked-save-results.patch": "24dd52ad36d828e38acdcd9c87311ed2cf3a5250aaf8fa1f0f12990b96abf151",
+    "0015-packages_ai_agent-unique-reminder-ids.patch": "47887acb025ae5307e56de0e3e3d247999d8a4187263715bd512092e00b03a0b",
+    "0016-vendor_bes-preserve-product-storage.patch": "0a8cbcf6209743921f92e3ee122b3529ecda522a48f79c495c7d9faddf1c2d8f",
+    "0017-packages_ai_agent-core-tools-and-clock.patch": "4298ee7a869d853d0eea8c95ba00b1737e680514862b774ad5df752c1307985d",
+    "0018-packages_ai_agent-preserve-connected-network.patch": "2b1d0a9c0a4145693c3b75a65a6ce255fe333bb95327646dc012050a05b7ff47",
+    "0019-packages_ai_agent-headless-wifi-retry.patch": "ed80fa2ee6d5ff2c99e5cbbab9358e84cba80c31f25f10feb735b049b4da248a",
+    "0020-packages_ai_agent-station-readiness-and-tcp-timeout.patch": "fa41a037a0af17b3323d2eca4875337078d01963465989595532ecf78e5bdd38",
+    "0021-packages_ai_agent-single-instance-and-worker-teardown.patch": "007a15df5d1337ad8550dbf9fc8b5afe569035911d07f5a24033bfb9d0b81864"
+  }
+}

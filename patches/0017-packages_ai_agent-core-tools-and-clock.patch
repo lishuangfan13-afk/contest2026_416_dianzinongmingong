@@ -1,0 +1,46 @@
+--- a/src/agent_main.c
++++ b/src/agent_main.c
+@@ -494,6 +494,11 @@
+     tzset();
+ #endif
+     BOOT_LOG(&t0, "P0", "timezone set");
++#ifdef CONFIG_ZHAOXI_BES_AUDIO
++    extern int zhaoxi_clock_init(void);
++    int clock_result = zhaoxi_clock_init();
++    BOOT_LOG_RC(&t0, "P0", "RTC binding and restore", clock_result);
++#endif
+ 
+     /* ── Phase 0: Storage Bootstrapping (Auto-mount & Mkdir) ── */
+ 
+--- a/src/tools/tool_cron.c
++++ b/src/tools/tool_cron.c
+@@ -124,6 +124,12 @@
+ int tool_cron_add_execute(const char* input_json,
+     char* output, size_t output_size)
+ {
++#ifdef CONFIG_ZHAOXI_BES_AUDIO
++    if (time(NULL) < 1735689600) {
++        snprintf(output, output_size, "Error: clock is not synchronized; reminder not created");
++        return ERROR;
++    }
++#endif
+     cJSON* root = cJSON_Parse(input_json);
+ 
+     if (!root) {
+--- a/src/tools/tool_registry.c
++++ b/src/tools/tool_registry.c
+@@ -88,6 +88,14 @@
+ 
+ static void register_tool(const agent_tool_t* tool)
+ {
++#ifdef CONFIG_EXAMPLES_ZHAOXI
++    static const char *core[] = {"get_current_time", "read_file", "write_file", "edit_file", "list_dir", "cron_add", "cron_list", "cron_remove"};
++    bool selected = false;
++    for (size_t i = 0; i < sizeof(core) / sizeof(core[0]); i++) {
++        if (strcmp(tool->name, core[i]) == 0) selected = true;
++    }
++    if (!selected) return;
++#endif
+     if (s_tool_count >= MAX_TOOLS) {
+         syslog(LOG_ERR, "[%s] Tool registry full\n", TAG);
+         return;

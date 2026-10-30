@@ -1,0 +1,50 @@
+--- a/src/agent_main.c
++++ b/src/agent_main.c
+@@ -148,12 +148,33 @@
+  * Runs in a background thread: waits for network, then starts all
+  * network-dependent services. Main thread is NOT blocked.
+  */
++#ifdef CONFIG_EXAMPLES_ZHAOXI
++static bool headless_network_pause(unsigned seconds)
++{
++    while (seconds-- && !g_shutdown_requested) sleep(1);
++    return !g_shutdown_requested;
++}
++#endif
++
+ static void* network_watch_task(void* arg)
+ {
+     (void)arg;
+     syslog(LOG_INFO, "[%s] Network watcher started\n", TAG);
+ 
++#ifdef CONFIG_EXAMPLES_ZHAOXI
++    /* The AP shell is ready before the APC1 Wi-Fi endpoint. A failed
++     * early ifup must not permanently disable automatic connection. */
++    unsigned delay = 3;
++    while (!network_is_connected()) {
++        if (!headless_network_pause(delay)) return NULL;
++        if (!network_is_connected() && network_wifi_reconnect() != OK)
++            syslog(LOG_WARNING, "[%s] WiFi unavailable; retry in 15 seconds\n", TAG);
++        delay = 15;
++    }
++    if (g_shutdown_requested) return NULL;
++#else
+     if (!network_is_connected()) network_wifi_reconnect();
++#endif
+ 
+     if (network_wait_connected(30000) == OK) {
+         syslog(LOG_INFO, "[%s] Network connected: %s\n", TAG, network_get_ip());
+@@ -205,6 +226,13 @@
+     /* Keep thread alive to handle reconnection events */
+     while (!g_shutdown_requested) {
+         sleep(1);
++    }
++#elif defined(CONFIG_EXAMPLES_ZHAOXI)
++    /* Keep an established link intact; reconnect only after IP loss.
++     * Core Agent, cron and outbound tasks are already running and must
++     * never be started a second time during a wireless recovery. */
++    while (headless_network_pause(15)) {
++        if (!network_is_connected()) network_wifi_reconnect();
+     }
+ #endif
+ 

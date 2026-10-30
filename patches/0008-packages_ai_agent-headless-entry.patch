@@ -92,7 +92,7 @@ diff --git a/src/core/message_bus.c b/src/core/message_bus.c
      queue->items[queue->tail] = *msg;
      queue->tail = (queue->tail + 1) % AGENT_BUS_QUEUE_LEN;
      queue->count++;
-@@ -168,79 +202,96 @@
+@@ -168,78 +202,95 @@
  
  int message_bus_init(void)
  {
@@ -219,13 +219,11 @@ diff --git a/src/core/message_bus.c b/src/core/message_bus.c
 -
 -    return msg_queue_pop(&g_outbound_queue, msg, timeout_ms);
 -}
--
 +    if (msg == NULL || !bus_enter()) return ERROR;
 +    int result = msg_queue_pop(&g_outbound_queue, msg, timeout_ms);
 +    bus_leave();
 +    return result;
 +}
-+
 diff --git a/src/core/message_bus.h b/src/core/message_bus.h
 --- a/src/core/message_bus.h
 +++ b/src/core/message_bus.h

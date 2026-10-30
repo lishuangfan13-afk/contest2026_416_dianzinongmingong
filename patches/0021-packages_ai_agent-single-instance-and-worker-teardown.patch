@@ -1,0 +1,324 @@
+--- a/include/agent_compat.h
++++ b/include/agent_compat.h
+@@ -29,6 +29,10 @@
+ #define _DEFAULT_SOURCE 1
+ #endif
+ 
++#ifdef __NuttX__
++#include <nuttx/config.h>
++#endif
++
+ #include <errno.h>
+ #include <inttypes.h>
+ #include <pthread.h>
+@@ -43,6 +47,10 @@
+ #include <syslog.h> /* LOG_INFO / LOG_ERR / LOG_WARNING / LOG_DEBUG */
+ #include <time.h>
+ #include <unistd.h>
++
++#ifdef CONFIG_EXAMPLES_ZHAOXI
++#include "infra/task_lifecycle.h"
++#endif
+ 
+ /* ── Task helper ───────────────────────────────────────────────────────────── */
+ 
+@@ -89,7 +97,11 @@
+     pthread_attr_setinheritsched(&attr, PTHREAD_EXPLICIT_SCHED);
+ 
+     pthread_t tid;
++#ifdef CONFIG_EXAMPLES_ZHAOXI
++    int r = agent_tracked_pthread_create(&tid, &attr, _agent_task_shim, ta, name);
++#else
+     int r = pthread_create(&tid, &attr, _agent_task_shim, ta);
++#endif
+     pthread_attr_destroy(&attr);
+     if (r != 0) {
+         free(ta);
+--- a/src/agent_main.c
++++ b/src/agent_main.c
+@@ -128,7 +128,9 @@
+ #ifndef CONFIG_EXAMPLES_ZHAOXI
+         agent_loop_start();
+ #endif
++#ifndef CONFIG_EXAMPLES_ZHAOXI
+         ws_server_start();
++#endif
+ #ifdef CONFIG_AI_AGENT_NODE
+         node_client_start();
+ #endif
+@@ -199,8 +201,10 @@
+         if (agent_loop_start() != OK)
+             syslog(LOG_WARNING, "[%s] agent_loop_start failed\n", TAG);
+ #endif
++#ifndef CONFIG_EXAMPLES_ZHAOXI
+         if (ws_server_start() != OK)
+             syslog(LOG_WARNING, "[%s] ws_server_start failed\n", TAG);
++#endif
+ #ifdef CONFIG_AI_AGENT_NODE
+         if (node_client_start() != OK)
+             syslog(LOG_WARNING, "[%s] node_client_start failed\n", TAG);
+@@ -502,7 +506,7 @@
+     syslog((rc) == OK ? LOG_INFO : LOG_WARNING, \
+         "[%s] [boot +%ldms] " phase ": " msg " (rc=%d)\n", TAG, boot_ms(t0), (rc))
+ 
+-int ai_agent_main(int argc, char* argv[])
++static int ai_agent_run(int argc, char* argv[])
+ {
+     bool headless = argc == 2 && strcmp(argv[1], "--headless") == 0;
+     if (argc > 1 && !headless) {
+@@ -510,6 +514,12 @@
+         return argc == 2 && strcmp(argv[1], "--help") == 0 ? 0 : 2;
+     }
+ 
++#ifdef CONFIG_EXAMPLES_ZHAOXI
++    if (!headless) {
++        puts("This product requires: ai_agent --headless &");
++        return ERROR;
++    }
++#endif
+     g_shutdown_requested = false;
+ 
+     struct timespec t0;
+@@ -685,7 +695,8 @@
+             AGENT_OUTBOUND_PRIO)
+         != OK) {
+         syslog(LOG_ERR, "[%s] Failed to start outbound dispatch thread\n", TAG);
+-        return -1;
++        agent_request_shutdown();
++        goto shutdown;
+     }
+     BOOT_LOG(&t0, "P5", "outbound dispatch thread started");
+ 
+@@ -693,7 +704,7 @@
+     /* Requests must return errors rather than remain queued behind WiFi. */
+     if (agent_loop_start() != OK) {
+         agent_request_shutdown();
+-        return ERROR;
++        goto shutdown;
+     }
+     BOOT_LOG(&t0, "P5", "headless agent loop started");
+ #endif
+@@ -781,10 +792,20 @@
+         sleep(1);
+     }
+ 
++shutdown:
+     syslog(LOG_INFO, "[%s] Shutdown requested — stopping services...\n", TAG);
++
++    /* Freeze the scheduler while the bus can still accept its in-flight
++     * delivery. Never consume a new due job during worker shutdown. */
++    cron_service_stop();
+ 
+     /* Wake all threads blocked on message bus before stopping services */
+     message_bus_wakeup();
++#ifdef CONFIG_EXAMPLES_ZHAOXI
++    /* The watcher must not start services after their stop calls. */
++    syslog(LOG_INFO, "[%s] Waiting for network watcher to exit\n", TAG);
++    agent_tasks_wait(true);
++#endif
+ 
+     /* ── Graceful teardown (reverse of startup order) ──────── */
+ 
+@@ -809,11 +830,16 @@
+ #endif
+ 
+     /* Phase 5 services (non-network) */
+-    cron_service_stop();
+     if (!headless) heartbeat_stop();
+ 
+-    /* Give threads a moment to notice and exit */
++#ifdef CONFIG_EXAMPLES_ZHAOXI
++    voice_channel_stop();
++    syslog(LOG_INFO, "[%s] Waiting for Agent workers to exit\n", TAG);
++    agent_tasks_wait(false);
++#else
++    /* Existing profiles retain their original teardown. */
+     usleep(500 * 1000);
++#endif
+ 
+     /* Cleanup — reverse order of init */
+     tool_media_cleanup();
+@@ -830,3 +856,18 @@
+ 
+     return 0;
+ }
++
++int ai_agent_main(int argc, char *argv[])
++{
++#ifdef CONFIG_EXAMPLES_ZHAOXI
++    if (!agent_instance_acquire()) {
++        printf("Agent is already running or stopping; wait for its exit log.\n");
++        return ERROR;
++    }
++#endif
++    int result = ai_agent_run(argc, argv);
++#ifdef CONFIG_EXAMPLES_ZHAOXI
++    agent_instance_release();
++#endif
++    return result;
++}
+--- a/src/infra/cron_service.c
++++ b/src/infra/cron_service.c
+@@ -407,6 +407,12 @@
+     bool changed = false;
+ 
+     pthread_mutex_lock(&s_cron_lock);
++#ifdef CONFIG_EXAMPLES_ZHAOXI
++    if (!s_cron_running) {
++        pthread_mutex_unlock(&s_cron_lock);
++        return;
++    }
++#endif
+ 
+     for (int i = 0; i < s_job_count; i++) {
+         cron_job_t* job = &s_jobs[i];
+@@ -461,8 +467,10 @@
+         ts.tv_sec += AGENT_CRON_CHECK_INTERVAL_MS / 1000;
+ 
+         pthread_mutex_lock(&s_cron_lock);
+-        pthread_cond_timedwait(&s_cron_wake, &s_cron_lock, &ts);
++        if (s_cron_running) pthread_cond_timedwait(&s_cron_wake, &s_cron_lock, &ts);
++        bool running = s_cron_running;
+         pthread_mutex_unlock(&s_cron_lock);
++        if (!running) break;
+ 
+         cron_process_due_jobs();
+     }
+@@ -556,10 +564,13 @@
+ 
+ void cron_service_stop(void)
+ {
++    pthread_mutex_lock(&s_cron_lock);
+     if (s_cron_running) {
+         s_cron_running = false;
+         syslog(LOG_INFO, "[%s] Cron service stopping\n", TAG);
+     }
++    pthread_cond_broadcast(&s_cron_wake);
++    pthread_mutex_unlock(&s_cron_lock);
+ }
+ 
+ int cron_add_job(cron_job_t* job)
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -70,6 +70,10 @@
+     src/ui/qrcode_display.c
+   )
+ 
++  if(CONFIG_EXAMPLES_ZHAOXI)
++    list(APPEND AGENT_SRCS src/infra/task_lifecycle.c)
++  endif()
++
+   # This board uses its verified HAL path instead of the media-service PCM backend.
+   if(CONFIG_ZHAOXI_BES_AUDIO)
+     list(REMOVE_ITEM AGENT_SRCS src/voice/audio_capture.c src/voice/audio_playback.c)
+--- a/Makefile
++++ b/Makefile
+@@ -179,4 +179,8 @@
+ PRIORITY  = $(CONFIG_EXAMPLES_AI_AGENT_VELA_PRIORITY)
+ STACKSIZE = $(CONFIG_EXAMPLES_AI_AGENT_VELA_STACKSIZE)
+ 
++ifeq ($(CONFIG_EXAMPLES_ZHAOXI),y)
++CSRCS += src/infra/task_lifecycle.c
++endif
++
+ include $(APPDIR)/Application.mk
+--- /dev/null
++++ b/src/infra/task_lifecycle.h
+@@ -0,0 +1,10 @@
++/* SPDX-License-Identifier: Apache-2.0 */
++#pragma once
++#include <pthread.h>
++#include <stdbool.h>
++
++bool agent_instance_acquire(void);
++void agent_instance_release(void);
++int agent_tracked_pthread_create(pthread_t *thread, const pthread_attr_t *attr,
++    void *(*function)(void *), void *argument, const char *name);
++void agent_tasks_wait(bool network_only);
+--- /dev/null
++++ b/src/infra/task_lifecycle.c
+@@ -0,0 +1,84 @@
++/* SPDX-License-Identifier: Apache-2.0 */
++#include "task_lifecycle.h"
++#include <errno.h>
++#include <stdlib.h>
++#include <string.h>
++
++extern bool agent_shutdown_requested(void);
++static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
++static pthread_cond_t changed = PTHREAD_COND_INITIALIZER;
++static bool active;
++static unsigned workers, network_workers;
++
++struct tracked_task {
++    void *(*function)(void *);
++    void *argument;
++    bool network;
++};
++
++bool agent_instance_acquire(void)
++{
++    pthread_mutex_lock(&lock);
++    bool acquired = !active;
++    if (acquired) active = true;
++    pthread_mutex_unlock(&lock);
++    return acquired;
++}
++
++void agent_instance_release(void)
++{
++    pthread_mutex_lock(&lock);
++    active = false;
++    pthread_mutex_unlock(&lock);
++}
++
++static void task_finished(void *argument)
++{
++    struct tracked_task *task = argument;
++    pthread_mutex_lock(&lock);
++    --workers;
++    if (task->network) --network_workers;
++    pthread_cond_broadcast(&changed);
++    pthread_mutex_unlock(&lock);
++    free(task);
++}
++
++static void *task_run(void *argument)
++{
++    struct tracked_task *task = argument;
++    void *result;
++    pthread_cleanup_push(task_finished, task);
++    result = task->function(task->argument);
++    pthread_cleanup_pop(1);
++    return result;
++}
++
++int agent_tracked_pthread_create(pthread_t *thread, const pthread_attr_t *attr,
++    void *(*function)(void *), void *argument, const char *name)
++{
++    struct tracked_task *task = malloc(sizeof(*task));
++    if (!task) return ENOMEM;
++    task->function = function;
++    task->argument = argument;
++    task->network = name && strcmp(name, "net_watch") == 0;
++    pthread_mutex_lock(&lock);
++    if (agent_shutdown_requested()) {
++        pthread_mutex_unlock(&lock);
++        free(task);
++        return ECANCELED;
++    }
++    ++workers;
++    if (task->network) ++network_workers;
++    pthread_mutex_unlock(&lock);
++    int result = pthread_create(thread, attr, task_run, task);
++    if (result) task_finished(task);
++    return result;
++}
++
++void agent_tasks_wait(bool network_only)
++{
++    pthread_mutex_lock(&lock);
++    while (network_only ? network_workers != 0 : workers != 0)
++        pthread_cond_wait(&changed, &lock);
++    pthread_mutex_unlock(&lock);
++}

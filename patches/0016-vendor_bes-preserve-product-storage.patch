@@ -1,0 +1,80 @@
+--- a/boards/best1700_ep/aos_evb/src/etc/init.d/rc.sysinit.ap
++++ b/boards/best1700_ep/aos_evb/src/etc/init.d/rc.sysinit.ap
+@@ -18,6 +18,11 @@
+  *
+  ****************************************************************************/
+ set +e
++#ifdef CONFIG_EXAMPLES_ZHAOXI
++#define ZHAOXI_FORMAT_OPTION
++#else
++#define ZHAOXI_FORMAT_OPTION -o autoformat
++#endif
+ /*************************
+ pmconfig stay normal
+ pmconfig stay normal 1
+@@ -27,11 +32,11 @@
+ 
+ #ifndef CONFIG_GPT_PARTITION
+ #if defined(CONFIG_MTD)
+-mount -t littlefs -o autoformat /dev/data /data
++mount -t littlefs ZHAOXI_FORMAT_OPTION /dev/data /data
+ #endif
+ 
+ #if defined(CONFIG_BES_MTDSDMMC)
+-  mount -t fatfs -o autoformat /dev/mmcsd0 /sdcard
++  mount -t fatfs ZHAOXI_FORMAT_OPTION /dev/mmcsd0 /sdcard
+   #if defined(CONFIG_RAMLOG_SYSLOG)
+     rm /emmc/lastword
+     dmesg > /emmc/lastword
+@@ -39,7 +44,7 @@
+ #endif
+ 
+ #if defined(CONFIG_BES_EMMC_DEV) || defined(CONFIG_BES_EMMC)
+-  mount -t fatfs -o autoformat /dev/mmcsd0 /emmc
++  mount -t fatfs ZHAOXI_FORMAT_OPTION /dev/mmcsd0 /emmc
+   #if defined(CONFIG_RAMLOG_SYSLOG)
+     rm /emmc/lastword
+     dmesg > /emmc/lastword
+@@ -50,10 +55,10 @@
+ 
+ #if defined(CONFIG_BES_MTDSDMMC)
+   #if defined(CONFIG_BOARD_COREDUMP_BLKDEV)
+-    mount -t fatfs -o autoformat /dev/mmcsd0fs /sdcard
++    mount -t fatfs ZHAOXI_FORMAT_OPTION /dev/mmcsd0fs /sdcard
+     coredump -s /emmc/coredump -m 10
+   #else
+-    mount -t fatfs -o autoformat /dev/mmcsd0 /sdcard
++    mount -t fatfs ZHAOXI_FORMAT_OPTION /dev/mmcsd0 /sdcard
+   #endif
+ 
+   #if defined(CONFIG_RAMLOG_SYSLOG)
+@@ -64,10 +69,10 @@
+ 
+ #if defined(CONFIG_BES_EMMC_DEV) || defined(CONFIG_BES_EMMC)
+   #if defined(CONFIG_BOARD_COREDUMP_BLKDEV)
+-    mount -t fatfs -o autoformat /dev/mmcsd0fs /emmc
++    mount -t fatfs ZHAOXI_FORMAT_OPTION /dev/mmcsd0fs /emmc
+     coredump -s /emmc/coredump -m 10
+   #else
+-    mount -t fatfs -o autoformat /dev/mmcsd0 /emmc
++    mount -t fatfs ZHAOXI_FORMAT_OPTION /dev/mmcsd0 /emmc
+   #endif
+ 
+   #if defined(CONFIG_RAMLOG_SYSLOG)
+@@ -119,14 +124,14 @@
+ fi
+ 
+ mkdir /data
+-mount -t fatfs -o autoformat /dev/data /data
++mount -t fatfs ZHAOXI_FORMAT_OPTION /dev/data /data
+ set errcode $?
+ if [ $errcode -ne 0 ]
+ then
+     echo "/dev/data mount failed, errcode is" $errcode
+ fi
+ 
+-mount -t fatfs -o autoformat /dev/coredump /log
++mount -t fatfs ZHAOXI_FORMAT_OPTION /dev/coredump /log
+ #endif
+ 
+ #ifdef CONFIG_USBMTP_COMPOSITE
