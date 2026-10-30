@@ -1,0 +1,44 @@
+Formatting: terminal control codes removed; line endings and trailing whitespace normalized.
+Historical test: 2026-10-27
+User confirmation after this run: audible tone.
+codecprobe dac 2000 8192
+SPKPROBE device=4 tone=1000Hz pcm_peak=8192 digital_gain=0dB ms=2000
+DACREG stage=0 addr=1006 value=4000 ret=0
+DACREG stage=0 addr=1009 value=0003 ret=0
+DACREG stage=0 addr=100d value=0c00 ret=0
+DACREG stage=0 addr=1011 value=3801 ret=0
+[01/01/70 00:01:43.931000] [14] [ap] [codec_int_open] codec=0, user_map=0x0
+[01/01/70 00:01:43.931900] [14] [ap] codec_hw_open
+[01/01/70 00:01:43.934700] [14] [ap] [int_stream_open] codec=0 stream=0
+[01/01/70 00:01:43.935600] [14] [ap] [int_stream_setup] codec=0 stream=0
+[01/01/70 00:01:43.936400] [14] [ap] [sample_rate]old=0 new=16000
+[01/01/70 00:01:43.937200] [14] [ap] [bits]old=0 new=16
+[01/01/70 00:01:43.937800] [14] [ap] [channel_num]old=0 new=1
+[01/01/70 00:01:43.938400] [14] [ap] [channel_map]old=0x0 new=0x1
+[01/01/70 00:01:43.939100] [14] [ap] [use_dma]old=0 new=1
+[01/01/70 00:01:43.939800] [14] [ap] [vol]old=0 new=1 chan_vol_set=0
+[01/01/70 00:01:43.940500] [14] [ap] [int_stream_setup] codec=0, stream=0 set_flag=0xff
+[01/01/70 00:01:43.941600] [14] [ap] [hal_codec_setup_stream] playback sample_rate=16000
+[01/01/70 00:01:43.942700] [14] [ap] [int_stream_start] stream=0
+[01/01/70 00:01:43.943400] [14] [ap] hal_codec_start_interface: id=0, stream=0, dma=1
+[01/01/70 00:01:43.944500] [14] [ap] codec_hw_start: stream=0
+SPKPROBE actual_dac_gain=16384 expected=16384
+DACREG stage=1 addr=1006 value=4140 ret=0
+DACREG stage=1 addr=1009 value=0003 ret=0
+DACREG stage=1 addr=100d value=0c9c ret=0
+DACREG stage=1 addr=1011 value=3801 ret=0
+SPKPROBE samples=32000 elapsed=1999 gain_code=16384
+[01/01/70 00:01:45.954200] [14] [ap] [int_stream_stop] stream=0
+[01/01/70 00:01:45.955000] [14] [ap] codec_hw_stop: stream=0
+[01/01/70 00:01:45.962200] [14] [ap] hal_codec_stop_interface: id=0, stream=0
+[01/01/70 00:01:45.963200] [14] [ap] [int_stream_close] codec=0 stream=0
+[01/01/70 00:01:45.964000] [14] [ap] [int_stream_restore_chan_vol] codec=0 stream=0
+[01/01/70 00:01:45.964900] [14] [ap] [codec_int_close]: codec=0, type=0 user_map=0x1
+[01/01/70 00:01:45.965900] [14] [ap] codec_hw_close: type=0
+DACREG stage=2 addr=1006 value=4000 ret=0
+DACREG stage=2 addr=1009 value=0003 ret=0
+DACREG stage=2 addr=100d value=0c00 ret=0
+DACREG stage=2 addr=1011 value=3801 ret=0
+DACPROBE done ret=0
+ap>
+ap>

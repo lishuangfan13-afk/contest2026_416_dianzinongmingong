@@ -1,0 +1,70 @@
+{
+  "test_date": "2026-10-27",
+  "published_baseline_date": "2026-10-30",
+  "board": "BES2800BP V1.2",
+  "standard_audio_nodes": "Diagnostic build still has audio_fake; successful tests use the patched codecprobe command.",
+  "microphone": {
+    "firmware_sha256": "e24a91fd81de392c8f523f42d048e34fac33a6fb1426725454a7a4586a16b74d",
+    "command": "codecprobe 4096|8192 5000",
+    "sample_rate_hz": 16000,
+    "channels_per_capture": 1,
+    "sample_bits": 16,
+    "distance_cm": [
+      5,
+      10
+    ],
+    "user_confirmed_speaking": true,
+    "user_confirmed_enhanced_speech_intelligible": true,
+    "processing_on_pc": "100-6000Hz bandpass and +40dB gain; processing not integrated into board firmware",
+    "captures": [
+      {
+        "channel": 0,
+        "map": 4096,
+        "bytes": 160000,
+        "samples": 80000,
+        "duration_seconds": 5.0,
+        "minimum": -252,
+        "maximum": 243,
+        "mean": -3.6741375,
+        "stddev": 31.035521602368693,
+        "clipped_samples": 0,
+        "sha256": "698ae938ed16a5c017d3fafba56e926ae4b9d8a247b9000fa82aa8ae6c39c455",
+        "enhanced_sha256": "6b3b4dfb37b150816541f02aed7822fb53f12e85b2a9fcc6771e9aab78f51811",
+        "enhanced_clipped_samples": 0
+      },
+      {
+        "channel": 1,
+        "map": 8192,
+        "bytes": 160000,
+        "samples": 80000,
+        "duration_seconds": 5.0,
+        "minimum": 842,
+        "maximum": 1171,
+        "mean": 1015.8707625,
+        "stddev": 24.140784684193548,
+        "clipped_samples": 0,
+        "sha256": "ea9137350787670a62e7f749478b8feba9b65ff1e3bc2634162b374d57ddfda5",
+        "enhanced_sha256": "c58cef7cfc0ff5fcaa0b3a69e6df266e2b4ee00bf5db12c77e7f1a11bff6fb78",
+        "enhanced_clipped_samples": 0
+      }
+    ]
+  },
+  "speaker": {
+    "firmware_sha256": "f1067aa32ae2b088eb95f1e3034d8892bb3b675df5f44d562a4eec8c0ea8d9e7",
+    "command": "codecprobe dac 2000 8192",
+    "sample_rate_hz": 16000,
+    "tone_hz": 1000,
+    "duration_ms": 2000,
+    "elapsed_ms": 1999,
+    "samples": 32000,
+    "actual_gain_code": 16384,
+    "dma_completed": true,
+    "output_closed": true,
+    "user_confirmed_audible": true,
+    "speaker_nominal_ohm": 8,
+    "speaker_nominal_watt": 2,
+    "effective_connector": "Direct two-pin header below R185; black left/red right in the original photographed orientation.",
+    "scope": "Short test-tone audibility only; no speech playback, 2W output or long-duration load qualification."
+  },
+  "integration": "P27 and P30 are separate images replacing the same codecprobe entry. Unified recording and playback remains the next development milestone."
+}
