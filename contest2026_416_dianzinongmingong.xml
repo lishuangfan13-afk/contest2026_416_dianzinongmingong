@@ -1,17 +1,17 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <manifest>
   <include name="openvela.xml"/>
+  <!-- Pin the two interfaces checked by headless integration patches. -->
+  <extend-project name="packages_ai_agent" revision="e65550f18759f086d7f544edcf17d1e31223244f"/>
+  <extend-project name="vendor_bes" revision="36465377d944a575ce8a0c7ba45259f5c6c61ea8"/>
   <project path="contest2026_416_dianzinongmingong" name="contest2026_416_dianzinongmingong">
     <linkfile src="app/hello_app" dest="packages/demos/contest2026_416_hello_app"/>
-    <linkfile src="app/zhaoxi_ui" dest="packages/demos/contest2026_416_zhaoxi_ui"/>
     <linkfile src="quickapp/hello_quickapp" dest="packages/apps/contest2026_416_hello_quickapp"/>
     <linkfile src="board/contest_board" dest="vendor/openvela/boards/contest2026_416_board"/>
     <!--
-      zhaoxi_ui: After repo sync, this linkfile creates packages/zhaoxi_ui in
-      the openvela build tree. In the apps repo, packages/ is a symlink to
-      ../packages, so the final path apps/packages/zhaoxi_ui is resolved.
-      Enabled via CONFIG_EXAMPLES_ZHAOXI_UI=y in defconfig.
+      The headless frontend shares the existing AI Agent in a flat build.
+      Archived display code is intentionally not linked into the build tree.
     -->
-    <linkfile src="app/zhaoxi_ui" dest="packages/zhaoxi_ui"/>
+    <linkfile src="app/zhaoxi" dest="packages/zhaoxi"/>
   </project>
 </manifest>

@@ -1,0 +1,3 @@
+ifneq ($(CONFIG_EXAMPLES_ZHAOXI),)
+CONFIGURED_APPS += $(APPDIR)/packages/zhaoxi
+endif

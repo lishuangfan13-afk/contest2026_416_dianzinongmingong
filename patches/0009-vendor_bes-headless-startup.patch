@@ -1,0 +1,28 @@
+From: lishuangfan13-afk <lishuangfan13@gmail.com>
+Subject: [PATCH] bes: start the headless assistant for the Zhaoxi profile
+
+Select the existing Agent without its console reader when the screen-free
+product frontend is configured. Other board profiles keep their startup.
+Based on vendor_bes 36465377d944a575ce8a0c7ba45259f5c6c61ea8.
+Do not apply the archived display startup patch 0004.
+
+diff --git a/boards/best1700_ep/aos_evb/src/etc/init.d/rcS.ap b/boards/best1700_ep/aos_evb/src/etc/init.d/rcS.ap
+--- a/boards/best1700_ep/aos_evb/src/etc/init.d/rcS.ap
++++ b/boards/best1700_ep/aos_evb/src/etc/init.d/rcS.ap
+@@ -38,10 +38,16 @@
+ bluetoothd &
+ #endif
+ 
++#ifdef CONFIG_EXAMPLES_ZHAOXI
++#ifdef CONFIG_EXAMPLES_AI_AGENT_VELA
++ai_agent --headless &
++#endif
++#else
+ #ifdef CONFIG_BESWATCH
+ beswatch &
+ #else
+ lvgldemo widgets &
++#endif
+ #endif
+ 
+ #ifdef CONFIG_KVDB_PERSIST_PATH
