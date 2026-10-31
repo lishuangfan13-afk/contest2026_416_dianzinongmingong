@@ -1,0 +1,36 @@
+--- a/libs/libc/netdb/lib_dnsquery.c
++++ b/libs/libc/netdb/lib_dnsquery.c
+@@ -140,7 +140,7 @@
+           break;
+         }
+ 
+-      buf = (FAR const uint8_t *)buf + len;
++      buf = (FAR const uint8_t *)buf + ret;
+       len -= ret;
+       total += ret;
+     }
+@@ -186,7 +186,7 @@
+           break;
+         }
+ 
+-      buf = (FAR uint8_t *)buf + len;
++      buf = (FAR uint8_t *)buf + ret;
+       len -= ret;
+       total += ret;
+     }
+@@ -903,6 +903,7 @@
+                   if (!stream && should_try_stream)
+                     {
+                       stream = true;
++                      close(sd);
+                       goto try_stream; /* Don't consume retry count */
+                     }
+ 
+@@ -962,6 +963,7 @@
+                   if (!stream && should_try_stream)
+                     {
+                       stream = true;
++                      close(sd);
+                       goto try_stream; /* Don't consume retry count */
+                     }
+ 

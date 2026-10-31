@@ -5,7 +5,7 @@ PRIORITY = 100
 STACKSIZE = 32768
 MAINSRC = zhaoxi_main.c
 ifeq ($(CONFIG_ZHAOXI_BES_AUDIO),y)
-CSRCS += bes_audio.c bes_clock.c
+CSRCS += bes_audio.c bes_clock.c reminder.c dns_diag.c
 endif
 ifeq ($(CONFIG_ZHAOXI_MIMO_VOICE),y)
 CSRCS += mimo_voice.c

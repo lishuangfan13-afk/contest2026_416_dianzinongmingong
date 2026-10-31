@@ -1,0 +1,101 @@
+--- a/src/agent_main.c
++++ b/src/agent_main.c
+@@ -424,6 +424,12 @@
+ #ifdef CONFIG_AI_AGENT_MQTT
+         } else if (strcmp(msg.channel, AGENT_CHAN_MQTT) == 0) {
+             mqtt_channel_send(msg.chat_id, msg.content);
++#endif
++#ifdef CONFIG_ZHAOXI_BES_AUDIO
++        } else if (strcmp(msg.channel, "reminder") == 0) {
++            extern int zhaoxi_deliver_reminder(const char *text);
++            int result = zhaoxi_deliver_reminder(msg.content);
++            if (result) syslog(LOG_ERR, "[%s] Reminder output failed: %d\n", TAG, result);
+ #endif
+         } else if (strcmp(msg.channel, AGENT_CHAN_VOICE) == 0) {
+             /* Check voice cooldown — skip voice dispatch if a recent
+--- a/src/infra/cron_service.c
++++ b/src/infra/cron_service.c
+@@ -43,7 +43,7 @@
+ static int cron_load_jobs(void);
+ static int cron_save_jobs(void);
+ static int cron_parse_job_item(cJSON* item, cron_job_t* job);
+-static void cron_fire_job(cron_job_t* job, time_t now);
++static bool cron_fire_job(cron_job_t* job, time_t now);
+ static void cron_process_due_jobs(void);
+ static void compute_initial_next_run(cron_job_t* job);
+ static void* cron_task_main(void* arg);
+@@ -337,7 +337,7 @@
+ 
+ /* -- Due-job processing ------------------------------------------ */
+ 
+-static void cron_fire_job(cron_job_t* job, time_t now)
++static bool cron_fire_job(cron_job_t* job, time_t now)
+ {
+     syslog(LOG_INFO, "[%s] Cron job firing: %s (%s)\n", TAG, job->name, job->id);
+ 
+@@ -386,6 +386,12 @@
+         agent_msg_t msg;
+         memset(&msg, 0, sizeof(msg));
+         strncpy(msg.channel, job->channel, sizeof(msg.channel) - 1);
++#ifdef CONFIG_ZHAOXI_BES_AUDIO
++        /* A plain voice reminder has its own delivery path: speech when
++         * available, otherwise a local alert tone and the actual text. */
++        if (strcmp(job->channel, AGENT_CHAN_VOICE) == 0)
++            strcpy(msg.channel, "reminder");
++#endif
+         strncpy(msg.chat_id, job->chat_id, sizeof(msg.chat_id) - 1);
+         msg.content = strdup(job->message);
+ 
+@@ -394,11 +400,15 @@
+             if (err != OK) {
+                 syslog(LOG_WARNING, "[%s] Failed to push cron message\n", TAG);
+                 free(msg.content);
++                return false;
+             }
++        } else {
++            return false;
+         }
+     }
+ 
+     job->last_run = now;
++    return true;
+ }
+ 
+ static void cron_process_due_jobs(void)
+@@ -426,7 +436,9 @@
+             continue;
+         }
+ 
+-        cron_fire_job(job, now);
++        /* A full outbound queue must not silently consume a one-shot.
++         * Leave it due for the next scheduler pass until accepted. */
++        if (!cron_fire_job(job, now)) continue;
+ 
+         if (job->kind == CRON_KIND_AT) {
+             if (job->delete_after_run) {
+@@ -462,11 +474,23 @@
+         /* Use timedwait instead of usleep so that cron_nudge() can
+          * wake us immediately when a new job is added.  This also
+          * survives NuttX deep-sleep better than plain usleep. */
++        pthread_mutex_lock(&s_cron_lock);
+         struct timespec ts;
+         clock_gettime(CLOCK_REALTIME, &ts);
++        time_t now = ts.tv_sec;
+         ts.tv_sec += AGENT_CRON_CHECK_INTERVAL_MS / 1000;
+-
+-        pthread_mutex_lock(&s_cron_lock);
++        /* Wake at the nearest actual deadline, rather than making a short
++         * reminder wait for the next ten-second polling tick. A due job
++         * retained after queue backpressure retries after one second. */
++        for (int i = 0; i < s_job_count; i++) {
++            cron_job_t *job = &s_jobs[i];
++            if (!job->enabled || job->next_run <= 0) continue;
++            time_t deadline = job->next_run <= now ? now + 1 : job->next_run;
++            if (deadline < ts.tv_sec) {
++                ts.tv_sec = deadline;
++                ts.tv_nsec = 0;
++            }
++        }
+         if (s_cron_running) pthread_cond_timedwait(&s_cron_wake, &s_cron_lock, &ts);
+         bool running = s_cron_running;
+         pthread_mutex_unlock(&s_cron_lock);

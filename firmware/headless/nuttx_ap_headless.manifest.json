@@ -1,7 +1,7 @@
 {
   "image": "nuttx_ap_headless.bin",
-  "size": 1300672,
-  "sha256": "450d7b8113f8846cfb3cd09d8dfdc4587cd55e431acce5520b218998734afc48",
+  "size": 1305328,
+  "sha256": "0ebb41634cd6ba1796de5064990cba93a9b7bed6dfc52462654779a063598300",
   "flash_address": "0x30190000",
   "ntc_patch": {
     "offset": 18364,
@@ -13,15 +13,19 @@
   "credentials_source": "runtime device config, not build options",
   "hardware_functional_acceptance_complete": false,
   "app_sources": {
-    "app/zhaoxi/CMakeLists.txt": "8e666cf4578f17279d7b02ced4b6e687696923b0b2953ab61e65fafc8c9e6eac",
+    "app/zhaoxi/CMakeLists.txt": "245c88b97372c6889e436656de9e6d6c7b085b98b0b4ea5d872d0f297c3d6da2",
     "app/zhaoxi/Kconfig": "18b7407180279284da6177f1b058976da8efa116001d0ede103ff127ae0a9c5c",
     "app/zhaoxi/Make.defs": "4b383b583ca2cac953df60dafcd5eee42ae1a1e52e448f085110960d7b006a93",
-    "app/zhaoxi/Makefile": "957b85dfcb2ca901270c85de320f8214cd10ef3b5dfc9e701724da8bca579026",
-    "app/zhaoxi/README.md": "8d49998776b96e4abfa25ae6dc264e87e27a747273762a9e76e3cc402ed24229",
+    "app/zhaoxi/Makefile": "4e7fbf73c9f24aef851165b23dba04c99c376269e57778dee85718511136c9a8",
+    "app/zhaoxi/README.md": "f3060dbbcd0e9b3826563861642cc602389359db39ebbcbce95a098379269ed7",
     "app/zhaoxi/bes_audio.c": "9acf416e364f5bbf1a0eee1587fa8360a19b6651f3fe31f143df4068fd683d8b",
     "app/zhaoxi/bes_clock.c": "75966f28160828c958ea59b1444b138f032fb92ef69f02c68bbae73ee81a075b",
+    "app/zhaoxi/dns_diag.c": "ccefe6e324910fc2ec0725d3ea798ce042bcefe4ccec422188dd301a856368e1",
+    "app/zhaoxi/dns_diag.h": "36c0fc7ea733e8bbc6cb74a4b2f078f7a5e882c7d2148669c28c08574f7d71cb",
     "app/zhaoxi/mimo_voice.c": "9a9cdbf637f7c4944df65dac204b4bcd42ffd5fe88605c3db3c0521516a3a3cb",
-    "app/zhaoxi/zhaoxi_main.c": "b99f819836fe0d3e6494839b0a9469cd7e5eab3fbc945a5772352068c5e0e452"
+    "app/zhaoxi/reminder.c": "1486f95c88b7790b591479d8837c92947644b06cd6fe0c5038f7e3970e2b2dc6",
+    "app/zhaoxi/reminder.h": "210caa59c5508c4743d32378e023b4cc04ea5ca826bf1fa0c3008dbdc307018d",
+    "app/zhaoxi/zhaoxi_main.c": "8ec837df29d9a6d59fd454c85284b3b81a544ded6f92c78b4e64ced88946d984"
   },
   "patches": {
     "0008-packages_ai_agent-headless-entry.patch": "ea6c16a65a42b0e0df8a699eafaeb1843f9e032b781e7dd572a36a15ddb02314",
@@ -37,6 +41,9 @@
     "0018-packages_ai_agent-preserve-connected-network.patch": "2b1d0a9c0a4145693c3b75a65a6ce255fe333bb95327646dc012050a05b7ff47",
     "0019-packages_ai_agent-headless-wifi-retry.patch": "ed80fa2ee6d5ff2c99e5cbbab9358e84cba80c31f25f10feb735b049b4da248a",
     "0020-packages_ai_agent-station-readiness-and-tcp-timeout.patch": "fa41a037a0af17b3323d2eca4875337078d01963465989595532ecf78e5bdd38",
-    "0021-packages_ai_agent-single-instance-and-worker-teardown.patch": "007a15df5d1337ad8550dbf9fc8b5afe569035911d07f5a24033bfb9d0b81864"
+    "0021-packages_ai_agent-single-instance-and-worker-teardown.patch": "007a15df5d1337ad8550dbf9fc8b5afe569035911d07f5a24033bfb9d0b81864",
+    "0022-nuttx-rpmsg-procfs-stat-mode.patch": "76b73ed7a8309932086dbc99e01043b9f1cb5aa8241fa303a3d6c2183189878c",
+    "0023-packages_ai_agent-offline-reminder-delivery.patch": "9510b761af424c6a870cd4cab22c2c0d9dcbf63127764c03ab7b55d5d42eeb26",
+    "0024-nuttx-dns-tcp-short-io-and-close.patch": "164a6497a239b40f6808c4e538188b17349df6c0db3cbb8128c1b4a609fad2ad"
   }
 }

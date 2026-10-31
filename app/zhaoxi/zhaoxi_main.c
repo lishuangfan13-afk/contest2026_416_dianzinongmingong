@@ -11,6 +11,8 @@
 #include <stdlib.h>
 #include <string.h>
 #ifdef CONFIG_ZHAOXI_BES_AUDIO
+#include "reminder.h"
+#include "dns_diag.h"
 #include "voice/audio_playback.h"
 #include "tools/tool_registry.h"
 #include <netutils/netlib.h>
@@ -35,6 +37,7 @@ static int usage(void)
     puts("  zhaoxi [--text] todo list");
     puts("  zhaoxi [--text] todo done <编号>");
     puts("  zhaoxi [--text] remind <时间和提醒内容>");
+    puts("  zhaoxi [--text] remind in <秒数> <内容> （本机直接创建）");
     puts("  zhaoxi [--text] remind list");
     puts("  zhaoxi [--text] remind cancel <任务编号>");
     puts("  zhaoxi status");
@@ -95,6 +98,15 @@ int main(int argc, char **argv)
         return radio_result || kernel_result ? 1 : 0;
     }
 #ifdef CONFIG_NETDB_DNSCLIENT
+    if (!strcmp(argv[at], "--dns-info")) {
+        return argc == 2 && !zhaoxi_dns_info() ? 0 : 1;
+    }
+    if (!strcmp(argv[at], "--dns-selftest")) {
+        return argc == 2 && !zhaoxi_dns_selftest() ? 0 : 1;
+    }
+    if (!strcmp(argv[at], "--dns-probe")) {
+        return argc == 4 && !zhaoxi_dns_probe(argv[2], argv[3]) ? 0 : 1;
+    }
     if (!strcmp(argv[at], "--dns")) {
         if (argc != 3) return 1;
         struct sockaddr_in server = { .sin_family = AF_INET };
@@ -142,18 +154,7 @@ int main(int argc, char **argv)
     }
     if (!strcmp(argv[at], "test-speaker")) {
         if (argc != 2) return 1;
-        static const int16_t wave[16] = {0, 12537, 23165, 30266, 32760, 30266,
-            23165, 12537, 0, -12537, -23165, -30266, -32760, -30266, -23165, -12537};
-        int16_t *pcm = malloc(3200);
-        if (!pcm) return 1;
-        for (int i = 0; i < 1600; i++) pcm[i] = wave[i % 16];
-        audio_playback_t *pb = audio_playback_open(NULL, 16000, 1, 16);
-        int result = pb ? 0 : -1;
-        for (int i = 0; pb && !result && i < 20; i++) {
-            if (audio_playback_write(pb, pcm, 3200) != 3200) result = -1;
-        }
-        audio_playback_close(pb);
-        free(pcm);
+        int result = zhaoxi_play_alert();
         puts(result ? "本机提示音失败，输出已关闭。" : "两秒本机提示音结束，输出已关闭。");
         return result ? 1 : 0;
     }
@@ -201,6 +202,13 @@ int main(int argc, char **argv)
         channel = "cli";
         if (++at >= argc) return 1;
     }
+#ifdef CONFIG_ZHAOXI_BES_AUDIO
+    if (!strcmp(argv[at], "remind") && at + 1 < argc &&
+        (!strcmp(argv[at + 1], "in") || !strcmp(argv[at + 1], "list") ||
+         !strcmp(argv[at + 1], "cancel"))) {
+        return zhaoxi_reminder_command(argc, argv, at, channel);
+    }
+#endif
     if (!strcmp(argv[at], "ask")) {
         first_text = at + 1;
     } else if (!strcmp(argv[at], "note")) {

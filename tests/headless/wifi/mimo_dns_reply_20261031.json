@@ -1,0 +1,9 @@
+{
+  "hostname": "token-plan-cn.xiaomimimo.com",
+  "captured_date": "2026-10-31",
+  "DNS_server": "223.5.5.5",
+  "bytes": 149,
+  "truncated": false,
+  "answers": 5,
+  "purpose": "Recorded public DNS packet for actual parser replay; not live DNS or board Internet acceptance"
+}

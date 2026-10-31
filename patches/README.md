@@ -20,6 +20,7 @@
 | 0019 | 无线就绪等待与自动重连 |
 | 0020 | station/carrier 检查、IPv4 DNS 与 TCP 截止时间 |
 | 0021 | 单实例、worker 退出屏障、cron 停止唤醒，产品不启动 WS/阻塞 CLI |
+| 0023 | 提醒独立投递、语音失败后的本机提示音、拥堵保留和最近到期时间唤醒 |
 
 后续补丁依赖前面的源码状态，逐个 `git apply --check /path/to/patch` 后再 `git apply /path/to/patch`。不要把历史 0001～0007 无条件叠加到此基线。
 
@@ -44,3 +45,14 @@ python3 tools/check_agent_patches.py \
 0001～0003、0005、0007 保留历史时间、存储、DNS、daily 调度和模型适配的追溯用途，按各自基线核对。纯显示的 0004/0006 已转入 legacy，不属于当前序列。
 
 API key、Wi-Fi 凭据及录音不进入补丁。当前已生成并烧录完整镜像，但板端云问答和完整语音业务尚未通过；见 [构建与验收](../docs/BES固件构建与验收.md) 和 [Wi-Fi 审计](../docs/WiFi固件审计.md)。
+
+## NuttX 修复
+
+基线为 `76354c637858ecb0aa4601629327acb6f44a26bb`。0022 补齐 rpmsg procfs 文件权限，避免属性查询调用空 stat 指针而重启。0024 修复 DNS TCP 分段收发指针推进和 UDP 截断回退时的 socket 泄漏。两项解析缺陷已复现，但不被认定为当前普通 UDP 查询失败的根因。
+
+```bash
+python3 tools/check_nuttx_patches.py --nuttx-root /path/to/openvela/nuttx
+python3 tools/check_dns.py --nuttx-root /path/to/openvela/nuttx
+```
+
+补丁使用 Git 原始 LF 格式；工作区若自动转换了源码换行，先在干净 checkout 核对。实板对照见 [DNS 解析审计](../docs/DNS解析审计.md)。

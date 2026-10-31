@@ -1,0 +1,86 @@
+{
+  "date": "2026-10-31",
+  "image": "headless_r10",
+  "sha256": "0ebb41634cd6ba1796de5064990cba93a9b7bed6dfc52462654779a063598300",
+  "size": 1305328,
+  "programming_succeeded": true,
+  "board_checks": [
+    "automatic_agent_start",
+    "actual_nuttx_resolver_A_CNAME_NXDOMAIN_via_loopback",
+    "DNS_servers_restored_after_test",
+    "clean_agent_restart_after_dns_test",
+    "procfs_stat_fixed"
+  ],
+  "dns_loopback": {
+    "A": "passed",
+    "CNAME_A": "passed",
+    "NXDOMAIN": "passed",
+    "synthetic_only": true,
+    "DNS_config_restored": true
+  },
+  "same_hotspot_PC_UDP_DNS": [
+    {
+      "server": "hotspot-gateway",
+      "elapsed_ms": 25,
+      "response_source": "hotspot-gateway",
+      "bytes": 149,
+      "id_matches": true,
+      "rcode": 0,
+      "truncated": false,
+      "answers": 5
+    },
+    {
+      "server": "223.5.5.5",
+      "elapsed_ms": 55,
+      "response_source": "223.5.5.5",
+      "bytes": 152,
+      "id_matches": true,
+      "rcode": 0,
+      "truncated": false,
+      "answers": 5
+    },
+    {
+      "server": "8.8.8.8",
+      "elapsed_ms": 204,
+      "response_source": "8.8.8.8",
+      "bytes": 149,
+      "id_matches": true,
+      "rcode": 0,
+      "truncated": false,
+      "answers": 5
+    }
+  ],
+  "board_external_probe": {
+    "DNS_server": "223.5.5.5",
+    "port": 53,
+    "ipv4": "0.0.0.0",
+    "gateway": "0.0.0.0",
+    "sent": -1,
+    "received": -1,
+    "error": -101,
+    "meaning": "ENETUNREACH before response parsing"
+  },
+  "reminder_board": {
+    "image": "headless_r10",
+    "due_within_5s": true,
+    "create_list_cancel": true
+  },
+  "scheduled_audio_output": {
+    "DMA_tested": true,
+    "one_shot_removed": true,
+    "user_hearing_confirmed": false,
+    "speech_played": false
+  },
+  "cloud_question_and_full_voice_acceptance_complete": false,
+  "bounded_reconnection_observation": {
+    "seconds": 120,
+    "connected_observed": false,
+    "samples": 13
+  },
+  "real_mimo_reply_parser_replay": {
+    "bytes": 149,
+    "actual_NuttX_parser_passed": true,
+    "host_test_only": true,
+    "board_internet_proven": false
+  }
+}

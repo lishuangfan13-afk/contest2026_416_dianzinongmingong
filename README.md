@@ -34,7 +34,7 @@ zhaoxi todo list
 zhaoxi todo done 2
 zhaoxi remind 十分钟后提醒我交作业
 zhaoxi remind list
-zhaoxi remind cancel a123b4
+zhaoxi remind cancel a123b456
 ```
 
 默认回复走 `voice` 通道；`zhaoxi --text ask 你好` 将回复改到串口。`请求已提交` 只表示进入队列，实际操作结果由助手依据工具返回确认。
@@ -69,6 +69,8 @@ pwsh -File tools/deploy_assets.ps1 -Port COM3 -Baud 921600 -BaseDir /emmc/zhaoxi
 
 命令入口已经做 Cortex-M55 对象编译；主机测试连接真实上游消息总线，覆盖业务路由、中文、错误输入、队列满和关闭期间并发请求；两种数据根目录的资产渲染与部署脚本语法也有检查。原生 Skill 加载检查确认旧扩展不会进入当前配置，普通配置仍保留原功能。重现方法见 [应用说明](app/zhaoxi/README.md)。
 
-完整 AP 固件已编译、烧录。当前实板版本为 headless_r8：本机音频发声、持久化文件、按编号取消提醒、真实定时投递、RTC、单实例及退出后重启已有实测；Pro 热点曾取得 IP，但 DNS/互联网尚未通过，板端联网问答和完整语音业务仍待验收。工具诊断通过不等于自然语言业务已经完成。
+完整 AP 固件已编译、烧录。当前实板版本为 headless_r10：本机音频发声、持久化文件、按编号取消提醒、真实定时投递、RTC、单实例及退出后重启已有实测；Pro 热点曾取得 IP，但 DNS/互联网尚未通过，板端联网问答和完整语音业务仍待验收。工具诊断通过不等于自然语言业务已经完成。
 
 [完整构建、镜像校验和实板结果](docs/BES固件构建与验收.md) · [Wi-Fi 独立审计](docs/WiFi固件审计.md)
+
+R10 增量：真实本机 DNS 对照通过；原始查询诊断已接入，本机提醒可直接创建、查询、取消和按期串口投递。具体结果见 [DNS 解析审计](docs/DNS解析审计.md)。

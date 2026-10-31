@@ -96,6 +96,18 @@ def main():
                      str(ROOT / "tests/headless/test_cron_persistence.c"),
                      str(cjson / "cJSON.c"), "-pthread", "-lm", "-o", str(executable)])
                 report["cron_persistence"] = run([str(executable)]).strip().splitlines()[-1]
+            with tempfile.TemporaryDirectory(prefix="zhaoxi-reminder-") as temporary:
+                data = Path(temporary) / "data"
+                executable = Path(temporary) / "test_reminder"
+                run([options.cc, *flags, *sanitizers, *include,
+                     "-I" + str(ROOT / "app/zhaoxi"), "-DCONFIG_EXAMPLES_ZHAOXI=1",
+                     "-I" + str(agent / "include"),
+                     "-DCONFIG_ZHAOXI_BES_AUDIO=1", "-include", str(ROOT / "tests/headless/cron_support.h"),
+                     "-I" + str(cjson), '-DAGENT_DATA_DIR="' + str(data) + '"',
+                     str(ROOT / "app/zhaoxi/reminder.c"), str(agent / "src/infra/cron_service.c"),
+                     str(agent / "src/core/message_bus.c"), str(ROOT / "tests/headless/test_reminder.c"),
+                     str(cjson / "cJSON.c"), "-Wl,--wrap=time", "-pthread", "-lm", "-o", str(executable)])
+                report["local_reminder"] = run([str(executable)]).strip().splitlines()[-1]
         else:
             report["cron_persistence"] = "not run: cJSON source missing; pass --cjson-root"
         if options.arm_prefix:
