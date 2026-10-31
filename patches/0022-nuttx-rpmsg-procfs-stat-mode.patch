@@ -1,0 +1,12 @@
+--- a/drivers/rpmsg/rpmsg_procfs.c
++++ b/drivers/rpmsg/rpmsg_procfs.c
+@@ -103,7 +103,8 @@
+ 
+ static const struct procfs_entry_s g_rpmsg_procfs_root =
+ {
+-  "rpmsg", &g_rpmsg_procfs_ops, PROCFS_FILE_TYPE
++  "rpmsg", &g_rpmsg_procfs_ops, PROCFS_FILE_TYPE,
++  S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH
+ };
+ 
+ static DEFINE_PER_CPU_BSS_BMP(char,

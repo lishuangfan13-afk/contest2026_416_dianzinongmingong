@@ -6,7 +6,7 @@
 
 | 项目 | 实际结果 | 范围 |
 | --- | --- | --- |
-| 完整 AP 编译、链接、烧录 | 通过 | 运行版本 headless_r8，AP 地址 `0x30190000`；不改 APC1 或引导固件 |
+| 完整 AP 编译、链接、烧录 | 通过 | 运行版本 headless_r10，AP 地址 `0x30190000`；不改 APC1 或引导固件 |
 | 自动启动 | 通过 | 实板 `/etc/init.d/rcS` 含后台 Agent；保持 NSH 可用 |
 | 本机音频播放 | 通过 | 真实 DMA、内部 DAC；用户明确听到两秒提示音；不是主机替身 |
 | MiMo 文本、ASR、TTS 接口 | PC 侧 HTTP 200 | 文本返回、ASR 转写、24 kHz PCM16 均实测；尚未证明板端请求成功 |
@@ -22,15 +22,15 @@
 
 ## 运行镜像
 
-仓库交付 [nuttx_ap_headless.bin](../firmware/headless/nuttx_ap_headless.bin) 及同目录 manifest。当前它与实际烧入的 `nuttx_ap_headless_r8.bin` 字节一致：
+仓库交付 [nuttx_ap_headless.bin](../firmware/headless/nuttx_ap_headless.bin) 及同目录 manifest。当前它与实际烧入的 `nuttx_ap_headless_r10.bin` 字节一致：
 
 ```text
-大小：1300672 字节
-SHA256：450d7b8113f8846cfb3cd09d8dfdc4587cd55e431acce5520b218998734afc48
+大小：1305328 字节
+SHA256：0ebb41634cd6ba1796de5064990cba93a9b7bed6dfc52462654779a063598300
 烧录地址：0x30190000
 ```
 
-`headless_r8` 是本轮集成版本名，与历史“V5”宣传演示固件无关。镜像不携带用户 API key、Wi-Fi 凭据或录音。这些配置位于设备的 `/emmc/zhaoxi/config/config.json`，不提交 Git。
+`headless_r10` 是本轮集成版本名，与历史“V5”宣传演示固件无关。镜像不携带用户 API key、Wi-Fi 凭据或录音。这些配置位于设备的 `/emmc/zhaoxi/config/config.json`，不提交 Git。
 
 ## 构建输入
 
@@ -45,7 +45,7 @@ SHA256：450d7b8113f8846cfb3cd09d8dfdc4587cd55e431acce5520b218998734afc48
 ## 源码集成与构建
 
 1. 准备所列依赖，将本仓库 `app/zhaoxi` 链接为 `packages/zhaoxi`，移除旧的显示应用构建链接。
-2. 按 [补丁说明](../patches/README.md) 分别应用 SDK 与 vendor 补丁；不要对整个补丁目录无条件排序应用。
+2. 按 [补丁说明](../patches/README.md) 分别应用 SDK、vendor 与 NuttX 补丁；不要对整个补丁目录无条件排序应用。
 3. 确认 packages 根目录的 CMake/Kconfig/Make 入口能发现 `ai_agent` 和 `zhaoxi`。本地使用 `nuttx_add_subdirectory()`、`nuttx_generate_kconfig()`，Kconfig 包含两项应用；已有 packages 入口应合并，不能覆盖其他工程。
 4. 执行下面的完整构建命令。脚本会检查 BSP 库校验值、安装已验证配置、重载配置、触发 ROMFS 重新生成并检查封装内容，再输出 AP 镜像。
 
@@ -108,3 +108,9 @@ python3 tools/check_headless.py \
 SDK 补丁逐个应用到原始源码副本，并与实际构建源码逐文件比较通过。主机测试覆盖真实消息总线、40 次并发关闭/重建、核心 Skill 筛选及真实 cron 持久化；后者包括写满失败回滚、恢复副本、损坏文件拒绝和 `rand()` 恒零时编号仍唯一。ASan/UBSan 检查通过。Windows 资产检查使用 `tests/headless/test_assets.ps1`。
 
 工具诊断入口 `zhaoxi --tool <name> /tmp/args.json` 调用真实工具注册表，用于读写与调度验收。它不经过 ASR 或 LLM。接下来仍需完成板端联网问答、自然语言记事/待办/提醒，以及到期语音播报，才能判定三项产品功能全部跑通。
+
+## R10 DNS 与提醒增量
+
+R10 已完整烧录。实板真实 resolver 的本机 A、CNAME+A、NXDOMAIN 对照通过；配置恢复及 Agent 重启通过。当前外部原始 DNS 查询在无IP条件下返回 ENETUNREACH，尚未接收到可用于解析的公网应答。历史有IP后的超时仍需重捕获，不把天线或解析器直接认定为唯一根因。详见 [DNS 解析审计](DNS解析审计.md) 及 [本轮证据](bringup_logs/20261031_dns_board.json)。
+
+0022 修复已复现的 procfs属性查询重启，R9/R10实板验证通过。0023 增加本机提醒、提示音回退、拥堵保留及最近到期时间唤醒；真实三秒CLI提醒在五秒窗口内投递。0024 修复两项已复现的DNS TCP路径缺陷；本次小米UDP回复约150字节、不带TC，不将它们当成本次已证根因。全部自动检查与主观听音边界分别记录。

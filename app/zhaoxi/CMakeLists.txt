@@ -1,7 +1,7 @@
 if(CONFIG_EXAMPLES_ZHAOXI)
   set(ZHAOXI_SRCS zhaoxi_main.c)
   if(CONFIG_ZHAOXI_BES_AUDIO)
-    list(APPEND ZHAOXI_SRCS bes_audio.c bes_clock.c)
+    list(APPEND ZHAOXI_SRCS bes_audio.c bes_clock.c reminder.c dns_diag.c)
   endif()
   if(CONFIG_ZHAOXI_MIMO_VOICE)
     list(APPEND ZHAOXI_SRCS mimo_voice.c)

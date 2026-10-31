@@ -66,5 +66,9 @@
     "profile": "apheadless",
     "bsp_library_profile": "apaudio3",
     "target": "AP at 0x30190000"
-  }
+  },
+  "nuttx_local_patch_numbers": [
+    22,
+    24
+  ]
 }

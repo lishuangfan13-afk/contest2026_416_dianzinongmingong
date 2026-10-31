@@ -1,0 +1,36 @@
+{
+  "profile": "passed",
+  "board_operations": false,
+  "commands": "PASS: routes, UTF-8, validation, full queue, pre-init, shutdown and audio API error propagation.",
+  "shutdown": "passed: 40 teardown/re-init cycles with concurrent producers or consumers",
+  "worker_lifecycle": "PASS: 50 single-instance/worker-drain cycles, network-first barrier and late-worker refusal.",
+  "skill_profile": "passed: core-only discovery, legacy file exclusion, deployed asset preservation, standard profile and summary bounds",
+  "cron_persistence": "PASS: persistent add/remove, reload, flush-failure rollback, recovery copy, corrupt-data refusal and unique IDs with rand() always zero.",
+  "local_reminder": "PASS: local reminder CRUD, time/input/save guards, offline/TTS/audio failures, real scheduler queue-full retention and single delivery.",
+  "arm_object": "compiled; not a complete flashable firmware",
+  "dns_regression": {
+    "source_sha256": "dd4d459249dbfc9975097795725e16a0c69a750b6d7b86219cc455619351613a",
+    "cases": {
+      "short_stream_io": {
+        "exit_code": 0,
+        "stdout": "send_result=8 second_write_offset=3 expected=3\nrecv_result=8 matches_expected=1 gap_byte3=100 tail_at8=\u0000\n",
+        "stderr": ""
+      },
+      "truncation_socket_leak": {
+        "exit_code": 0,
+        "stdout": "callback_result=1 sockets_created=2 sockets_closed=2 leaked=0\n",
+        "stderr": ""
+      },
+      "ordinary_dns_parse_controls": {
+        "exit_code": 0,
+        "stdout": "A=1 compressed_CNAME_then_A=1 TC=-11 tcp_requested=1 NXDOMAIN=-71\n",
+        "stderr": ""
+      },
+      "actual_mimo_reply_replay": {
+        "exit_code": 0,
+        "stdout": "recorded_MiMo_reply_bytes=149 result=1 address=220.181.104.192 TCP_requested=0\n",
+        "stderr": ""
+      }
+    }
+  }
+}
