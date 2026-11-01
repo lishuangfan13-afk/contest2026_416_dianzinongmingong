@@ -1,7 +1,7 @@
 {
   "image": "nuttx_ap_headless.bin",
-  "size": 1355784,
-  "sha256": "763b7bd1ef1b10f7205f89380b4bf30a31a61cbb833ca7e18c0a6519d6bd8aec",
+  "size": 1355720,
+  "sha256": "8aa769552f24f0caffcc6822b30d0b30f3674c7642117f4b1ef8c7e7022f2f49",
   "flash_address": "0x30190000",
   "ntc_patch": {
     "offset": 18364,
@@ -99,6 +99,7 @@
     "0060-packages_ai_agent-verify-slash-reminders-and-reject-truncation.patch": "5c3b6ca4035ef2cd756dce8592496c98f574c85d1f15e610536aa3191207a921",
     "0061-packages_ai_agent-retire-workers-by-stable-cleanup-token.patch": "b6aade06fd361b378112d4ff5c8b2ba18ff3d737f66d87fe31f7194c1f1cf384",
     "0062-packages_ai_agent-use-contest-wake-phrases-and-clear-rejected-vad.patch": "be014c8b37b6eceb0d62b442fd51e625b89968a8a4ce9a234188b27c090b9cd5",
-    "0063-packages_ai_agent-serialize-local-alert-output.patch": "daed2fb1dca4ed518fefb2f47dfd62f833b8a5917714a1bbbf42e356cc2cf226"
+    "0063-packages_ai_agent-serialize-local-alert-output.patch": "daed2fb1dca4ed518fefb2f47dfd62f833b8a5917714a1bbbf42e356cc2cf226",
+    "0064-packages_ai_agent-validate-buffered-http-response-framing.patch": "2e45fcc123bc2c3f3e39497059e46a1d42144f3302c4a0da20b114823dcd5bcc"
   }
 }

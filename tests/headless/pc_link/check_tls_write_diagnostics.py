@@ -9,9 +9,11 @@ a=p.parse_args()
 text=(a.sdk/'src/infra/vela_tls.c').read_text()
 begin=text.index('#ifdef CONFIG_ZHAOXI_BES_AUDIO\n/* Counters describe plaintext')
 end=text.index('\n/**\n * Read full HTTP/1.1 response.',begin)
-reader_begin=text.index('static int tls_read_response(',end)
-reader_end=text.index('/* ── Bounded incremental HTTP response delivery',reader_begin)
-actual=text[begin:end]+text[reader_begin:reader_end]
+reader_begin=text.index('typedef struct {\n    tls_ctx_t *ctx;\n    unsigned char buffer[2048]',end)
+reader_end=text.index('/* ── Public API',reader_begin)
+clock_begin=text.index('static int64_t tls_stream_now_ms(',end)
+clock_end=text.index('static int tls_stream_send(',clock_begin)
+actual=text[begin:end]+text[clock_begin:clock_end]+text[reader_begin:reader_end]
 template=Path(__file__).with_name('test_tls_write_diagnostics.c').read_text()
 with tempfile.TemporaryDirectory(prefix='zhaoxi-tls-write-diag-') as folder:
     folder=Path(folder);source=folder/'test.c';exe=folder/'test'

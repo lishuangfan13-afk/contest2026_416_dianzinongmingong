@@ -9,8 +9,8 @@
 | 开发板 | BES2800BP EVB，板级目录 `vendor/bes/boards/best1700_ep/aos_evb` |
 | 产品配置 | `apheadless`，匹配 `apaudio3` BSP 库 |
 | 镜像 | [nuttx_ap_headless.bin](../firmware/headless_pc_link/nuttx_ap_headless.bin) |
-| 镜像大小 | 1,355,784 字节 |
-| SHA256 | `763b7bd1ef1b10f7205f89380b4bf30a31a61cbb833ca7e18c0a6519d6bd8aec` |
+| 镜像大小 | 1,355,720 字节 |
+| SHA256 | `8aa769552f24f0caffcc6822b30d0b30f3674c7642117f4b1ef8c7e7022f2f49` |
 | AP 烧录地址 | `0x30190000` |
 | 持久数据目录 | `/emmc/zhaoxi` |
 | 来源与校验 | [固件 manifest](../firmware/headless_pc_link/nuttx_ap_headless.manifest.json) |
@@ -137,6 +137,7 @@ EasyMatrix 源码、依赖锁和分区说明位于 [extension/EasyMatrix](../ext
 | `tests/headless/voice/check_bes_dma_irq.py` | DMA 完成唤醒、取消、超时与旧信号边界 |
 | `tests/headless/voice/check_mimo_sse.py` | 实际 SSE、base64、PCM 分段与结束边界 |
 | `tests/headless/voice/check_tts_queue.py` | 有界播放队列、背压、停止与预缓冲 |
+| `tests/headless/pc_link/check_tls_buffered_framing.py` | 整份生产 HTTP 解析、合法分块扩展与尾字段、长度与截断错误、1xx／HEAD／304 |
 | `tests/headless/pc_link/check_tls_stream.py` | HTTPS 分片、接收恢复与绝对截止时间 |
 | `tests/headless/pc_link/check_tls_write_diagnostics.py` | 请求完整写入、socket 状态与失败反馈 |
 | `tools/check_ppp.py` | 生命周期、批量接收、转义协商和整帧发送 |
@@ -172,14 +173,14 @@ powershell -File tests/headless/test_assets.ps1
 | 检查范围 | 实际结果 |
 | --- | --- |
 | 电脑供网与 UTC | 正式入口完成授时、控制通信和真实模型请求 |
-| 直接备忘与待办 | 追加、查询、精确完成及旧内容保留通过；直接备忘约 0.349s，待办约 0.331～0.377s |
+| 直接备忘与待办 | 追加、查询、精确完成及旧内容保留通过；直接备忘约 0.346s，待办约 0.337～0.397s |
 | 中文快捷指令 | 记事、待办、三十秒相对提醒、喝水开启／状态／重复开启／关闭均走本地，文本模型调用为零 |
 | 定时提醒 | 创建、同编号回读、到期移除、取消后不投递，以及既有任务保留通过 |
-| 问答 | 11 次真实请求均取得对应回答；板端模型阶段中位数 1.946s，范围 1.674～42.235s |
+| 问答 | 15 次真实请求均取得对应回答；板端模型阶段中位数 2.139s，范围 1.754～3.830s |
 | 退出与串口 | `quit` 返回 0，主机确认真实关闭串口 |
 | 连续启停 | 同一固件连续 10 轮完成启动、对应问题的正确回答与正常退出，无回答缓存命中；串口、接收线程及网关均完成清理，退出后无残留 Agent |
 
-10 轮启停均无需按 RESET，每轮完整启动至停机约 19.700～22.042 秒；这个时间包含启动与清理，问答耗时按上表单独记录。
+10 轮启停均无需按 RESET，每轮完整启动至停机约 19.868～24.908 秒；这个时间包含启动与清理，问答耗时按上表单独记录。
 
 EasyMatrix 的七种表情、协议回执、帧更新、TTL 恢复和状态读回通过，原有 23 项像素钟配置保持。实物交接按 [交付清单](交付核对清单.md) 复核供电、POWER、接口、数据回读和合盖后的声音。
 

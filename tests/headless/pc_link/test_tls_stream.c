@@ -11,6 +11,7 @@
 #include <time.h>
 #include <unistd.h>
 #include "infra/vela_tls.h"
+#define TLS_RAW_BUF_SIZE 8192
 
 #define MBEDTLS_ERR_SSL_TIMEOUT -101
 #define MBEDTLS_ERR_NET_RECV_FAILED -102
@@ -20,6 +21,10 @@
 typedef struct {int fd;} mbedtls_net_context;
 typedef struct {void *bio;int (*recv)(void *,unsigned char *,size_t);} fake_ssl;
 typedef struct {fake_ssl ssl;mbedtls_net_context net;} tls_ctx_t;
+#ifdef CONFIG_ZHAOXI_BES_AUDIO
+static void tls_diag_socket(tls_ctx_t *ctx,const char *stage,size_t bytes,int ret,int error)
+{ (void)ctx;(void)stage;(void)bytes;(void)ret;(void)error; }
+#endif
 struct feed {const unsigned char *bytes;size_t length,position,fragment;
              bool want,early;int error_at,callback_error,connect_error,write_error;
              size_t calls,used;int64_t now,tick;int allocations,cleanups;
@@ -150,6 +155,7 @@ static void *parallel(void *unused)
 int main(void)
 {
     expect("HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello",200,"hello");
+    expect("HTTP/1.1 100 Continue\r\n\r\nHTTP/1.1 103 Hint\r\nLink: </x>\r\n\r\nHTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello",200,"hello");
     expect("HTTP/1.1 200 OK\r\ncontent-length:\t5 \r\nContent-Encoding: identity\r\n\r\nhello",200,"hello");
     expect("HTTP/1.0 200 OK\r\n\r\nclose-delimited",200,"close-delimited");
     expect("HTTP/1.1 200\r\nContent-Length: 0\r\n\r\n",200,"");

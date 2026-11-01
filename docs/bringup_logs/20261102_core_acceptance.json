@@ -4,8 +4,8 @@
   "firmware": {
     "bes_ap": {
       "image": "nuttx_ap_headless.bin",
-      "sha256": "763b7bd1ef1b10f7205f89380b4bf30a31a61cbb833ca7e18c0a6519d6bd8aec",
-      "size": 1355784,
+      "sha256": "8aa769552f24f0caffcc6822b30d0b30f3674c7642117f4b1ef8c7e7022f2f49",
+      "size": 1355720,
       "address": "0x30190000"
     },
     "easymatrix": {
@@ -16,7 +16,7 @@
     }
   },
   "sdk_patch_replay": {
-    "patches": 48,
+    "patches": 49,
     "files_compared": 28,
     "byte_equal_to_build_workspace": true
   },
@@ -79,8 +79,8 @@
     "physical_reset_required": false,
     "default_official_wake_phrase_verified_each_cycle": true,
     "full_cycle_seconds": {
-      "min": 19.7,
-      "max": 22.042
+      "min": 19.868,
+      "max": 24.908
     }
   },
   "host_tests": {
@@ -95,11 +95,11 @@
     "existing_matrix_config_values_preserved": 23
   },
   "local_command_timings_seconds": {
-    "note_complete": 0.349,
-    "todo_A_complete": 0.364,
-    "todo_B_complete": 0.377,
-    "todo_complete_A_complete": 0.357,
-    "todo_list_complete": 0.331
+    "note_complete": 0.346,
+    "todo_A_complete": 0.397,
+    "todo_B_complete": 0.364,
+    "todo_complete_A_complete": 0.358,
+    "todo_list_complete": 0.337
   },
   "notification_interface_validation": "Local HTTP fixtures; live account configuration is supplied separately.",
   "voice_code_regression": {
@@ -115,12 +115,39 @@
     "asan_ubsan": "passed"
   },
   "read_only_auto_status_cli_actual": true,
-  "model_request_timings": {
+  "earlier_release_model_timings": {
     "samples": 11,
     "metric": "board LLM stage seconds",
     "median_seconds": 1.946,
     "min_seconds": 1.674,
     "max_seconds": 42.235,
+    "microphone_enabled": false,
+    "firmware_sha256": "763b7bd1ef1b10f7205f89380b4bf30a31a61cbb833ca7e18c0a6519d6bd8aec"
+  },
+  "model_request_timings": {
+    "samples": 15,
+    "metric": "board LLM stage seconds",
+    "median_seconds": 2.139,
+    "min_seconds": 1.754,
+    "max_seconds": 3.83,
     "microphone_enabled": false
+  },
+  "http_response_framing": {
+    "whole_production_source_asan_ubsan": "passed product and standard",
+    "valid_chunk_extensions_and_trailers": "complete body",
+    "invalid_length_early_eof_capacity": "explicit error and cleared output",
+    "interim_head_304": "passed",
+    "original_42_second_sample_cause": "not established by this correction"
+  },
+  "passive_transport_observation": {
+    "text_queries": 8,
+    "packets": 618,
+    "kernel_drops": 0,
+    "encrypted_metadata_only": true,
+    "raw_pcap_saved": false,
+    "baseline_wall_median_seconds": 3.555,
+    "updated_wall_median_seconds": 3.572,
+    "slow_sample_observed": "10.238 seconds primarily in connection and handshake",
+    "original_42_second_delay_reproduced": false
   }
 }

@@ -11,7 +11,7 @@ def main():
     a=p.parse_args();sdk=a.sdk.resolve()
     actual=(sdk/'src/infra/vela_tls.c').read_text()
     begin=actual.index('/* ── Bounded incremental HTTP response delivery')
-    end=actual.index('/* ── Public API',begin)
+    end=actual.index('typedef struct {\n    char *buffer;\n    size_t capacity, used;',begin)
     public_begin=actual.index('int vela_https_post_json_stream(')
     public_end=actual.index('int vela_https_head_date(',public_begin)
     with tempfile.TemporaryDirectory(prefix='zhaoxi-tls-stream-') as folder:
