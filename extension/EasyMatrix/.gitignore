@@ -1,0 +1,5 @@
+/build/
+/artifacts/
+/artifacts-final/
+/tests/*.exe
+__pycache__/

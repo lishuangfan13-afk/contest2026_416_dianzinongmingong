@@ -89,7 +89,11 @@ def main():
                 'startup_in_packaged_romfs_verified': True, 'persistent_data_root': '/emmc/zhaoxi',
                 'credentials_source': 'runtime device config, not build options',
                 'hardware_functional_acceptance_complete': False,
-                'app_sources': {str(p.relative_to(REPO)): digest(p) for p in sorted((REPO / 'app/zhaoxi').glob('*')) if p.is_file()},
+                'app_sources': {str(p.relative_to(REPO)): digest(p)
+                                for p in sorted((REPO / 'app/zhaoxi').rglob('*'))
+                                if p.is_file() and '__pycache__' not in p.parts
+                                and (p.suffix in ('.c', '.h', '.cpp', '.hpp', '.md', '.cmake', '.json')
+                                     or p.name in ('CMakeLists.txt', 'Makefile', 'Make.defs', 'Kconfig'))},
                 'patches': {p.name: digest(p) for p in sorted((REPO / 'patches').glob('*.patch')) if int(p.name[:4]) >= 8}}
     target.with_suffix('.manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
     print(json.dumps({'image': str(target), 'sha256': manifest['sha256'], 'size': len(image)}))

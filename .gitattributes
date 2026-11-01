@@ -12,5 +12,31 @@
 /patches/*.patch text eol=lf whitespace=-blank-at-eol,-blank-at-eof
 /patches/README.md text eol=lf
 /tools/*.py text eol=lf
+/tools/pc_link/*.py text eol=lf
+/tools/pc_link/*.md text eol=lf
+/tests/display/*.py text eol=lf
 /tools/*.ps1 text eol=lf
 /.gitattributes text eol=lf
+# Hash-locked extension sources must have identical bytes on Windows and Linux.
+/extension/EasyMatrix/**/*.ino text eol=lf
+/extension/EasyMatrix/**/*.cpp text eol=lf
+/extension/EasyMatrix/**/*.c text eol=lf
+/extension/EasyMatrix/**/*.h text eol=lf
+/extension/EasyMatrix/**/*.hpp text eol=lf
+/extension/EasyMatrix/**/*.csv text eol=lf
+/extension/EasyMatrix/**/*.json text eol=lf
+/extension/EasyMatrix/**/*.md text eol=lf
+/extension/EasyMatrix/**/*.py text eol=lf
+/extension/EasyMatrix/**/*.txt text eol=lf
+/extension/EasyMatrix/**/.gitignore text eol=lf
+/extension/EasyMatrix/**/*.png binary
+/firmware/easymatrix/*.bin binary
+/firmware/easymatrix/*.json text eol=lf
+/firmware/easymatrix/*.md text eol=lf
+/firmware/headless_pc_link/*.json text eol=lf
+/docs/bringup_logs/*.json text eol=lf
+# Preserve baseline whitespace in imported clock sources with locked build hashes.
+# New expression modules and their tests use the normal whitespace checks.
+/extension/EasyMatrix/** whitespace=-blank-at-eol,-blank-at-eof
+/extension/EasyMatrix/emotion_* whitespace=blank-at-eol,blank-at-eof,space-before-tab
+/extension/EasyMatrix/tests/** whitespace=blank-at-eol,blank-at-eof,space-before-tab

@@ -1,0 +1,63 @@
+{
+  "source": "User-provided EasyMatrix Arduino source",
+  "archive_sha256": "ce9e9e953ffff3cc6bfacc11ecc34038e1cf91251e613331c23eb8b5942850c1",
+  "archive_bytes": 6489667,
+  "source_files_copied": 29,
+  "old_build_outputs_excluded": true,
+  "private_device_data_copied": false,
+  "base_source_sha256": {
+    "buzzer.cpp": "bdb7adf45622c227575fd149641dab647450d09d04a7302cccd966733670b673",
+    "buzzer.h": "8cc68faa5a7aede3526b21e3dcf6b121b55a390b5684f45c24b93dafa23d5529",
+    "common.h": "e3c94d278a752c0ef4f37d458186076f98b571ef756dcf48b06ea459a137d165",
+    "drawPage.h": "a3f98a891f01c385af92494e7eaf136ee601d2dbfcce387907ce745597c6a891",
+    "EasyMatrix.ino": "97ddcfa663b92826ace69b181ed21a881715ad9e83f8ea77d6002549c7cbd502",
+    "light.cpp": "2baba2b83a55487b57a7b9fa3855bb7569605a3471d06da5f2689d3074d281cb",
+    "light.h": "4537fa83882100de7f1fb5d39209330df38f7f485c67e44fb69ca5a00444a4e6",
+    "MyFont.h": "5cc2029dbb17db762282e12fcd3c65d325fdaec339acd498e5eeac3e75009faa",
+    "net.cpp": "4c2df9cec464683c2bfae14d8649fb15bd7b34e452309d2ebd1a320a7dbfc34f",
+    "net.h": "38797af4332c22dfd46a7652943776fc912155668a85609581dd1452bd0f511d",
+    "preferencesUtil.cpp": "ccf665b5a677b8b43044970690d21e36022f2510eac2c5e11e21b954b45ea01f",
+    "preferencesUtil.h": "9e9c4efe29559d48ce2531bab72940a1e695d5f063d775d1591ae176b4e97972",
+    "songs.h": "bb7f26f3c21507884fc566a707c8abb7b933b281e2198dc70bace9b4b120c830",
+    "task.cpp": "45a703b757b28ff07b1606ba3c97412f853bcbc6efd0dcc9dd593bba48824a5a",
+    "task.h": "72f60dcb0eeaca46bd32d504fb8062381dd4f7fc853cc7c572b4c69e47288aa0",
+    "img/animHack.h": "86d0510884cc6142ba18bae60732a1385919db0504dd088f916a9f993b7e8f36",
+    "img/bell.h": "e747cd28546d668cf223817301ff32658a1cb986ce70c553a65a944789e82577",
+    "img/checkingTime.h": "a1d0345f943ea1ce8b85ec030ca1ce7c546d2817bfdc30d0805a11326b064ed4",
+    "img/timeAnim0.h": "97507ef017f962990448cff294e24dafe6d62adabf8bbd9817f93835fa8c01a9",
+    "img/timeAnim1.h": "4b167b0a3f5b87e118886128655724a878fd18cccdcff6146c75e5ee5989b0b1",
+    "img/timeAnim2.h": "8bb119d91883d6865a1473a7f9a9696cb4dafa3b9a63ebad701392e0f31d4bb2",
+    "img/timeAnim3.h": "ff0a3a291197662950d4f89ea777dea5fbf9d2545dd118315855b2bebf3e69b6",
+    "img/timeAnim4.h": "449e59eb4c216379e6279e9281e4205eb7e08a348f1d1d7468dcb5e21f202039",
+    "img/timeAnim5.h": "6db342c3dd8dd7670d11b8ac358661b3d42609e785da14dc3060184d06bb32b0",
+    "img/timeAnim6.h": "eb68fe4f0dde26507b82a27ba4b5245179e7d3795e2720e6488351bb97f96b72",
+    "img/timeAnim7.h": "60f331b73e396c2c19737020edc5ed4baa5a01a815bc806fef351f43eede6fbe",
+    "img/timeAnim8.h": "b66218c4d0247c852678cbf6bc3a2d423ea4c4b7270cc697037279d1f3479837",
+    "img/timeIcons.h": "2417eb2c7e660ae09c8613d06bb484e1c4e7db96b6b8e215933d666157596862",
+    "img/weatherIcons.h": "4173861e1dc6f902c742a42ca45d0809345f051e6faef3c62cadfba6e3075852"
+  },
+  "partition_layout_source": "Live 4MB Flash table parsed by root on 2026-11-02, not the older archive build",
+  "partition_layout": {
+    "nvs": [
+      "0x9000",
+      "0x5000"
+    ],
+    "otadata": [
+      "0xe000",
+      "0x2000"
+    ],
+    "app0": [
+      "0x10000",
+      "0x300000"
+    ],
+    "spiffs": [
+      "0x310000",
+      "0xe0000"
+    ],
+    "coredump": [
+      "0x3f0000",
+      "0x10000"
+    ]
+  },
+  "flash_backup_included": false
+}

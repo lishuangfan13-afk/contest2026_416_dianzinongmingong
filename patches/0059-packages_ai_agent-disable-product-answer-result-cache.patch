@@ -1,0 +1,15 @@
+--- a/src/core/agent_loop.c
++++ b/src/core/agent_loop.c
+@@ -1300,7 +1300,11 @@
+     product_mutation_t mutation = product_mutation_intent(msg->content);
+     int mutation_first = cJSON_GetArraySize(messages);
+     bool mutation_repair_sent = false;
+-    cacheable = mutation == PRODUCT_MUTATION_NONE;
++    /* Product answers depend on the full conversation, instructions and
++     * runtime configuration. A prefix/hash-only result cache cannot identify
++     * that context safely. Disable both answer lookup and storage here;
++     * unrelated prompt/tool/schema caches keep their existing behavior. */
++    cacheable = false;
+ #endif
+ 
+     /* Router: select and apply best backend before first LLM call.

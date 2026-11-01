@@ -11,6 +11,9 @@ import time
 
 HERE=Path(__file__).resolve().parent
 STATE=HERE.parents[1]/'out/pc_link'
+# Covers the board's 90-second quit drain, bounded serial cleanup, outstanding
+# control threads and WSL gateway cleanup. Confirmation still ends it early.
+STOP_SESSION_WAIT_SECONDS=240
 
 
 def choose_port(ports,requested=None):
@@ -118,7 +121,7 @@ def active_sessions(state_dir):
     return active
 
 
-def stop_session(state_dir=STATE,wait_seconds=60):
+def stop_session(state_dir=STATE,wait_seconds=STOP_SESSION_WAIT_SECONDS):
     active=active_sessions(state_dir)
     if not active:
         print('当前没有正在运行的朝夕供网会话。');return 0

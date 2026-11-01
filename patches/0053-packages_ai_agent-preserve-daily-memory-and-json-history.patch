@@ -1,0 +1,469 @@
+--- a/src/core/memory_store.c
++++ b/src/core/memory_store.c
+@@ -28,19 +28,22 @@
+ #include <string.h>
+ #include <time.h>
+ #include <sys/stat.h>
++#include <stdint.h>
++#include <unistd.h>
+ 
+ static const char *TAG = "memory";
+ 
+-static void get_date_str(char *buf, size_t size, int days_ago)
++static int get_date_str(char *buf, size_t size, int days_ago)
+ {
+     time_t now;
+     time(&now);
+-    now -= days_ago * 86400;
++    now -= (time_t)days_ago * 86400;
+     /* Use gmtime_r + manual UTC+8 offset to avoid NuttX zoneinfo errors */
+     struct tm tm_val;
+     time_t local_epoch = now + 8 * 3600;
+-    gmtime_r(&local_epoch, &tm_val);
+-    strftime(buf, size, "%Y-%m-%d", &tm_val);
++    if (!gmtime_r(&local_epoch, &tm_val) ||
++        !strftime(buf, size, "%Y-%m-%d", &tm_val)) return ERROR;
++    return OK;
+ }
+ 
+ /* Create directory if not exists (recursive) */
+@@ -51,6 +54,7 @@
+         /* Try to create parent first */
+         char parent[256];
+         strncpy(parent, path, sizeof(parent) - 1);
++        parent[sizeof(parent) - 1] = '\0';
+         char *slash = strrchr(parent, '/');
+         if (slash && slash != parent) {
+             *slash = '\0';
+@@ -173,49 +177,55 @@
+ 
+ int memory_append_today(const char *note)
+ {
++    if (!note || ensure_dir(AGENT_MEMORY_DIR "/daily") != OK) return ERROR;
+     char date_str[16];
+-    get_date_str(date_str, sizeof(date_str), 0);
+-
+-    char path[128];
+-    snprintf(path, sizeof(path), "%s/%s.md", AGENT_MEMORY_DIR, date_str);
+-
++    if (get_date_str(date_str, sizeof(date_str), 0) != OK) return ERROR;
++    char path[256];
++    int length = snprintf(path, sizeof(path), "%s/daily/%s.md", AGENT_MEMORY_DIR, date_str);
++    if (length < 0 || (size_t)length >= sizeof(path)) return ERROR;
+     FILE *f = fopen(path, "a");
+-    if (!f) {
+-        f = fopen(path, "w");
+-        if (!f) {
+-            syslog(LOG_ERR, "[%s] Cannot open %s\n", TAG, path);
+-            return ERROR;
+-        }
+-        fprintf(f, "# %s\n\n", date_str);
+-    }
+-
+-    fprintf(f, "%s\n", note);
+-    fclose(f);
+-    return OK;
++    if (!f) return ERROR;
++    int failed = fprintf(f, "%s\n", note) < 0;
++    if (fflush(f) != 0) failed = 1;
++    if (!failed && fsync(fileno(f)) != 0) failed = 1;
++    if (fclose(f) != 0) failed = 1;
++    return failed ? ERROR : OK;
+ }
+ 
+ int memory_read_recent(char *buf, size_t size, int days)
+ {
++    if (!buf || !size) return ERROR;
+     size_t offset = 0;
+     buf[0] = '\0';
+-
++    if (days < 0) return ERROR;
+     for (int i = 0; i < days && offset < size - 1; i++) {
+         char date_str[16];
+-        get_date_str(date_str, sizeof(date_str), i);
+-
+-        char path[128];
+-        snprintf(path, sizeof(path), "%s/%s.md", AGENT_MEMORY_DIR, date_str);
+-
+-        FILE *f = fopen(path, "r");
+-        if (!f) continue;
+-
+-        if (offset > 0 && offset < size - 4) {
+-            offset += snprintf(buf + offset, size - offset, "\n---\n");
+-        }
+-        size_t n = fread(buf + offset, 1, size - offset - 1, f);
+-        offset += n;
+-        buf[offset] = '\0';
+-        fclose(f);
+-    }
+-    return OK;
+-}
++        if (get_date_str(date_str, sizeof(date_str), i) != OK) return ERROR;
++        /* New notes use daily/. Retain legacy flat files too: a newly
++         * created daily file must not hide an older same-date flat note. */
++        for (int legacy = 0; legacy < 2 && offset < size - 1; legacy++) {
++            char path[256];
++            int length = snprintf(path, sizeof(path), legacy ? "%s/%s.md" : "%s/daily/%s.md",
++                                  AGENT_MEMORY_DIR, date_str);
++            if (length < 0 || (size_t)length >= sizeof(path)) return ERROR;
++            FILE *f = fopen(path, "r");
++            if (!f) continue;
++            if (offset) {
++                const char separator[] = "\n---\n";
++                if (size - 1 - offset <= sizeof(separator) - 1) {
++                    fclose(f);
++                    return OK;
++                }
++                memcpy(buf + offset, separator, sizeof(separator) - 1);
++                offset += sizeof(separator) - 1;
++            }
++            size_t n = fread(buf + offset, 1, size - offset - 1, f);
++            offset += n;
++            buf[offset] = '\0';
++            int failed = ferror(f);
++            fclose(f);
++            if (failed) return ERROR;
++        }
++    }
++    return OK;
++}
+--- a/src/core/session_mgr.c
++++ b/src/core/session_mgr.c
+@@ -166,78 +166,88 @@
+ 
+ int session_get_history_json(const char *chat_id, char *buf, size_t size, int max_msgs)
+ {
++    if (!buf || size < 3 || !chat_id) {
++        if (buf && size) buf[0] = '\0';
++        return ERROR;
++    }
++    memcpy(buf, "[]", 3);
++    if (max_msgs <= 0) return OK;
+     pthread_mutex_lock(&s_session_lock);
+-
+     char path[128];
+     session_path(chat_id, path, sizeof(path));
+-
+     FILE *f = fopen(path, "r");
+     if (!f) {
+-        snprintf(buf, size, "[]");
+         pthread_mutex_unlock(&s_session_lock);
+         return OK;
+     }
+-
+-    /* VLA alternative: static ring buffer (max_msgs is bounded by caller) */
+     if (max_msgs > AGENT_SESSION_MAX_MSGS) max_msgs = AGENT_SESSION_MAX_MSGS;
+-
+     cJSON *messages[AGENT_SESSION_MAX_MSGS];
+-    int count = 0;
+-    int write_idx = 0;
+-
++    int count = 0, write_idx = 0;
+     char line[8192];
+     while (fgets(line, sizeof(line), f)) {
+         size_t len = strlen(line);
+-        if (len > 0 && line[len - 1] == '\n') line[len - 1] = '\0';
+-        if (line[0] == '\0') continue;
+-
+-        cJSON *obj = cJSON_Parse(line);
+-        if (!obj) continue;
+-
+-        if (count >= max_msgs) {
+-            cJSON_Delete(messages[write_idx]);
+-        }
++        if (len && line[len - 1] == '\n') line[len - 1] = '\0';
++        else if (!feof(f)) {
++            int next = fgetc(f);
++            if (next != '\n' && next != EOF) {
++                /* Never interpret the tail of an oversized JSONL record
++                 * as a fresh message. Keep later complete records. */
++                while ((next = fgetc(f)) != '\n' && next != EOF) {}
++                continue;
++            }
++        }
++        if (!line[0]) continue;
++        cJSON *obj = cJSON_ParseWithOpts(line, NULL, true);
++        cJSON *role = cJSON_GetObjectItem(obj, "role");
++        cJSON *content = cJSON_GetObjectItem(obj, "content");
++        if (!cJSON_IsString(role) || !cJSON_IsString(content)) {
++            cJSON_Delete(obj);
++            continue;
++        }
++        if (count >= max_msgs) cJSON_Delete(messages[write_idx]);
+         messages[write_idx] = obj;
+         write_idx = (write_idx + 1) % max_msgs;
+         if (count < max_msgs) count++;
+     }
+     fclose(f);
+-
+     cJSON *arr = cJSON_CreateArray();
+-    int start = (count < max_msgs) ? 0 : write_idx;
++    bool allocation_failed = arr == NULL;
++    int start = count < max_msgs ? 0 : write_idx;
+     for (int i = 0; i < count; i++) {
+         int idx = (start + i) % max_msgs;
+         cJSON *src = messages[idx];
+-
+         cJSON *entry = cJSON_CreateObject();
+-        cJSON *role    = cJSON_GetObjectItem(src, "role");
+-        cJSON *content = cJSON_GetObjectItem(src, "content");
+-        if (role && content) {
+-            cJSON_AddStringToObject(entry, "role",    role->valuestring);
+-            cJSON_AddStringToObject(entry, "content", content->valuestring);
+-        }
+-        cJSON_AddItemToArray(arr, entry);
+-    }
+-
+-    /* Cleanup ring buffer */
+-    int cleanup_start = (count < max_msgs) ? 0 : write_idx;
+-    for (int i = 0; i < count; i++) {
+-        cJSON_Delete(messages[(cleanup_start + i) % max_msgs]);
+-    }
+-
+-    char *json_str = cJSON_PrintUnformatted(arr);
++        if (arr && entry &&
++            cJSON_AddStringToObject(entry, "role", cJSON_GetObjectItem(src, "role")->valuestring) &&
++            cJSON_AddStringToObject(entry, "content", cJSON_GetObjectItem(src, "content")->valuestring)) {
++            cJSON_AddItemToArray(arr, entry);
++        } else {
++            allocation_failed = true;
++            cJSON_Delete(entry);
++        }
++        cJSON_Delete(src);
++    }
++    int result = ERROR;
++    if (arr && !allocation_failed) {
++        /* Drop complete oldest messages; never strncpy a JSON document. */
++        for (;;) {
++            char *json = cJSON_PrintUnformatted(arr);
++            if (!json) break;
++            size_t length = strlen(json);
++            if (length < size) {
++                memcpy(buf, json, length + 1);
++                result = OK;
++                free(json);
++                break;
++            }
++            free(json);
++            if (!cJSON_GetArraySize(arr)) break;
++            cJSON_DeleteItemFromArray(arr, 0);
++        }
++    }
+     cJSON_Delete(arr);
+-
+-    if (json_str) {
+-        strncpy(buf, json_str, size - 1);
+-        buf[size - 1] = '\0';
+-        free(json_str);
+-    } else {
+-        snprintf(buf, size, "[]");
+-    }
+-
+     pthread_mutex_unlock(&s_session_lock);
+-    return OK;
++    return result;
+ }
+ 
+ int session_clear(const char *chat_id)
+--- a/src/core/context_builder.c
++++ b/src/core/context_builder.c
+@@ -31,6 +31,8 @@
+ #endif
+ 
+ #include <stdio.h>
++#include <stdarg.h>
++#include <stdlib.h>
+ #include <stdbool.h>
+ #include <string.h>
+ #include <time.h>
+@@ -38,6 +40,21 @@
+ 
+ static const char *TAG = "context";
+ 
++/* Return the actual occupied size, not snprintf's would-have-written
++ * count, so later memory sections cannot step beyond a full buffer. */
++static size_t append_format(char *buf, size_t size, size_t off, const char *format, ...)
++{
++    if (!buf || !size) return 0;
++    if (off >= size - 1) return size - 1;
++    va_list args;
++    va_start(args, format);
++    int length = vsnprintf(buf + off, size - off, format, args);
++    va_end(args);
++    if (length < 0) { buf[off] = '\0'; return off; }
++    size_t room = size - off - 1;
++    return off + ((size_t)length < room ? (size_t)length : room);
++}
++
+ /* Build a comma-separated list of registered tool names.
+  * Returns number of bytes written (excluding NUL). */
+ 
+@@ -61,7 +78,7 @@
+     cJSON_ArrayForEach(item, arr) {
+         cJSON *name = cJSON_GetObjectItem(item, "name");
+         if (name && cJSON_IsString(name) && off < size - 1) {
+-            off += snprintf(buf + off, size - off, "%s%s",
++            off = append_format(buf, size, off, "%s%s",
+                 first ? "" : ", ", name->valuestring);
+             first = false;
+         }
+@@ -74,11 +91,12 @@
+ static size_t append_file(char *buf, size_t size, size_t offset,
+                            const char *path, const char *header)
+ {
++    if (!buf || !size || offset >= size - 1) return size ? size - 1 : 0;
+     FILE *f = fopen(path, "r");
+     if (!f) return offset;
+ 
+     if (header && offset < size - 1) {
+-        offset += snprintf(buf + offset, size - offset, "\n## %s\n\n", header);
++        offset = append_format(buf, size, offset, "\n## %s\n\n", header);
+     }
+ 
+     size_t n = fread(buf + offset, 1, size - offset - 1, f);
+@@ -90,6 +108,8 @@
+ 
+ int context_build_system_prompt(char *buf, size_t size)
+ {
++    if (!buf || !size) return ERROR;
++    buf[0] = '\0';
+     size_t off = 0;
+ 
+     /* Current time — essential for cron scheduling.
+@@ -102,7 +122,7 @@
+     char time_str[64];
+     strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", &tm_now);
+ 
+-    off += snprintf(buf + off, size - off,
++    off = append_format(buf, size, off,
+         "# AI Agent\n\n"
+         "Personal AI on Vela/NuttX. Channels: Feishu, WebSocket, CLI.\n"
+         "Time: %s CST (UTC+8, tz=%s). For epoch, call get_current_time.\n\n"
+@@ -127,7 +147,7 @@
+         char tool_names[1024];
+         size_t names_len = build_tool_names(tool_names, sizeof(tool_names));
+         if (names_len > 0) {
+-            off += snprintf(buf + off, size - off,
++            off = append_format(buf, size, off,
+                 "## Capability Boundary\n"
+                 "Your ONLY tools: %s.\n"
+                 "If a user request needs a tool not in this list, "
+@@ -137,7 +157,7 @@
+         }
+     }
+ 
+-    off += snprintf(buf + off, size - off,
++    off = append_format(buf, size, off,
+         "## Memory\n"
+         "Long-term: %s/memory/MEMORY.md | Daily: %s/memory/daily/<YYYY-MM-DD>.md\n\n"
+         "## Skills\n"
+@@ -149,22 +169,22 @@
+     off = append_file(buf, size, off, AGENT_USER_FILE, "User Info");
+ 
+     /* Long-term memory — write directly into buf */
+-    off += snprintf(buf + off, size - off, "\n## Long-term Memory\n\n");
++    off = append_format(buf, size, off, "\n## Long-term Memory\n\n");
+     {
+         size_t avail = size - off - 1;
+         if (avail > 0 && memory_read_long_term(buf + off, avail) == OK && buf[off]) {
+             off += strlen(buf + off);
+-            off += snprintf(buf + off, size - off, "\n");
++            off = append_format(buf, size, off, "\n");
+         }
+     }
+ 
+     /* Recent daily notes — write directly into buf */
+-    off += snprintf(buf + off, size - off, "\n## Recent Notes\n\n");
++    off = append_format(buf, size, off, "\n## Recent Notes\n\n");
+     {
+         size_t avail = size - off - 1;
+         if (avail > 0 && memory_read_recent(buf + off, avail, 3) == OK && buf[off]) {
+             off += strlen(buf + off);
+-            off += snprintf(buf + off, size - off, "\n");
++            off = append_format(buf, size, off, "\n");
+         }
+     }
+ 
+@@ -172,7 +192,7 @@
+     char skills_buf[1024];
+     size_t skills_len = skill_loader_build_summary(skills_buf, sizeof(skills_buf));
+     if (skills_len > 0) {
+-        off += snprintf(buf + off, size - off,
++        off = append_format(buf, size, off,
+             "\n## Skills\n%s\n", skills_buf);
+     }
+ 
+@@ -181,7 +201,7 @@
+     char node_buf[512];
+     int node_count = node_manager_list(node_buf, sizeof(node_buf));
+     if (node_count > 0) {
+-        off += snprintf(buf + off, size - off,
++        off = append_format(buf, size, off,
+             "\n## Nodes\n"
+             "Remote devices. Use node:<id>:<cmd> tools for remote queries.\n%s\n",
+             node_buf);
+@@ -193,28 +213,42 @@
+ }
+ 
+ int context_build_messages(const char *history_json, const char *user_message,
+-                                  char *buf, size_t size)
+-{
+-    cJSON *history = cJSON_Parse(history_json);
+-    if (!history) {
++                           char *buf, size_t size)
++{
++    if (!buf || size < 3 || !user_message) {
++        if (buf && size) buf[0] = '\0';
++        return ERROR;
++    }
++    memcpy(buf, "[]", 3);
++    cJSON *history = history_json ? cJSON_Parse(history_json) : NULL;
++    if (!cJSON_IsArray(history)) {
++        cJSON_Delete(history);
+         history = cJSON_CreateArray();
+     }
+-
+-    cJSON *user_msg = cJSON_CreateObject();
+-    cJSON_AddStringToObject(user_msg, "role", "user");
+-    cJSON_AddStringToObject(user_msg, "content", user_message);
+-    cJSON_AddItemToArray(history, user_msg);
+-
+-    char *json_str = cJSON_PrintUnformatted(history);
++    cJSON *user = cJSON_CreateObject();
++    if (!history || !user) { cJSON_Delete(history); cJSON_Delete(user); return ERROR; }
++    if (!cJSON_AddStringToObject(user, "role", "user") ||
++        !cJSON_AddStringToObject(user, "content", user_message)) {
++        cJSON_Delete(history); cJSON_Delete(user); return ERROR;
++    }
++    cJSON_AddItemToArray(history, user);
++    int result = ERROR;
++    for (;;) {
++        char *json = cJSON_PrintUnformatted(history);
++        if (!json) break;
++        size_t length = strlen(json);
++        if (length < size) {
++            memcpy(buf, json, length + 1);
++            result = OK;
++            free(json);
++            break;
++        }
++        free(json);
++        /* Preserve the current message. If it alone cannot fit, return a
++         * clear error and valid empty JSON rather than a cut-off request. */
++        if (cJSON_GetArraySize(history) <= 1) break;
++        cJSON_DeleteItemFromArray(history, 0);
++    }
+     cJSON_Delete(history);
+-
+-    if (json_str) {
+-        strncpy(buf, json_str, size - 1);
+-        buf[size - 1] = '\0';
+-        free(json_str);
+-    } else {
+-        snprintf(buf, size, "[{\"role\":\"user\",\"content\":\"%s\"}]", user_message);
+-    }
+-
+-    return OK;
+-}
++    return result;
++}

@@ -4,7 +4,7 @@
 Requires Windows Python with pyserial, Ubuntu-22.04 WSL and its ppp package.
 No cloud API credentials are stored or used by this forwarder.
 """
-import argparse,json,os,re,secrets,socket,subprocess,threading,time
+import argparse,json,os,queue,re,secrets,socket,subprocess,threading,time
 from datetime import datetime
 from pathlib import Path
 import serial
@@ -83,7 +83,8 @@ class AutoVoiceDisplay:
             state=voice.get('state','未知');code=voice.get('last_error',0)
             enabled=voice.get('enabled') is True;running=voice.get('running') is True
             accepting=voice.get('accepting_speech')
-            key=('board-state',enabled,running,state,code,voice.get('utterances'),accepting)
+            key=('board-state',enabled,running,state,code,voice.get('utterances'),accepting,
+                 voice.get('wake_enabled'),voice.get('awake'))
             if not enabled and running:
                 text='已请求停止收音，正在等待当前处理退出；尚未确认自动语音完全停止。'
             elif not running:
@@ -104,6 +105,9 @@ class AutoVoiceDisplay:
                     '语音异常，正在恢复':'本次语音处理失败，板子正在恢复。两短音表示本次失败，随后重新等待说话。'
                 }
                 text=messages.get(state,'板端语音状态：'+str(state))
+                if state in ['等待说话','正在聆听'] and accepting is True and voice.get('wake_enabled') is True:
+                    text=('正在等待唤醒；请先说“朝夕”，也可以接着说出问题。' if voice.get('awake') is False else
+                          '朝夕已唤醒，可以直接说下一句；安静一分钟后回到等待唤醒。')
                 if state in ['等待说话','正在聆听'] and accepting is not True:
                     text=('板端正在恢复收音，尚未确认可以接收下一句话，请稍等。' if accepting is False else
                           '板端报告正在等待你说话；当前固件尚未提供实际收音确认。')
@@ -170,6 +174,10 @@ def open_gateway(settings):
         raise
 
 UART_WRITE_CHUNK = 512
+# Board Agent shutdown alone has a 45-second budget. Managed PPP can still
+# be in its one-second poll, then restores routes/DNS/TTY and prints the exit.
+# Keep forwarding through that work; a late nonzero exit remains a failure.
+BOARD_QUIT_WAIT_SECONDS = 90
 
 
 def read_available(port,maximum=8192):
@@ -235,6 +243,72 @@ def relay_inbound(link,port,stop,errors,metrics=None,expected_close=None,console
     finally:
         stop.set()
 
+def close_serial_transport(port,receiver=None,timeout=3,progress=None):
+    """Cancel I/O before joining/closing; a deadline never claims release.
+
+    Windows driver calls can outlive COMMTIMEOUTS. Isolate only final cleanup
+    so a stuck driver cannot hide the status or block Linux/token cleanup.
+    A timed-out daemon may still hold the port: callers must not reopen it.
+    """
+    events=queue.Queue()
+    result={'serial_close_confirmed':False,'serial_receiver_stopped':receiver is None,
+            'serial_cleanup_stage':'starting','serial_cleanup_timeout':False,
+            'serial_cleanup_errors':[]}
+    def stage(value):
+        result['serial_cleanup_stage']=value
+        events.put(dict(result,serial_cleanup_errors=list(result['serial_cleanup_errors'])))
+    def run():
+        try:
+            for name in ('cancel_write','cancel_read'):
+                stage(name)
+                operation=getattr(port,name,None)
+                if operation:
+                    try:operation()
+                    except Exception as error:
+                        result['serial_cleanup_errors'].append(name+': '+repr(error))
+            stage('waiting-receiver')
+            if receiver:
+                receiver.join(timeout)
+                result['serial_receiver_stopped']=not receiver.is_alive()
+            if not result['serial_receiver_stopped']:
+                result['serial_cleanup_timeout']=True
+                result['serial_cleanup_errors'].append('UART receive thread did not stop; serial close was skipped')
+                stage('receiver-still-running')
+                return
+            stage('closing-port')
+            port.close()
+            if getattr(port,'is_open',False):
+                result['serial_cleanup_errors'].append('Serial close returned while the port was still open')
+                stage('close-unconfirmed')
+                return
+            result['serial_close_confirmed']=True
+            stage('closed')
+        except Exception as error:
+            result['serial_cleanup_errors'].append('Serial cleanup: '+repr(error))
+            stage('failed')
+    worker=threading.Thread(target=run,daemon=True)
+    worker.start();deadline=time.monotonic()+timeout
+    snapshot=dict(result,serial_cleanup_errors=[])
+    while True:
+        while True:
+            try:snapshot=events.get_nowait()
+            except queue.Empty:break
+            deadline=time.monotonic()+timeout
+            if progress:progress(dict(snapshot))
+        if not worker.is_alive():
+            if not events.empty():continue
+            return snapshot
+        remaining=deadline-time.monotonic()
+        if remaining<=0:
+            snapshot=dict(snapshot,serial_close_confirmed=False,serial_cleanup_timeout=True,
+                          serial_cleanup_errors=list(snapshot['serial_cleanup_errors'])+[
+                              'Serial cleanup timed out during '+snapshot['serial_cleanup_stage']+
+                              '; port release was not confirmed'])
+            if progress:progress(dict(snapshot))
+            return snapshot
+        worker.join(min(.05,remaining))
+
+
 def wait_for_agent_stop(port,initial,timeout=90,clock=time.monotonic,emit=print):
     reply=bytearray(initial);started=clock();next_progress=started+10
     while b'[agent] Shutdown complete.' not in reply and clock()-started<timeout:
@@ -290,7 +364,7 @@ def validate_board_exit(seen,rc,control_verified):
         raise RuntimeError('开发板在控制通信验证通过前结束，本次启动失败。')
 
 def drain_board_quit(port,link,tail,serial_log,send,capture_exit,errors,
-                     metrics=None,timeout=45,clock=time.monotonic):
+                     metrics=None,timeout=BOARD_QUIT_WAIT_SECONDS,clock=time.monotonic):
     """Keep forwarding while the board closes capture and restores its console."""
     def request_quit():
         try:send({'action':'quit'},timeout=8)
@@ -465,6 +539,9 @@ def main():
             raise RuntimeError('Stopped during link setup; board console restoration has not been confirmed')
         if ready and b'PC_LINK finished' not in tail and not stop.is_set():
             closing.set()
+            status.update(phase='stopping-board',ready=False,
+                          usable_for_automatic_voice=False,accepting_speech=False,
+                          board_quit_budget_seconds=BOARD_QUIT_WAIT_SECONDS);update()
             closer=drain_board_quit(port,link,tail,serial_log,serialized_request,
                                     capture_board_exit,errors,metrics)
         validate_board_exit(status['board_finished_marker_seen'],status['board_exit_rc'],health.ever_confirmed)
@@ -474,6 +551,9 @@ def main():
         closing.set()
         try:
             if ready and not status['board_finished_marker_seen'] and not stop.is_set():
+                status.update(phase='stopping-board',ready=False,
+                              usable_for_automatic_voice=False,accepting_speech=False,
+                              board_quit_budget_seconds=BOARD_QUIT_WAIT_SECONDS);update()
                 closer=drain_board_quit(port,link,tail,serial_log,serialized_request,
                                         capture_board_exit,errors,metrics)
             validate_board_exit(status['board_finished_marker_seen'],status['board_exit_rc'],health.ever_confirmed)
@@ -491,12 +571,23 @@ def main():
         def cleanup(label,operation):
             try:operation()
             except Exception as error:errors.append(label+': '+str(error))
+        status.update(phase='closing-serial',ready=False,usable_for_automatic_voice=False,
+                      accepting_speech=False,serial_close_confirmed=port is None,
+                      serial_cleanup_stage='pending' if port else 'not-opened',
+                      serial_cleanup_timeout=False)
+        cleanup('Record serial cleanup state',update)
         if link:
             try:link.shutdown(socket.SHUT_RDWR)
             except OSError:pass
             cleanup('Close gateway socket',link.close)
-        if receiver:cleanup('Stop receive thread',lambda:receiver.join(3))
-        if port:cleanup('Close serial port',port.close)
+        if port:
+            def serial_progress(value):
+                status.update(value)
+                cleanup('Record serial cleanup progress',update)
+            serial_result=close_serial_transport(port,receiver,progress=serial_progress)
+            status.update(serial_result)
+            errors.extend(serial_result['serial_cleanup_errors'])
+        elif receiver:cleanup('Stop receive thread',lambda:receiver.join(3))
         if serial_log:cleanup('Close serial log',serial_log.close)
         cleanup('Wait for control probe',health.wait)
         cleanup('Wait for automatic voice start request',automatic.wait)

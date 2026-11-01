@@ -4,9 +4,10 @@ PROGNAME = zhaoxi
 PRIORITY = 100
 STACKSIZE = 32768
 MAINSRC = zhaoxi_main.c
-CSRCS += todo_store.c
+CSRCS += todo_store.c journal.c local_intent.c
 ifeq ($(CONFIG_ZHAOXI_BES_AUDIO),y)
-CSRCS += bes_audio.c bes_clock.c reminder.c dns_diag.c
+CSRCS += bes_audio.c bes_clock.c reminder.c drink.c dns_diag.c
+CSRCS += notifications/feishu_notify.c notifications/feishu_notify_sdk.c
 endif
 ifeq ($(CONFIG_ZHAOXI_MIMO_VOICE),y)
 CSRCS += mimo_voice.c mimo_sse.c

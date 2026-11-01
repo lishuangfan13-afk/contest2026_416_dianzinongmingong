@@ -1,0 +1,411 @@
+--- a/src/voice/voice_channel.c
++++ b/src/voice/voice_channel.c
+@@ -15,6 +15,9 @@
+  */
+ 
+ #include "voice/voice_channel.h"
++#ifdef CONFIG_ZHAOXI_BES_AUDIO
++#include "voice/voice_wake.h"
++#endif
+ #ifdef CONFIG_AI_AGENT_AUDIO_PREPROCESS
+ #include <compexp.h>
+ #include <echo_canceller.h>
+@@ -245,6 +248,8 @@
+     pthread_mutex_t lock;
+     pthread_cond_t changed;
+     bool enabled, running, awaiting, tts_playing;
++    bool wake_processing;
++    voice_wake_t wake;
+     unsigned turn_generation;
+     char pending_id[32];
+     unsigned speakers;
+@@ -254,7 +259,8 @@
+     unsigned frames_seen, utterances, asr_calls, rejected;
+     size_t last_pcm_bytes;
+     int64_t reply_started, cooldown_until;
+-} s_auto = {.lock=PTHREAD_MUTEX_INITIALIZER, .changed=PTHREAD_COND_INITIALIZER};
++} s_auto = {.lock=PTHREAD_MUTEX_INITIALIZER, .changed=PTHREAD_COND_INITIALIZER,
++            .wake=VOICE_WAKE_INITIALIZER};
+ 
+ struct local_vad {
+     unsigned calibrated, consecutive, voiced, silent, frames;
+@@ -352,6 +358,22 @@
+     pthread_mutex_unlock(&s_auto.lock);return enabled;
+ }
+ 
++/* Caller holds s_auto.lock. ASR, pending replies and every playback all
++ * suspend idle expiry; transition back to idle gives a fresh 60 seconds. */
++static void auto_wake_sync_locked(void)
++{
++    voice_wake_set_busy(&s_auto.wake,
++        s_auto.wake_processing || s_auto.awaiting || s_auto.speakers > 0,
++        (uint64_t)auto_now_ms());
++}
++static void auto_wake_processing(bool processing)
++{
++    pthread_mutex_lock(&s_auto.lock);
++    s_auto.wake_processing = processing;
++    auto_wake_sync_locked();
++    pthread_mutex_unlock(&s_auto.lock);
++}
++
+ static bool auto_can_capture(void)
+ {
+     bool timed_out=false;
+@@ -387,6 +409,7 @@
+     pthread_mutex_lock(&s_auto.lock);
+     if(!s_auto.speakers)s_auto.tts_playing=false;
+     s_auto.speakers++;
++    auto_wake_sync_locked();
+     if(s_auto.capture)audio_capture_abort(s_auto.capture);
+     while(s_auto.capture)pthread_cond_wait(&s_auto.changed,&s_auto.lock);
+     pthread_mutex_unlock(&s_auto.lock);
+@@ -398,6 +421,7 @@
+     if(s_auto.speakers)s_auto.speakers--;
+     if(!s_auto.speakers)s_auto.tts_playing=false;
+     s_auto.cooldown_until=auto_now_ms()+600;
++    auto_wake_sync_locked();
+     pthread_cond_broadcast(&s_auto.changed);
+     pthread_mutex_unlock(&s_auto.lock);
+ }
+@@ -417,6 +441,7 @@
+     if(chat_id && s_auto.awaiting && !strcmp(s_auto.pending_id,chat_id)) {
+         s_auto.awaiting=false;s_auto.pending_id[0]=0;
+         s_auto.cooldown_until=auto_now_ms()+600;
++        auto_wake_sync_locked();
+         pthread_cond_broadcast(&s_auto.changed);
+     }
+     pthread_mutex_unlock(&s_auto.lock);
+@@ -436,6 +461,7 @@
+     pthread_mutex_lock(&s_auto.lock);
+     s_auto.awaiting=false;s_auto.pending_id[0]=0;
+     s_auto.cooldown_until=auto_now_ms()+600;
++    auto_wake_sync_locked();
+     pthread_cond_broadcast(&s_auto.changed);
+     pthread_mutex_unlock(&s_auto.lock);
+ }
+@@ -516,6 +542,7 @@
+                     memcpy(pcm+used,pre+((first+i)%AUTO_PRE_FRAMES)*AUTO_FRAME_BYTES,AUTO_FRAME_BYTES);
+                     used+=AUTO_FRAME_BYTES;
+                 }
++                auto_wake_processing(true);
+                 auto_set_state(AUTO_RECORDING,0);
+             } else if(was_active && used+AUTO_FRAME_BYTES<=max_bytes) {
+                 memcpy(pcm+used,frame,AUTO_FRAME_BYTES);used+=AUTO_FRAME_BYTES;
+@@ -540,6 +567,7 @@
+         auto_capture_close();
+         if(!voice_auto_enabled() || agent_shutdown_requested())break;
+         ready_pending=true;
++        if(!completed || !used) auto_wake_processing(false);
+         if(calibrated_restart)continue;
+         if(discarding && drain_silence>=AUTO_SILENCE_FRAMES) {
+             discard_tail=false;
+@@ -555,7 +583,10 @@
+             continue;
+         }
+         auto_set_state(AUTO_ASR,0);
+-        auto_feedback(VOICE_AUTO_FEEDBACK_ACCEPTED);
++        pthread_mutex_lock(&s_auto.lock);
++        bool accepted_cue=voice_wake_poll(&s_auto.wake,(uint64_t)auto_now_ms());
++        pthread_mutex_unlock(&s_auto.lock);
++        if(accepted_cue)auto_feedback(VOICE_AUTO_FEEDBACK_ACCEPTED);
+         if(!voice_auto_enabled() || agent_shutdown_requested())break;
+         pthread_mutex_lock(&s_auto.lock);s_auto.utterances++;s_auto.asr_calls++;
+         s_auto.last_pcm_bytes=used;pthread_mutex_unlock(&s_auto.lock);
+@@ -565,12 +596,27 @@
+         syslog(LOG_INFO,"[voice_auto] ASR done: %lldms rc=%d bytes=%zu\n",
+                (long long)(auto_now_ms()-asr_started),result,used);
+         if(!voice_auto_enabled() || agent_shutdown_requested())break;
+-        if(result || !text[0]){auto_set_state(AUTO_ERROR,result?result:-ENODATA);
++        if(result || !text[0]){auto_wake_processing(false);
++            auto_set_state(AUTO_ERROR,result?result:-ENODATA);
+             auto_feedback(VOICE_AUTO_FEEDBACK_ASR_ERROR);usleep(500000);continue;}
+         if(!voice_auto_enabled() || agent_shutdown_requested())break;
++        char command[sizeof(text)];
++        pthread_mutex_lock(&s_auto.lock);
++        voice_wake_result_t gate=voice_wake_process(&s_auto.wake,text,
++            (uint64_t)auto_now_ms(),command,sizeof(command));
++        pthread_mutex_unlock(&s_auto.lock);
++        if(gate!=VOICE_WAKE_COMMAND) {
++            auto_wake_processing(false);
++            ready_pending=false;
++            if(gate==VOICE_WAKE_STOP) { voice_channel_auto_stop(); break; }
++            if(gate==VOICE_WAKE_ONLY) auto_feedback(VOICE_AUTO_FEEDBACK_READY);
++            auto_set_state(AUTO_LISTENING,0);
++            continue;
++        }
++        if(!accepted_cue)auto_feedback(VOICE_AUTO_FEEDBACK_ACCEPTED);
+         agent_msg_t message={0};
+         strcpy(message.channel,AGENT_CHAN_VOICE);
+-        message.content=strdup(text);
++        message.content=strdup(command);
+         pthread_mutex_lock(&s_auto.lock);
+         if(!s_auto.enabled) {
+             pthread_mutex_unlock(&s_auto.lock);free(message.content);break;
+@@ -578,6 +624,8 @@
+         snprintf(s_auto.pending_id,sizeof(s_auto.pending_id),"voice_auto_%u",++s_auto.turn_generation);
+         memcpy(message.chat_id,s_auto.pending_id,strlen(s_auto.pending_id)+1);
+         s_auto.awaiting=true;s_auto.reply_started=auto_now_ms();
++        s_auto.wake_processing=false;
++        auto_wake_sync_locked();
+         pthread_mutex_unlock(&s_auto.lock);
+         auto_set_state(AUTO_REPLY,0);
+         if(!message.content || message_bus_push_inbound(&message)!=0) {
+@@ -594,6 +642,7 @@
+     if(s_auto.last_error!=-ETIMEDOUT)s_auto.last_error=0;
+     s_auto.pending_id[0]=0;
+     s_auto.running=false;s_auto.enabled=false;s_auto.awaiting=false;
++    s_auto.wake_processing=false;voice_wake_reset(&s_auto.wake);
+     pthread_cond_broadcast(&s_auto.changed);
+     pthread_mutex_unlock(&s_auto.lock);
+     return NULL;
+@@ -609,6 +658,7 @@
+         pthread_mutex_unlock(&s_auto.lock);pthread_mutex_unlock(&s_voice.lock);return result;
+     }
+     s_auto.enabled=true;s_auto.running=true;s_auto.awaiting=false;s_auto.last_error=0;
++    s_auto.wake_processing=false;voice_wake_reset(&s_auto.wake);
+     pthread_mutex_unlock(&s_auto.lock);pthread_mutex_unlock(&s_voice.lock);
+     int result=agent_task_create(auto_voice_worker,"voice_auto",AGENT_VOICE_STACK,NULL,AGENT_VOICE_PRIO);
+     if(result) {
+@@ -622,10 +672,28 @@
+ {
+     pthread_mutex_lock(&s_auto.lock);s_auto.enabled=false;s_auto.awaiting=false;
+     s_auto.pending_id[0]=0;s_auto.last_error=0;
++    s_auto.wake_processing=false;voice_wake_reset(&s_auto.wake);
+     if(s_auto.capture)audio_capture_abort(s_auto.capture);
+     pthread_cond_broadcast(&s_auto.changed);pthread_mutex_unlock(&s_auto.lock);return 0;
+ }
+ 
++int voice_channel_auto_wake_set_enabled(bool enabled)
++{
++    pthread_mutex_lock(&s_auto.lock);
++    voice_wake_set_enabled(&s_auto.wake,enabled);
++    auto_wake_sync_locked();
++    pthread_mutex_unlock(&s_auto.lock);
++    return 0;
++}
++int voice_channel_auto_wake_get_state(bool *enabled,bool *awake)
++{
++    if(!enabled && !awake)return -EINVAL;
++    pthread_mutex_lock(&s_auto.lock);
++    if(enabled)*enabled=s_auto.wake.enabled;
++    if(awake)*awake=s_auto.enabled && voice_wake_poll(&s_auto.wake,(uint64_t)auto_now_ms());
++    pthread_mutex_unlock(&s_auto.lock);
++    return 0;
++}
+ int voice_channel_auto_status(char *output,size_t capacity)
+ {
+     if(!output || !capacity)return -EINVAL;
+@@ -635,15 +703,24 @@
+         s_auto.last_error==-ETIMEDOUT?"回答超时，自动监听已停止":"已停止"):auto_state_name(state);
+     bool accepting=s_auto.enabled && s_auto.running && s_auto.capture &&
+         (state==AUTO_LISTENING || state==AUTO_RECORDING);
+-    snprintf(output,capacity,"{\"enabled\":%s,\"running\":%s,\"accepting_speech\":%s,\"state\":\"%s\",\"noise\":%d,\"threshold\":%d,\"last_error\":%d,\"frames\":%u,\"utterances\":%u,\"asr_calls\":%u,\"rejected\":%u,\"last_pcm_bytes\":%zu}",
+-        s_auto.enabled?"true":"false",s_auto.running?"true":"false",accepting?"true":"false",name,
++    bool awake=s_auto.enabled && voice_wake_poll(&s_auto.wake,(uint64_t)auto_now_ms());
++    bool output_active=s_auto.speakers>0;
++    int written=snprintf(output,capacity,
++        "{\"enabled\":%s,\"running\":%s,\"accepting_speech\":%s,\"wake_enabled\":%s,\"awake\":%s,\"wake_phrase\":\"朝夕\",\"accepting_commands\":%s,\"output_active\":%s,\"output_playing\":%s,\"state\":\"%s\",\"noise\":%d,\"threshold\":%d,\"last_error\":%d,\"frames\":%u,\"utterances\":%u,\"asr_calls\":%u,\"rejected\":%u,\"last_pcm_bytes\":%zu}",
++        s_auto.enabled?"true":"false",s_auto.running?"true":"false",accepting?"true":"false",
++        s_auto.wake.enabled?"true":"false",awake?"true":"false",(accepting && awake)?"true":"false",
++        output_active?"true":"false",(output_active && s_auto.tts_playing)?"true":"false",name,
+         s_auto.noise,s_auto.threshold,s_auto.last_error,s_auto.frames_seen,
+         s_auto.utterances,s_auto.asr_calls,s_auto.rejected,s_auto.last_pcm_bytes);
+-    pthread_mutex_unlock(&s_auto.lock);return 0;
++    pthread_mutex_unlock(&s_auto.lock);
++    return written<0 || (size_t)written>=capacity ? -ENOSPC : 0;
+ }
+ #else
+ int voice_channel_auto_start(void){return -ENOSYS;}
+ int voice_channel_auto_stop(void){return -ENOSYS;}
++int voice_channel_auto_wake_set_enabled(bool enabled){(void)enabled;return -ENOSYS;}
++int voice_channel_auto_wake_get_state(bool *enabled,bool *awake)
++{if(enabled)*enabled=false;if(awake)*awake=false;return -ENOSYS;}
+ int voice_channel_auto_status(char *output,size_t capacity)
+ {if(output && capacity)snprintf(output,capacity,"{\"enabled\":false}");return -ENOSYS;}
+ void voice_channel_auto_reply_done(void){}
+--- a/src/voice/voice_channel.h
++++ b/src/voice/voice_channel.h
+@@ -57,6 +57,12 @@
+ int voice_channel_auto_start(void);
+ int voice_channel_auto_stop(void);
+ int voice_channel_auto_status(char *output, size_t capacity);
++/* RAM-only ASR wake-phrase gate. This never starts the microphone. VAD/ASR
++ * still run when auto is enabled; only recognized prefixed/awake commands
++ * enter the assistant. It is not offline/low-power keyword spotting. */
++int voice_channel_auto_wake_set_enabled(bool enabled);
++int voice_channel_auto_wake_get_state(bool *enabled, bool *awake);
++
+ 
+ /* Call after dispatching the final voice_auto reply, including TTS failure.
+  * Unrelated reminders must not complete the pending conversational turn. */
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -76,6 +76,7 @@
+ 
+   # This board uses its verified HAL path instead of the media-service PCM backend.
+   if(CONFIG_ZHAOXI_BES_AUDIO)
++    list(APPEND AGENT_SRCS src/voice/voice_wake.c)
+     list(REMOVE_ITEM AGENT_SRCS src/voice/audio_capture.c src/voice/audio_playback.c)
+   endif()
+ 
+--- a/Makefile
++++ b/Makefile
+@@ -116,6 +116,9 @@
+ 
+ # voice/ - 语音管线
+ CSRCS += src/voice/voice_channel.c
++ifeq ($(CONFIG_ZHAOXI_BES_AUDIO),y)
++CSRCS += src/voice/voice_wake.c
++endif
+ CSRCS += src/voice/voice_tts.c
+ CSRCS += src/voice/voice_asr.c
+ CSRCS += src/voice/volc_tts.c
+--- /dev/null
++++ b/src/voice/voice_wake.c
+@@ -0,0 +1,113 @@
++/* SPDX-License-Identifier: Apache-2.0 */
++#include "voice/voice_wake.h"
++#include <string.h>
++
++static uint64_t next_deadline(uint64_t now)
++{
++    return now > UINT64_MAX - VOICE_WAKE_WINDOW_MS ? UINT64_MAX : now + VOICE_WAKE_WINDOW_MS;
++}
++static const char *skip_separators(const char *text)
++{
++    static const char *unicode[] = {"，", "。", "、", "！", "？", "：", "；", "“", "”", "‘", "’", "　", "\xc2\xa0", NULL};
++    for (;;) {
++        if (*text && strchr(" \t\r\n,.:;!?\"'", (unsigned char)*text)) { text++; continue; }
++        int found = 0;
++        for (int i = 0; unicode[i]; i++) {
++            size_t n = strlen(unicode[i]);
++            if (!strncmp(text, unicode[i], n)) { text += n; found = 1; break; }
++        }
++        if (!found) return text;
++    }
++}
++static const char *consume(const char *text, const char *part)
++{
++    size_t n = strlen(part);
++    return !strncmp(text, part, n) ? skip_separators(text + n) : NULL;
++}
++static const char *wake_prefix(const char *text)
++{
++    const char *name = text;
++    const char *greeting = consume(text, "你");
++    if (greeting) {
++        greeting = consume(greeting, "好");
++        if (!greeting) return NULL;
++        name = greeting;
++    } else {
++        const char *small = consume(text, "小");
++        if (small) name = small;
++    }
++    const char *after = consume(name, "朝");
++    return after ? consume(after, "夕") : NULL;
++}
++static bool exact_control(const char *text, const char *phrase)
++{
++    size_t n = strlen(phrase);
++    if (strncmp(text, phrase, n)) return false;
++    const char *tail = skip_separators(text + n);
++    if (!strncmp(tail, "吧", strlen("吧"))) tail = skip_separators(tail + strlen("吧"));
++    return !*tail;
++}
++void voice_wake_reset(voice_wake_t *state)
++{
++    if (!state) return;
++    state->awake = false;
++    state->busy = false;
++    state->deadline_ms = 0;
++}
++void voice_wake_set_enabled(voice_wake_t *state, bool enabled)
++{
++    if (!state) return;
++    voice_wake_reset(state);
++    state->enabled = enabled;
++}
++bool voice_wake_poll(voice_wake_t *state, uint64_t now)
++{
++    if (!state) return false;
++    if (state->enabled && state->awake && !state->busy && now >= state->deadline_ms)
++        state->awake = false;
++    return !state->enabled || state->awake;
++}
++void voice_wake_set_busy(voice_wake_t *state, bool busy, uint64_t now)
++{
++    if (!state) return;
++    voice_wake_poll(state, now);
++    if (state->busy == busy) return;
++    state->busy = busy;
++    if (!busy && state->awake) state->deadline_ms = next_deadline(now);
++}
++static voice_wake_result_t empty_result(char *command, voice_wake_result_t result)
++{
++    command[0] = 0;
++    return result;
++}
++voice_wake_result_t voice_wake_process(voice_wake_t *state, const char *text,
++                                      uint64_t now, char *command, size_t capacity)
++{
++    if (!state || !text || !command || !capacity) return VOICE_WAKE_REJECTED;
++    if (command != text) command[0] = 0;
++    bool active = voice_wake_poll(state, now);
++    text = skip_separators(text);
++    if (!*text) return empty_result(command, VOICE_WAKE_IGNORE);
++    const char *after = wake_prefix(text);
++    bool prefixed = after != NULL;
++    if (after) text = after;
++    /* A direct stop remains available even before wake, for privacy. */
++    if (exact_control(text,"停止监听") || exact_control(text,"请停止监听")) {
++        voice_wake_reset(state);
++        return empty_result(command, VOICE_WAKE_STOP);
++    }
++    if (state->enabled && (active || prefixed) &&
++        (exact_control(text,"再见") || exact_control(text,"休息吧") || exact_control(text,"结束对话"))) {
++        voice_wake_reset(state);
++        return empty_result(command, VOICE_WAKE_SLEEP);
++    }
++    if (prefixed) {
++        state->awake = true;
++        state->deadline_ms = next_deadline(now);
++        if (!*text) return empty_result(command, VOICE_WAKE_ONLY);
++    } else if (state->enabled && !active) return empty_result(command, VOICE_WAKE_IGNORE);
++    size_t length = strlen(text);
++    if (length >= capacity) return empty_result(command, VOICE_WAKE_REJECTED);
++    memmove(command, text, length + 1);
++    return VOICE_WAKE_COMMAND;
++}
+--- /dev/null
++++ b/src/voice/voice_wake.h
+@@ -0,0 +1,29 @@
++/* SPDX-License-Identifier: Apache-2.0 */
++#pragma once
++#include <stdbool.h>
++#include <stddef.h>
++#include <stdint.h>
++#define VOICE_WAKE_WINDOW_MS UINT64_C(60000)
++#define VOICE_WAKE_INITIALIZER { .enabled = true }
++typedef struct {
++    bool enabled;
++    bool awake;
++    bool busy;
++    uint64_t deadline_ms;
++} voice_wake_t;
++typedef enum {
++    VOICE_WAKE_IGNORE = 0,
++    VOICE_WAKE_COMMAND,
++    VOICE_WAKE_ONLY,
++    VOICE_WAKE_SLEEP,
++    VOICE_WAKE_STOP,
++    VOICE_WAKE_REJECTED
++} voice_wake_result_t;
++/* Pure gate over ASR text, never an offline keyword detector. All timestamps
++ * are monotonic milliseconds. Caller serializes access to the state. */
++void voice_wake_reset(voice_wake_t *state);
++void voice_wake_set_enabled(voice_wake_t *state, bool enabled);
++bool voice_wake_poll(voice_wake_t *state, uint64_t now_ms);
++void voice_wake_set_busy(voice_wake_t *state, bool busy, uint64_t now_ms);
++voice_wake_result_t voice_wake_process(voice_wake_t *state, const char *asr_text,
++                                      uint64_t now_ms, char *command, size_t capacity);

@@ -31,7 +31,7 @@ typedef struct { size_t buf_size; } pool_t;
 static pool_t s_tool_pool;
 static bool s_pool_ready;
 static const char *TAG = "guard-test";
-static unsigned model_calls, cache_gets, cache_puts;
+static unsigned model_calls, cache_gets, cache_puts, cache_token_puts;
 static atomic_uint tool_calls;
 static int scenario;
 static bool duplicate_exit, poison_cache;
@@ -46,9 +46,9 @@ FILE *__wrap_fopen(const char *path,const char *mode)
         return __real_fopen("/dev/full",mode);
     return __real_fopen(path,mode);
 }
-static uint32_t calc_elapsed_ms(const struct timeval *a,const struct timeval *b) { (void)a;(void)b;return 1; }
+static uint32_t calc_elapsed_ms(const struct timeval *a,const struct timeval *b) { (void)a;(void)b;return (scenario==20||scenario==21)?36001:1; }
 static bool automatic_voice_cancelled(const agent_msg_t *m) { (void)m;return false; }
-static bool llm_call_timed_out(uint32_t ms) { (void)ms;return false; }
+static bool llm_call_timed_out(uint32_t ms) { return ms>(uint32_t)AGENT_LLM_TIMEOUT_SEC*1000; }
 static void send_working_status(const agent_msg_t *m,int i) { (void)m;(void)i; }
 static size_t agent_mem_safe_size(size_t preferred,size_t minimum) { (void)minimum;return preferred; }
 static char *agent_pool_acquire(pool_t *p) { (void)p;return NULL; }
@@ -69,7 +69,7 @@ static int agent_tool_exec_streamed(const char *n,const char *i,char *o,size_t z
 int tool_registry_execute(const char *n,const char *i,char *o,size_t z)
 { return agent_tool_exec_streamed(n,i,o,z); }
 llm_complexity_t llm_router_estimate_complexity(const char *p,size_t z) { (void)p;(void)z;return LLM_COMPLEXITY_SIMPLE; }
-int llm_router_select(llm_complexity_t c) { (void)c;return -1; }
+int llm_router_select(llm_complexity_t c) { (void)c;return scenario==27?0:-1; }
 int llm_router_select_with_profile(llm_complexity_t c,llm_route_profile_t p) { (void)c;(void)p;return -1; }
 int llm_router_apply(int i) { (void)i;return 0; }
 llm_route_profile_t llm_router_get_profile(void) { return LLM_ROUTE_ECO; }
@@ -82,10 +82,10 @@ void agent_trace_step(agent_trace_t *t,int i,const char *n,uint32_t m,int ok) { 
 void agent_trace_end(agent_trace_t *t,int status) { t->status=status; }
 static char *llm_cache_get(const char *p,size_t n) { (void)p;(void)n;cache_gets++;return poison_cache?strdup("cached-success"):NULL; }
 static void llm_cache_put(const char *p,size_t n,const char *r) { (void)p;(void)n;(void)r;cache_puts++; }
-static void llm_cache_put_tokens(const char *p,size_t n,int t) { (void)p;(void)n;(void)t; }
+static void llm_cache_put_tokens(const char *p,size_t n,int t) { (void)p;(void)n;(void)t;cache_token_puts++; }
 static bool check_tool_dup(const llm_response_t *r,char *s,int *d,char *n,int *c) { (void)r;(void)s;(void)d;(void)n;(void)c;return duplicate_exit; }
 static char *force_finish_reply(const char *p,cJSON *m) { (void)p;(void)m;return strdup("已添加，编号2。"); }
-static char *handle_task_complete(const char *p,cJSON *m,bool *timeout) { (void)p;(void)m;*timeout=false;return strdup("已完成。"); }
+static char *handle_task_complete(const char *p,cJSON *m,bool *timeout) { (void)p;(void)m;*timeout=scenario==24;return strdup(scenario==24?LLM_TIMEOUT_TASK_COMPLETE_MSG:"已完成。"); }
 void llm_response_free(llm_response_t *r)
 { free(r->text);free(r->reasoning_content);for(int i=0;i<r->call_count;i++)free(r->calls[i].input);memset(r,0,sizeof(*r)); }
 static void model_tool(llm_response_t *r,int index,const char *name,const char *path,const char *content)
@@ -118,6 +118,8 @@ int llm_chat_tools(const char *p,cJSON *m,const char *tools,llm_response_t *r)
 {
     (void)p;(void)m;(void)tools;memset(r,0,sizeof(*r));unsigned n=model_calls++;
     const char *tasks=AGENT_DATA_DIR "/TASKS.md";
+    if(scenario==20||scenario==22) return ERROR;
+    if(scenario==27) { r->total_tokens=100;r->prompt_tokens=70;r->completion_tokens=30; }
     if(scenario==1 && n==0) model_tool(r,0,"read_file",tasks,NULL);
     else if(scenario==1 && n==2) model_tool(r,0,"write_file",tasks,"- [ ] [1] old\n- [ ] [2] new\n");
     else if(scenario==2 && (n==0 || n==2)) model_tool(r,0,"write_file",tasks,NULL);
@@ -126,7 +128,7 @@ int llm_chat_tools(const char *p,cJSON *m,const char *tools,llm_response_t *r)
         model_tool(r,0,"read_file",AGENT_DATA_DIR "/OTHER.md",NULL);
         model_tool(r,1,"write_file",tasks,"parallel-save");
     } else if(scenario==5 && n==0) model_tool(r,0,"write_file",AGENT_DATA_DIR "/memory/daily/2026-11-01.md","real-note");
-    else if(scenario==6 || scenario==7 || ((scenario==8 || scenario==9) && n==0)) model_tool(r,0,"read_file",tasks,NULL);
+    else if(scenario==6 || scenario==7 || scenario==23 || ((scenario==8 || scenario==9 || scenario==24 || scenario==25) && n==0)) model_tool(r,0,"read_file",tasks,NULL);
     else if(scenario==10 && n==0) model_tool(r,0,"edit_file",tasks,NULL);
     else if(scenario==11 && n==0) model_cron(r,"cron_add",false);
     else if(scenario==12 && n==0) model_cron(r,"cron_remove",false);
@@ -151,8 +153,8 @@ static void write_text(const char *path,const char *text)
 { FILE *f=fopen(path,"w");assert(f);assert(fputs(text,f)>=0);assert(fclose(f)==0); }
 static char *run_case(const char *request,int mode,bool history)
 {
-    model_calls=cache_gets=cache_puts=0;atomic_store(&tool_calls,0);scenario=mode;
-    write_text(AGENT_DATA_DIR "/TASKS.md",mode==8?"TASK_COMPLETE":mode==9?"OK: wrote 3 bytes":"old");
+    model_calls=cache_gets=cache_puts=cache_token_puts=0;atomic_store(&tool_calls,0);scenario=mode;
+    write_text(AGENT_DATA_DIR "/TASKS.md",(mode==8||mode==24||mode==25)?"TASK_COMPLETE":mode==9?"OK: wrote 3 bytes":"old");
     cJSON *messages=cJSON_CreateArray();
     if(history){
         llm_response_t old={0};model_tool(&old,0,"write_file",AGENT_DATA_DIR "/TASKS.md","old");
@@ -163,7 +165,7 @@ static char *run_case(const char *request,int mode,bool history)
     }
     cJSON *u=cJSON_CreateObject();cJSON_AddStringToObject(u,"role","user");cJSON_AddStringToObject(u,"content",request);cJSON_AddItemToArray(messages,u);
     agent_msg_t msg={.content=(char*)request,.channel="voice",.chat_id="zhaoxi"};char output[8192];
-    char *answer=run_react_loop("test",messages,"tools",output,sizeof(output),&msg);cJSON_Delete(messages);assert(answer);return answer;
+    char *answer=run_react_loop("test",messages,"tools",output,sizeof(output),&msg);cJSON_Delete(messages);if(mode!=22)assert(answer);return answer;
 }
 static void __attribute__((unused)) expect_failure(int mode,bool history)
 {
@@ -210,10 +212,44 @@ static void reminder_guard(void)
     puts("PASS: reminder no-tool false confirmation, wrong file proof, list-only, failed create/remove and real persisted cron add/remove checked");
 }
 #endif
+#ifdef CHECK_CACHE_OUTCOMES
+static void cache_outcomes(void)
+{
+    const int failures[]={20,21,22,23,24,25};
+    for(unsigned i=0;i<sizeof(failures)/sizeof(failures[0]);i++) {
+        char *answer=run_case("解释一下缓存",failures[i],false);
+#ifdef EXPECT_CACHE_BROKEN
+        if(failures[i]==20||failures[i]==21||failures[i]==23||failures[i]==24||failures[i]==25)assert(cache_puts==1);
+#else
+        assert(cache_puts==0&&cache_token_puts==0);
+#endif
+        free(answer);
+    }
+    char *answer=run_case("解释一下缓存",27,false);
+#ifdef PRODUCT_ANSWER_CACHE_DISABLED
+    assert(answer&&model_calls==1&&!cache_gets&&!cache_puts&&!cache_token_puts);free(answer);
+    poison_cache=true;answer=run_case("解释一下缓存",0,false);
+    assert(strcmp(answer,"cached-success")&&model_calls==1&&!cache_gets&&!cache_puts);
+#else
+    assert(answer&&cache_puts==1&&cache_token_puts==1);free(answer);
+    poison_cache=true;answer=run_case("解释一下缓存",0,false);assert(!strcmp(answer,"cached-success")&&model_calls==0);
+#endif
+    free(answer);poison_cache=false;
+#ifdef EXPECT_CACHE_BROKEN
+    puts("REPRO: watchdog, exhausted-loop and task-complete failure replies were cached as ordinary answers");
+#elif defined(PRODUCT_ANSWER_CACHE_DISABLED)
+    puts("PASS: product answers, including normal QA and errors, never read/write the unsafe answer cache");
+#else
+    puts("PASS: watchdog errors, successful-but-late calls, plain failures, exhausted loops and task-complete outcomes excluded; normal QA and token metadata still cached");
+#endif
+}
+#endif
 int main(void)
 {
     (void)TAG;assert(mkdir(AGENT_DATA_DIR,0700)==0);
-#ifdef EXPECT_CRON_BROKEN
+#ifdef CHECK_CACHE_OUTCOMES
+    cache_outcomes();return 0;
+#elif defined(EXPECT_CRON_BROKEN)
     char *answer=run_case("请在30秒后提醒我：公开测试。",0,false);
     assert(!strcmp(answer,"已添加，编号2。")&&!atomic_load(&tool_calls));free(answer);
     puts("REPRO: reminder falsely confirmed without cron_add");return 0;
@@ -247,8 +283,20 @@ int main(void)
     }
     char *edited=run_case("把编号3标完成",10,false);assert(!strcmp(edited,"已添加，编号2。"));free(edited);
     poison_cache=true;expect_failure(0,false);assert(!cache_gets);
-    char *answer=run_case("如何添加待办？",0,false);assert(!strcmp(answer,"cached-success")&&cache_gets==1&&model_calls==0);free(answer);poison_cache=false;
-    answer=run_case("如何添加待办？",0,false);assert(!strcmp(answer,"已添加，编号2。")&&model_calls==1&&cache_puts==1);free(answer);
+    char *answer=run_case("如何添加待办？",0,false);
+#ifdef PRODUCT_ANSWER_CACHE_DISABLED
+    assert(!strcmp(answer,"已添加，编号2。")&&!cache_gets&&!cache_puts&&model_calls==1);
+#else
+    assert(!strcmp(answer,"cached-success")&&cache_gets==1&&model_calls==0);
+#endif
+    free(answer);poison_cache=false;
+    answer=run_case("如何添加待办？",0,false);
+#ifdef PRODUCT_ANSWER_CACHE_DISABLED
+    assert(!strcmp(answer,"已添加，编号2。")&&model_calls==1&&!cache_gets&&!cache_puts);
+#else
+    assert(!strcmp(answer,"已添加，编号2。")&&model_calls==1&&cache_puts==1);
+#endif
+    free(answer);
     failed_edit_is_real();
 #ifdef CHECK_CRON_GUARD
     reminder_guard();

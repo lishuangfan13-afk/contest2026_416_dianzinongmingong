@@ -3,6 +3,7 @@
 #include "cJSON.h"
 #include "tools/tool_registry.h"
 #include "pc_link.h"
+#include "journal.h"
 #include "voice/voice_channel.h"
 #include <arpa/inet.h>
 #include <errno.h>
@@ -49,9 +50,7 @@ static cJSON *dispatch(cJSON *request, bool *ending)
             char path[96] = "/emmc/zhaoxi/TASKS.md";
             if (!strcmp(action, "notes")) {
                 time_t now = time(NULL);
-                struct tm today;
-                if (now < 1735689600 || !localtime_r(&now, &today) ||
-                    !strftime(path, sizeof(path), "/emmc/zhaoxi/memory/daily/%Y-%m-%d.md", &today)) {
+                if (zhaoxi_note_path(now, path, sizeof(path))) {
                     free(out); cJSON_AddNumberToObject(reply, "rc", -EINVAL); return reply;
                 }
             }
@@ -73,7 +72,7 @@ static cJSON *dispatch(cJSON *request, bool *ending)
             if (total > 1024) valid = false;
         }
         int op = valid && !strcmp(argv[1], "--text") ? 2 : 1;
-        const char *allowed[] = {"ask", "note", "todo", "remind", "listen", "auto", "say", "status", "test-speaker"};
+        const char *allowed[] = {"ask", "note", "todo", "remind", "drink", "notify", "listen", "auto", "say", "status", "test-speaker"};
         bool permitted = false;
         if (valid && op <= count) {
             for (unsigned i = 0; i < sizeof(allowed) / sizeof(allowed[0]); i++)

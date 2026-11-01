@@ -57,8 +57,10 @@ def main():
         obj = output / "zhaoxi_main.o"
         run([options.cc, *flags, *sanitizers, *include, "-Dmain=zhaoxi_main", "-c", str(source), "-o", str(obj)])
         executable = output / "test_commands"
-        run([options.cc, *flags, *sanitizers, *include, str(obj), str(ROOT / "app/zhaoxi/todo_store.c"), str(agent / "src/core/message_bus.c"),
-             str(ROOT / "tests/headless/test_commands.c"), "-pthread", "-o", str(executable)])
+        run([options.cc, *flags, *sanitizers, *include, str(obj), str(ROOT / "app/zhaoxi/todo_store.c"),
+             str(ROOT / "app/zhaoxi/journal.c"), str(agent / "src/core/message_bus.c"),
+             str(ROOT / "app/zhaoxi/local_intent.c"),
+             str(ROOT / "tests/headless/test_commands.c"), "-Wl,--wrap=time", "-pthread", "-o", str(executable)])
         report["commands"] = run([str(executable)]).strip().splitlines()[-1]
         todo_test = output / "test_todo_store"
         run([options.cc, *flags, *sanitizers, "-I" + str(ROOT / "app/zhaoxi"),

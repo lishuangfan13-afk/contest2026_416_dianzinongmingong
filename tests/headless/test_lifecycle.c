@@ -13,6 +13,7 @@ static pthread_cond_t released = PTHREAD_COND_INITIALIZER;
 static unsigned mask;
 
 bool agent_shutdown_requested(void) { return atomic_load(&stopping); }
+void agent_request_shutdown(void) { atomic_store(&stopping,true); }
 
 static void *worker(void *argument)
 {

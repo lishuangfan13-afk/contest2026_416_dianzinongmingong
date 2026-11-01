@@ -1,0 +1,144 @@
+--- a/src/infra/task_lifecycle.c
++++ b/src/infra/task_lifecycle.c
+@@ -5,6 +5,8 @@
+ #include <string.h>
+ #include <syslog.h>
+ #include <stdint.h>
++#include <inttypes.h>
++#include <stdio.h>
+ #include <time.h>
+ #include <unistd.h>
+ 
+@@ -15,12 +17,17 @@
+ static bool active;
+ static uint64_t active_owner, pending_owner, owner_sequence;
+ static unsigned workers, network_workers;
++static uintptr_t worker_sequence;
+ 
+ struct tracked_task {
+     void *(*function)(void *);
+     void *argument;
+     bool network;
++    uintptr_t id;
++    char name[16];
++    struct tracked_task *next;
+ };
++static struct tracked_task *registered_tasks;
+ 
+ uint64_t agent_session_owner_new(void)
+ {
+@@ -113,22 +120,55 @@
+ 
+ static void task_finished(void *argument)
+ {
+-    struct tracked_task *task = argument;
+-    pthread_mutex_lock(&lock);
++    /* The TLS cleanup argument is a never-reused integer, not a pointer to
++     * storage that an earlier normal/exit/cancel cleanup may have freed. */
++    uintptr_t id = (uintptr_t)argument;
++    int old_cancel_state = PTHREAD_CANCEL_ENABLE;
++    pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &old_cancel_state);
++    pthread_mutex_lock(&lock);
++    struct tracked_task **link = &registered_tasks;
++    while (*link && (*link)->id != id) link = &(*link)->next;
++    struct tracked_task *task = *link;
++    if (!task) {
++        pthread_mutex_unlock(&lock);
++        syslog(LOG_WARNING, "[agent] Ignore duplicate/stale worker finish: id=%" PRIuPTR "\n", id);
++        pthread_setcancelstate(old_cancel_state, NULL);
++        return;
++    }
++    char name[sizeof(task->name)];
++    memcpy(name, task->name, sizeof(name));
++    *link = task->next;
+     --workers;
+     if (task->network) --network_workers;
++    unsigned remaining = workers, remaining_network = network_workers;
+     pthread_cond_broadcast(&changed);
+     pthread_mutex_unlock(&lock);
+     free(task);
++    syslog(LOG_INFO, "[agent] Worker leave: id=%" PRIuPTR " name=%s total=%u network=%u\n",
++           id, name, remaining, remaining_network);
++    pthread_setcancelstate(old_cancel_state, NULL);
+ }
+ 
+ static void *task_run(void *argument)
+ {
+     struct tracked_task *task = argument;
++    /* An exit/cancel handler may remove the registration. Retain no access
++     * to that heap record after invoking the user's function. */
++    uintptr_t id = task->id;
++    void *(*function)(void *) = task->function;
++    void *user_argument = task->argument;
+     void *result;
+-    pthread_cleanup_push(task_finished, task);
+-    result = task->function(task->argument);
+-    pthread_cleanup_pop(1);
++    int old_cancel_state = PTHREAD_CANCEL_ENABLE;
++    pthread_cleanup_push(task_finished, (void *)id);
++    result = function(user_argument);
++    /* Keep cancellation covered until the TLS hook is removed and the
++     * registration, lock and heap record have all been retired safely. */
++    pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &old_cancel_state);
++    /* NuttX pops its TLS record AFTER an execute=1 callback. Remove it
++     * before normal cleanup can wake the owner or free its task record. */
++    pthread_cleanup_pop(0);
++    task_finished((void *)id);
++    pthread_setcancelstate(old_cancel_state, NULL);
+     return result;
+ }
+ 
+@@ -140,28 +180,43 @@
+     task->function = function;
+     task->argument = argument;
+     task->network = name && strcmp(name, "net_watch") == 0;
+-    pthread_mutex_lock(&lock);
+-    if (agent_shutdown_requested()) {
++    snprintf(task->name, sizeof(task->name), "%s", name ? name : "unnamed");
++    pthread_mutex_lock(&lock);
++    if (agent_shutdown_requested() || worker_sequence == UINTPTR_MAX) {
++        int error = worker_sequence == UINTPTR_MAX ? EOVERFLOW : ECANCELED;
+         pthread_mutex_unlock(&lock);
+         free(task);
+-        return ECANCELED;
+-    }
++        return error;
++    }
++    /* No wraparound/ABA: once pointer-width IDs are exhausted, refuse new
++     * workers rather than let an old cleanup consume a future registration. */
++    uintptr_t id = task->id = ++worker_sequence;
++    task->next = registered_tasks;
++    registered_tasks = task;
+     ++workers;
+     if (task->network) ++network_workers;
+-    pthread_mutex_unlock(&lock);
++    unsigned registered = workers, registered_network = network_workers;
++    pthread_mutex_unlock(&lock);
++    syslog(LOG_INFO, "[agent] Worker enter: id=%" PRIuPTR " name=%s total=%u network=%u\n",
++           id, task->name, registered, registered_network);
+     int result = pthread_create(thread, attr, task_run, task);
+-    if (result) task_finished(task);
++    if (result) task_finished((void *)id);
+     return result;
+ }
+ 
+ void agent_tasks_wait(bool network_only)
+ {
+     pthread_mutex_lock(&lock);
++    unsigned total = workers, network = network_workers;
++    pthread_mutex_unlock(&lock);
+     syslog(LOG_INFO, "[agent] Worker wait begin: network_only=%d total=%u network=%u\n",
+-        network_only, workers, network_workers);
++        network_only, total, network);
++    pthread_mutex_lock(&lock);
+     while (network_only ? network_workers != 0 : workers != 0)
+         pthread_cond_wait(&changed, &lock);
++    total = workers;
++    network = network_workers;
++    pthread_mutex_unlock(&lock);
+     syslog(LOG_INFO, "[agent] Worker wait done: network_only=%d total=%u network=%u\n",
+-        network_only, workers, network_workers);
+-    pthread_mutex_unlock(&lock);
+-}
++        network_only, total, network);
++}

@@ -1,0 +1,100 @@
+{
+  "format": 1,
+  "date": "2026-11-02",
+  "firmware": {
+    "bes_ap": {
+      "image": "nuttx_ap_headless.bin",
+      "sha256": "7b648badc1fd194bcfff746a2509c90e249d8637ebcbbbe38b5247f0a951a31e",
+      "size": 1355464,
+      "address": "0x30190000"
+    },
+    "easymatrix": {
+      "image": "EasyMatrix.ino.bin",
+      "sha256": "6f8fd7b2335664e55538f56e0a1e32bfcde8f574922259607ec628732d8da5ba",
+      "size": 1194544,
+      "address": "0x10000"
+    }
+  },
+  "sdk_patch_replay": {
+    "patches": 46,
+    "files_compared": 28,
+    "byte_equal_to_build_workspace": true
+  },
+  "board_acceptance": {
+    "input": "text via the product message bus and local command entry",
+    "microphone_enabled": false,
+    "passed_checks": 37,
+    "checks": {
+      "clock_sync_confirmed": true,
+      "automatic_mic_before_off": true,
+      "actual_qa": true,
+      "note_saved_existing_lines_preserved": true,
+      "todo_A_saved_preserved": true,
+      "todo_B_saved_preserved": true,
+      "only_designated_todo_completed": true,
+      "todo_list_count_and_no_write": true,
+      "reminder_created_existing_ids_preserved": true,
+      "local_text_reminder_delivered_and_removed": true,
+      "cancel_reminder_id_is_new": true,
+      "cancel_removed_only_own_id": true,
+      "cancelled_reminder_not_delivered": true,
+      "local_cli_decimal_rejected_no_new_job": true,
+      "natural_note_local_no_model": true,
+      "natural_note_saved_punctuation_and_old_content": true,
+      "natural_todo_A_local_no_model": true,
+      "natural_todo_A_actual_id": true,
+      "natural_todo_B_local_no_model": true,
+      "natural_todo_B_actual_id": true,
+      "natural_todo_done_local_no_model": true,
+      "natural_todo_done_only_designated_id": true,
+      "natural_todo_list_local_no_model": true,
+      "natural_relative_reminder_local_no_model": true,
+      "natural_relative_reminder_saved_receipt": true,
+      "natural_relative_reminder_preserves_old_jobs": true,
+      "natural_relative_due_and_removed": true,
+      "natural_drink_start_local_no_model": true,
+      "natural_drink_saved_receipt": true,
+      "natural_drink_creates_only_own_job": true,
+      "natural_drink_status_local_no_model": true,
+      "natural_drink_idempotent_local_no_model": true,
+      "natural_drink_repeat_same_id": true,
+      "natural_drink_stop_local_no_model": true,
+      "natural_drink_stop_restores_job_set": true,
+      "automatic_mic_after_off": true,
+      "normal_quit_cleanup": true
+    }
+  },
+  "restart_stress": {
+    "cycles": 10,
+    "all_passed": true,
+    "per_cycle": [
+      "PPP/control ready",
+      "fresh model answer exactly matches request marker",
+      "automatic microphone remains off",
+      "normal quit rc=0",
+      "receiver stopped and serial closed",
+      "gateway cleanup completed",
+      "ai_agent task absent"
+    ],
+    "physical_reset_required": false
+  },
+  "host_tests": {
+    "pc_link": 83,
+    "display_link": 53
+  },
+  "display_hardware": {
+    "seven_expressions_acked": true,
+    "frame_counter_advanced": true,
+    "ttl_restored_clock": true,
+    "application_full_readback_equal": true,
+    "existing_matrix_config_values_preserved": 23
+  },
+  "local_command_timings_seconds": {
+    "note_complete": 0.31,
+    "todo_A_complete": 0.333,
+    "todo_B_complete": 0.328,
+    "todo_complete_A_complete": 0.328,
+    "todo_list_complete": 0.3
+  },
+  "notification_interface_validation": "Local HTTP fixtures; live account configuration is supplied separately."
+}
