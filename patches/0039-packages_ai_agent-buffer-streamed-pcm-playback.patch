@@ -1,0 +1,251 @@
+--- a/src/voice/voice_channel.c
++++ b/src/voice/voice_channel.c
+@@ -998,13 +998,22 @@
+ static int s_tts_playback_error;
+ static struct timespec s_asr_done_ts;
+ 
++int voice_channel_tts_stream_error(void)
++{
++    pthread_mutex_lock(&s_voice.lock);
++    int error = s_tts_playback_error ? s_tts_playback_error :
++                s_voice.tts_abort ? -ECANCELED : 0;
++    pthread_mutex_unlock(&s_voice.lock);
++    return error;
++}
++
+ static void tts_stream_cb(const unsigned char* pcm_data,
+     size_t pcm_len, int is_last, void* user_data)
+ {
+     audio_playback_t* pb = (audio_playback_t*)user_data;
+ 
+     /* Abort early if PTT recording started */
+-    if (s_voice.tts_abort) {
++    if (voice_channel_tts_stream_error()) {
+         return;
+     }
+ 
+@@ -1024,13 +1033,181 @@
+         }
+         int written = audio_playback_write(pb, pcm_data, pcm_len);
+         if (written < 0 || (size_t)written != pcm_len) {
++            pthread_mutex_lock(&s_voice.lock);
+             s_tts_playback_error = written < 0 ? written : -EIO;
+             s_voice.tts_abort = 1;
++            pthread_mutex_unlock(&s_voice.lock);
+         }
+     }
+ 
+     (void)is_last;
+ }
++
++#ifdef CONFIG_ZHAOXI_BES_AUDIO
++/* The HTTPS producer owns its TLS socket. A separate PCM consumer owns no
++ * sockets and only drives the blocking BES DMA API. Buffering is bounded to
++ * about 1.36 s at 24 kHz mono; backpressure never drops audio samples. */
++#define TTS_QUEUE_BYTES 65536
++#define TTS_QUEUE_PREFILL 9600
++#define TTS_QUEUE_BLOCK 3200
++struct tts_pcm_queue {
++    pthread_mutex_t lock;
++    pthread_cond_t changed;
++    unsigned char *data;
++    size_t read, write, used, peak;
++    bool eof;
++    int error;
++    audio_playback_t *pb;
++};
++
++static int64_t tts_queue_now(void)
++{
++    struct timespec t;
++    clock_gettime(CLOCK_MONOTONIC, &t);
++    return (int64_t)t.tv_sec * 1000 + t.tv_nsec / 1000000;
++}
++
++static void tts_queue_wait(struct tts_pcm_queue *q)
++{
++    struct timespec until;
++    clock_gettime(CLOCK_REALTIME, &until);
++    until.tv_nsec += 100000000;
++    if (until.tv_nsec >= 1000000000) { until.tv_sec++; until.tv_nsec -= 1000000000; }
++    pthread_cond_timedwait(&q->changed, &q->lock, &until);
++}
++
++/* q->lock is held; existing callers never hold s_voice.lock while waiting
++ * on this queue. This makes cancellation visible to a blocked producer. */
++static void tts_queue_fail(struct tts_pcm_queue *q, int error)
++{
++    if (!q->error) q->error = error;
++    pthread_mutex_lock(&s_voice.lock);
++    s_tts_playback_error = q->error;
++    s_voice.tts_abort = 1;
++    pthread_mutex_unlock(&s_voice.lock);
++    pthread_cond_broadcast(&q->changed);
++}
++
++static void *tts_pcm_consumer(void *argument)
++{
++    struct tts_pcm_queue *q = argument;
++    unsigned char block[TTS_QUEUE_BLOCK];
++    bool started = false;
++    int64_t first_data = 0;
++    for (;;) {
++        pthread_mutex_lock(&q->lock);
++        while (!q->error) {
++            int cancelled = voice_channel_tts_stream_error();
++            if (cancelled) { q->error = cancelled; break; }
++            if (q->used && !first_data) first_data = tts_queue_now();
++            if (q->used && (started || q->eof || q->used >= TTS_QUEUE_PREFILL ||
++                            tts_queue_now()-first_data >= 200)) break;
++            if (q->eof) break;
++            tts_queue_wait(q);
++        }
++        if (q->error || (!q->used && q->eof)) {
++            pthread_cond_broadcast(&q->changed);
++            pthread_mutex_unlock(&q->lock);
++            return NULL;
++        }
++        started = true;
++        size_t count = q->used < sizeof(block) ? q->used : sizeof(block);
++        size_t first = TTS_QUEUE_BYTES-q->read;
++        if (first > count) first = count;
++        memcpy(block, q->data+q->read, first);
++        memcpy(block+first, q->data, count-first);
++        q->read=(q->read+count)%TTS_QUEUE_BYTES;
++        q->used-=count;
++        pthread_cond_broadcast(&q->changed);
++        pthread_mutex_unlock(&q->lock);
++        tts_stream_cb(block,count,0,q->pb);
++        int error=voice_channel_tts_stream_error();
++        if (error) {
++            pthread_mutex_lock(&q->lock);
++            tts_queue_fail(q,error);
++            pthread_mutex_unlock(&q->lock);
++            return NULL;
++        }
++    }
++}
++
++static void tts_enqueue_cb(const unsigned char *pcm, size_t length,
++                           int last, void *argument)
++{
++    (void)last;
++    struct tts_pcm_queue *q=argument;
++    if (!length) return;
++    pthread_mutex_lock(&q->lock);
++    if (!pcm || length%2) {
++        tts_queue_fail(q,-EINVAL);
++        pthread_mutex_unlock(&q->lock);
++        return;
++    }
++    size_t offset=0;
++    while (offset<length && !q->error) {
++        int cancelled=voice_channel_tts_stream_error();
++        if (cancelled) { tts_queue_fail(q,cancelled); break; }
++        int64_t deadline=tts_queue_now()+5000;
++        while (q->used==TTS_QUEUE_BYTES && !q->error) {
++            cancelled=voice_channel_tts_stream_error();
++            if (cancelled || tts_queue_now()>=deadline) {
++                tts_queue_fail(q,cancelled?cancelled:-ETIMEDOUT); break;
++            }
++            tts_queue_wait(q);
++        }
++        if (q->error) break;
++        size_t count=TTS_QUEUE_BYTES-q->used;
++        if (count>length-offset) count=length-offset;
++        size_t first=TTS_QUEUE_BYTES-q->write;
++        if (first>count) first=count;
++        memcpy(q->data+q->write,pcm+offset,first);
++        memcpy(q->data,pcm+offset+first,count-first);
++        q->write=(q->write+count)%TTS_QUEUE_BYTES;
++        q->used+=count; offset+=count;
++        if (q->used>q->peak) q->peak=q->used;
++        pthread_cond_broadcast(&q->changed);
++    }
++    pthread_mutex_unlock(&q->lock);
++}
++
++static int tts_queue_start(struct tts_pcm_queue *q, audio_playback_t *pb,
++                           pthread_t *thread)
++{
++    memset(q,0,sizeof(*q)); q->pb=pb;
++    q->data=malloc(TTS_QUEUE_BYTES);
++    if (!q->data) return -ENOMEM;
++    int result=pthread_mutex_init(&q->lock,NULL);
++    if (result) { free(q->data); return -result; }
++    result=pthread_cond_init(&q->changed,NULL);
++    if (result) { pthread_mutex_destroy(&q->lock); free(q->data); return -result; }
++    pthread_attr_t attr;
++    pthread_attr_init(&attr);
++    pthread_attr_setstacksize(&attr,AGENT_VOICE_STACK);
++    result=pthread_create(thread,&attr,tts_pcm_consumer,q);
++    pthread_attr_destroy(&attr);
++    if (result) {
++        pthread_cond_destroy(&q->changed); pthread_mutex_destroy(&q->lock);
++        free(q->data); return -result;
++    }
++    return 0;
++}
++
++static int tts_queue_finish(struct tts_pcm_queue *q, pthread_t thread, int result)
++{
++    pthread_mutex_lock(&q->lock);
++    q->eof=true;
++    if (result && !q->error) q->error=result;
++    pthread_cond_broadcast(&q->changed);
++    pthread_mutex_unlock(&q->lock);
++    pthread_join(thread,NULL);
++    if (!result) result=q->error;
++    syslog(LOG_INFO,"[%s] TTS PCM queue peak=%zu capacity=%u rc=%d\n",
++           TAG,q->peak,TTS_QUEUE_BYTES,result);
++    pthread_cond_destroy(&q->changed); pthread_mutex_destroy(&q->lock);
++    free(q->data);
++    return result;
++}
++#endif
+ 
+ /* ── Public API ──────────────────────────────────────────── */
+ 
+@@ -1538,15 +1715,26 @@
+     s_voice.tts_pb = pb;
+     pthread_mutex_unlock(&s_voice.lock);
+ 
+-    /* Use streaming TTS: each chunk writes to playback file */
+-    int ret = voice_tts_speak_stream(clean,
+-        tts_stream_cb, pb);
++    /* Keep socket reads on this caller's task group. BES playback runs on a
++     * bounded PCM consumer so DMA duration does not block every TLS read. */
++#ifdef CONFIG_ZHAOXI_BES_AUDIO
++    struct tts_pcm_queue queue;
++    pthread_t player;
++    int queue_result=tts_queue_start(&queue,pb,&player);
++    int ret=queue_result;
++    if (!queue_result) ret=voice_tts_speak_stream(clean,tts_enqueue_cb,&queue);
++#else
++    int ret = voice_tts_speak_stream(clean,tts_stream_cb,pb);
++#endif
+ 
+     struct timespec tts_net;
+     clock_gettime(CLOCK_MONOTONIC, &tts_net);
+     long net_ms = (tts_net.tv_sec - s_tts_start.tv_sec) * 1000
+         + (tts_net.tv_nsec - s_tts_start.tv_nsec) / 1000000;
+     syslog(LOG_INFO, "[%s] TTS network done: %ldms\n", TAG, net_ms);
++#ifdef CONFIG_ZHAOXI_BES_AUDIO
++    if (!queue_result) ret=tts_queue_finish(&queue,player,ret);
++#endif
+ 
+     if (!ret && !s_tts_first_chunk) ret = -ENODATA;
+     if (!ret && s_tts_playback_error) ret = s_tts_playback_error;
+--- a/src/voice/voice_channel.h
++++ b/src/voice/voice_channel.h
+@@ -70,6 +70,10 @@
+ /* Synthesize text and play back (called from outbound dispatcher). */
+ int voice_channel_speak(const char *text);
+ 
++/* Streaming providers check between PCM callbacks to abort network reads.
++ * Returns 0 while playback can continue, negative errno on failure/cancel. */
++int voice_channel_tts_stream_error(void);
++
+ /* Test TTS: synthesize text, save PCM to file. */
+ int voice_channel_test_tts(const char *text, const char *out_path);
+ 

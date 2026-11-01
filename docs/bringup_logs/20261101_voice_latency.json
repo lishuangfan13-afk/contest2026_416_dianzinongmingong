@@ -1,0 +1,1296 @@
+{
+  "date": "2026-11-01",
+  "status": "production_selected_first_audio_improved_continuity_and_attended_listening_not_fully_accepted",
+  "scope": "Fixed public text playback and text-input model QA on the real BES board via PC PPP uplink. No microphone capture or ASR request in these runs.",
+  "measurement_notes": [
+    "Each item is one real board request, not a statistical average. Generated audio duration can vary between requests.",
+    "First audio is the software timestamp of the first PCM callback into physical playback, not an independent acoustic measurement.",
+    "Command queue acceptance is not playback completion. Each recorded run waited for speak done and normal session exit.",
+    "Queue underrun count zero does not prove acoustically continuous playback. DMA completion and scheduling overhead remained in the 0437 intermediate firmware.",
+    "Model QA uses text input; its total is not speech-end-to-answer latency. ASR still uploads a completed utterance.",
+    "Both board firmware and the updated tools/pc_link host files must be used together.",
+    "Software reboot and flashing were performed locally. These records do not require a new unattended microphone test."
+  ],
+  "measurements": [
+    {
+      "variant": "batch_baseline",
+      "firmware_sha256": "c19ddd07801675f8aafce01db45519fc2f6bdd5f2b2814b627bb83a0827d4c2c",
+      "acceptance_state": "completed_fixed_text_playback",
+      "fixed_text_measurements": [
+        {
+          "name": "short",
+          "fixed_public_text": "你好，朝夕语音测试成功。",
+          "result_code": 0,
+          "request_to_playback_complete_seconds": 7.535,
+          "tts_start_to_first_play_callback_ms": 4767,
+          "provider": {
+            "text_bytes": 36,
+            "http": 200,
+            "parsed": 1,
+            "elapsed_ms": 4530
+          },
+          "pcm": {}
+        },
+        {
+          "name": "long",
+          "fixed_public_text": "我是朝夕，可以帮你回答问题、记录待办，并在约定的时间提醒你。",
+          "result_code": 0,
+          "request_to_playback_complete_seconds": 14.209,
+          "tts_start_to_first_play_callback_ms": 8601,
+          "provider": {
+            "text_bytes": 90,
+            "http": 200,
+            "parsed": 1,
+            "elapsed_ms": 8115
+          },
+          "pcm": {}
+        }
+      ],
+      "automatic_capture_before": {
+        "enabled": false,
+        "running": false,
+        "accepting_speech": false,
+        "state": "已停止",
+        "noise": 0,
+        "threshold": 0,
+        "last_error": 0,
+        "frames": 0,
+        "utterances": 0,
+        "asr_calls": 0,
+        "rejected": 0,
+        "last_pcm_bytes": 0
+      },
+      "automatic_capture_after": {
+        "enabled": false,
+        "running": false,
+        "accepting_speech": false,
+        "state": "已停止",
+        "noise": 0,
+        "threshold": 0,
+        "last_error": 0,
+        "frames": 0,
+        "utterances": 0,
+        "asr_calls": 0,
+        "rejected": 0,
+        "last_pcm_bytes": 0
+      },
+      "normal_quit_result_code": 0,
+      "host_forwarder_exit_code": 0
+    },
+    {
+      "variant": "initial_streaming",
+      "firmware_sha256": "8f7f374d8732423ae00e1e42ea3dcdb9228a14a70199d0c06501988593beb9c6",
+      "acceptance_state": "user_heard_pauses",
+      "fixed_text_measurements": [
+        {
+          "name": "short",
+          "fixed_public_text": "你好，朝夕语音测试成功。",
+          "result_code": 0,
+          "request_to_playback_complete_seconds": 9.023,
+          "tts_start_to_first_play_callback_ms": 3126,
+          "provider": {
+            "text_bytes": 36,
+            "first_pcm_ms": 2183,
+            "http": 200,
+            "rc": 0,
+            "total_ms": 6988,
+            "pcm_bytes": 122880
+          },
+          "pcm": {}
+        },
+        {
+          "name": "long",
+          "fixed_public_text": "我是朝夕，可以帮你回答问题、记录待办，并在约定的时间提醒你。",
+          "result_code": 0,
+          "request_to_playback_complete_seconds": 14.276,
+          "tts_start_to_first_play_callback_ms": 2850,
+          "provider": {
+            "text_bytes": 90,
+            "first_pcm_ms": 2624,
+            "http": 200,
+            "rc": 0,
+            "total_ms": 12755,
+            "pcm_bytes": 284160
+          },
+          "pcm": {}
+        }
+      ],
+      "automatic_capture_before": {
+        "enabled": false,
+        "running": false,
+        "accepting_speech": false,
+        "state": "已停止",
+        "noise": 0,
+        "threshold": 0,
+        "last_error": 0,
+        "frames": 0,
+        "utterances": 0,
+        "asr_calls": 0,
+        "rejected": 0,
+        "last_pcm_bytes": 0
+      },
+      "automatic_capture_after": {
+        "enabled": false,
+        "running": false,
+        "accepting_speech": false,
+        "state": "已停止",
+        "noise": 0,
+        "threshold": 0,
+        "last_error": 0,
+        "frames": 0,
+        "utterances": 0,
+        "asr_calls": 0,
+        "rejected": 0,
+        "last_pcm_bytes": 0
+      },
+      "normal_quit_result_code": 0,
+      "host_forwarder_exit_code": 0,
+      "text_input_model_qa": {
+        "input": "请用一句话解释什么是待办清单。",
+        "submitted_result_code": 0,
+        "llm_ms": [
+          2483
+        ],
+        "tts_start_to_first_play_callback_ms": [
+          3551
+        ],
+        "playback_completed": true,
+        "text_request_to_playback_complete_seconds": 18.13,
+        "pcm": {}
+      }
+    },
+    {
+      "variant": "buffered_streaming_intermediate",
+      "firmware_sha256": "0437a79fec2044ecd4c33e026756ab1ad7df948026ee5e4b451efa39db365335",
+      "acceptance_state": "no_queue_underrun_but_dma_overhead_remaining",
+      "fixed_text_measurements": [
+        {
+          "name": "short",
+          "fixed_public_text": "你好，朝夕语音测试成功。",
+          "result_code": 0,
+          "request_to_playback_complete_seconds": 6.572,
+          "tts_start_to_first_play_callback_ms": 1907,
+          "provider": {
+            "text_bytes": 36,
+            "first_pcm_ms": 1678,
+            "http": 200,
+            "rc": 0,
+            "total_ms": 4843,
+            "pcm_bytes": 161280
+          },
+          "pcm": {
+            "peak": 65280,
+            "capacity": 65536,
+            "rc": 0,
+            "rx": 161280,
+            "played": 161280,
+            "low": 4480,
+            "chunks": 53,
+            "min_chunk": 1280,
+            "max_chunk": 3200,
+            "rx_ms": 3150,
+            "rx_Bps": 51200,
+            "dma_ms": 4312,
+            "play_ms": 4328,
+            "ideal_ms": 3360,
+            "count": 0,
+            "empty_ms": 0,
+            "max_empty_ms": 0,
+            "gap_ms": 9,
+            "max_gap_ms": 3,
+            "fragment_wait_ms": 0,
+            "full_wait_ms": 0
+          }
+        },
+        {
+          "name": "long",
+          "fixed_public_text": "我是朝夕，可以帮你回答问题、记录待办，并在约定的时间提醒你。",
+          "result_code": 0,
+          "request_to_playback_complete_seconds": 12.677,
+          "tts_start_to_first_play_callback_ms": 1839,
+          "provider": {
+            "text_bytes": 90,
+            "first_pcm_ms": 1609,
+            "http": 200,
+            "rc": 0,
+            "total_ms": 10796,
+            "pcm_bytes": 291840
+          },
+          "pcm": {
+            "peak": 65536,
+            "capacity": 65536,
+            "rc": 0,
+            "rx": 291840,
+            "played": 291840,
+            "low": 0,
+            "chunks": 96,
+            "min_chunk": 640,
+            "max_chunk": 3200,
+            "rx_ms": 9175,
+            "rx_Bps": 31808,
+            "dma_ms": 10086,
+            "play_ms": 10381,
+            "ideal_ms": 6080,
+            "count": 0,
+            "empty_ms": 0,
+            "max_empty_ms": 0,
+            "gap_ms": 248,
+            "max_gap_ms": 116,
+            "fragment_wait_ms": 121,
+            "full_wait_ms": 3000
+          }
+        }
+      ],
+      "automatic_capture_before": {
+        "enabled": false,
+        "running": false,
+        "accepting_speech": false,
+        "state": "已停止",
+        "noise": 0,
+        "threshold": 0,
+        "last_error": 0,
+        "frames": 0,
+        "utterances": 0,
+        "asr_calls": 0,
+        "rejected": 0,
+        "last_pcm_bytes": 0
+      },
+      "automatic_capture_after": {
+        "enabled": false,
+        "running": false,
+        "accepting_speech": false,
+        "state": "已停止",
+        "noise": 0,
+        "threshold": 0,
+        "last_error": 0,
+        "frames": 0,
+        "utterances": 0,
+        "asr_calls": 0,
+        "rejected": 0,
+        "last_pcm_bytes": 0
+      },
+      "normal_quit_result_code": 0,
+      "host_forwarder_exit_code": 0,
+      "text_input_model_qa": {
+        "input": "请用一句话解释什么是待办清单。",
+        "submitted_result_code": 0,
+        "llm_ms": [
+          2582
+        ],
+        "tts_start_to_first_play_callback_ms": [
+          2111
+        ],
+        "playback_completed": true,
+        "text_request_to_playback_complete_seconds": 14.249,
+        "pcm": {
+          "peak": 65536,
+          "capacity": 65536,
+          "rc": 0,
+          "rx": 322560,
+          "played": 322560,
+          "low": 4480,
+          "chunks": 106,
+          "min_chunk": 640,
+          "max_chunk": 3200,
+          "rx_ms": 7624,
+          "rx_Bps": 42308,
+          "dma_ms": 8789,
+          "play_ms": 8811,
+          "ideal_ms": 6720,
+          "count": 0,
+          "empty_ms": 0,
+          "max_empty_ms": 0,
+          "gap_ms": 14,
+          "max_gap_ms": 3,
+          "fragment_wait_ms": 0,
+          "full_wait_ms": 3355
+        }
+      }
+    },
+    {
+      "variant": "irq_dma_completion_intermediate",
+      "firmware_sha256": "cb080953e3f2dd3616d7cb7f01063a08686de18af3f646245d161bce8c6131a3",
+      "acceptance_state": "dma_timing_corrected_but_queue_underruns_and_qa_tls_failure_remaining",
+      "fixed_text_measurements": [
+        {
+          "name": "short",
+          "fixed_public_text": "你好，朝夕语音测试成功。",
+          "result_code": 0,
+          "request_to_playback_complete_seconds": 7.641,
+          "tts_start_to_first_play_callback_ms": 3666,
+          "provider": {
+            "text_bytes": 36,
+            "first_pcm_ms": 3442,
+            "http": 200,
+            "rc": 0,
+            "total_ms": 6501,
+            "pcm_bytes": 145920
+          },
+          "pcm": {
+            "peak": 27520,
+            "capacity": 65536,
+            "rc": 0,
+            "rx": 145920,
+            "played": 145920,
+            "low": 0,
+            "chunks": 48,
+            "min_chunk": 1280,
+            "max_chunk": 3200,
+            "rx_ms": 3045,
+            "rx_Bps": 47921,
+            "dma_ms": 3052,
+            "play_ms": 3485,
+            "ideal_ms": 3040,
+            "count": 2,
+            "empty_ms": 193,
+            "max_empty_ms": 111,
+            "gap_ms": 429,
+            "max_gap_ms": 111,
+            "fragment_wait_ms": 236,
+            "full_wait_ms": 0
+          }
+        },
+        {
+          "name": "long",
+          "fixed_public_text": "我是朝夕，可以帮你回答问题、记录待办，并在约定的时间提醒你。",
+          "result_code": 0,
+          "request_to_playback_complete_seconds": 8.478,
+          "tts_start_to_first_play_callback_ms": 2014,
+          "provider": {
+            "text_bytes": 90,
+            "first_pcm_ms": 1790,
+            "http": 200,
+            "rc": 0,
+            "total_ms": 7469,
+            "pcm_bytes": 284160
+          },
+          "pcm": {
+            "peak": 32640,
+            "capacity": 65536,
+            "rc": 0,
+            "rx": 284160,
+            "played": 284160,
+            "low": 0,
+            "chunks": 93,
+            "min_chunk": 1280,
+            "max_chunk": 3200,
+            "rx_ms": 5663,
+            "rx_Bps": 50178,
+            "dma_ms": 5928,
+            "play_ms": 6152,
+            "ideal_ms": 5920,
+            "count": 1,
+            "empty_ms": 80,
+            "max_empty_ms": 80,
+            "gap_ms": 215,
+            "max_gap_ms": 81,
+            "fragment_wait_ms": 132,
+            "full_wait_ms": 0
+          }
+        }
+      ],
+      "automatic_capture_before": {
+        "enabled": false,
+        "running": false,
+        "accepting_speech": false,
+        "state": "已停止",
+        "noise": 0,
+        "threshold": 0,
+        "last_error": 0,
+        "frames": 0,
+        "utterances": 0,
+        "asr_calls": 0,
+        "rejected": 0,
+        "last_pcm_bytes": 0
+      },
+      "automatic_capture_after": null,
+      "automatic_capture_after_note": "The probe report did not save a second status snapshot after the failed QA; do not infer one. No microphone was requested.",
+      "normal_quit_result_code": 0,
+      "host_forwarder_exit_code": 0,
+      "text_input_model_qa": {
+        "input": "请用一句话解释什么是待办清单。",
+        "submitted_result_code": 0,
+        "llm_ms": [
+          3176
+        ],
+        "tts_start_to_first_play_callback_ms": [
+          2042
+        ],
+        "playback_completed": false,
+        "text_request_to_playback_complete_seconds": 15.515,
+        "pcm": {
+          "peak": 20480,
+          "capacity": 65536,
+          "rc": -4,
+          "rx": 207360,
+          "played": 207360,
+          "low": 0,
+          "chunks": 68,
+          "min_chunk": 1280,
+          "max_chunk": 3200,
+          "rx_ms": 8548,
+          "rx_Bps": 24258,
+          "dma_ms": 4336,
+          "play_ms": 8748,
+          "ideal_ms": 4320,
+          "count": 8,
+          "empty_ms": 3416,
+          "max_empty_ms": 1922,
+          "gap_ms": 4389,
+          "max_gap_ms": 1922,
+          "fragment_wait_ms": 925,
+          "full_wait_ms": 0
+        },
+        "diagnosis": "Temporary TLS receive no-data was treated as a request failure; recovery fix pending at this measurement."
+      }
+    },
+    {
+      "variant": "tls_retry_and_640ms_prefill_intermediate",
+      "firmware_sha256": "8b3f19e98dbf9db6a7f1a2c7ae173de087692039b967202781cbdb23b5520fa6",
+      "acceptance_state": "all_requests_completed_but_long_and_qa_underruns_remaining",
+      "fixed_text_measurements": [
+        {
+          "name": "short",
+          "fixed_public_text": "你好，朝夕语音测试成功。",
+          "result_code": 0,
+          "request_to_playback_complete_seconds": 5.745,
+          "tts_start_to_first_play_callback_ms": 2236,
+          "provider": {
+            "text_bytes": 36,
+            "first_pcm_ms": 1574,
+            "http": 200,
+            "rc": 0,
+            "total_ms": 4446,
+            "pcm_bytes": 145920
+          },
+          "pcm": {
+            "peak": 41600,
+            "capacity": 65536,
+            "rc": 0,
+            "rx": 145920,
+            "played": 145920,
+            "low": 6400,
+            "chunks": 48,
+            "min_chunk": 1280,
+            "max_chunk": 3200,
+            "rx_ms": 2863,
+            "rx_Bps": 50967,
+            "dma_ms": 3047,
+            "play_ms": 3052,
+            "ideal_ms": 3040,
+            "count": 0,
+            "empty_ms": 0,
+            "max_empty_ms": 0,
+            "gap_ms": 3,
+            "max_gap_ms": 1,
+            "fragment_wait_ms": 0,
+            "full_wait_ms": 0
+          }
+        },
+        {
+          "name": "long",
+          "fixed_public_text": "我是朝夕，可以帮你回答问题、记录待办，并在约定的时间提醒你。",
+          "result_code": 0,
+          "request_to_playback_complete_seconds": 8.972,
+          "tts_start_to_first_play_callback_ms": 2164,
+          "provider": {
+            "text_bytes": 90,
+            "first_pcm_ms": 1545,
+            "http": 200,
+            "rc": 0,
+            "total_ms": 7960,
+            "pcm_bytes": 284160
+          },
+          "pcm": {
+            "peak": 47360,
+            "capacity": 65536,
+            "rc": 0,
+            "rx": 284160,
+            "played": 284160,
+            "low": 0,
+            "chunks": 93,
+            "min_chunk": 1280,
+            "max_chunk": 3200,
+            "rx_ms": 6406,
+            "rx_Bps": 44358,
+            "dma_ms": 5927,
+            "play_ms": 6446,
+            "ideal_ms": 5920,
+            "count": 2,
+            "empty_ms": 188,
+            "max_empty_ms": 115,
+            "gap_ms": 518,
+            "max_gap_ms": 115,
+            "fragment_wait_ms": 325,
+            "full_wait_ms": 0
+          }
+        }
+      ],
+      "automatic_capture_before": {
+        "enabled": false,
+        "running": false,
+        "accepting_speech": false,
+        "state": "已停止",
+        "noise": 0,
+        "threshold": 0,
+        "last_error": 0,
+        "frames": 0,
+        "utterances": 0,
+        "asr_calls": 0,
+        "rejected": 0,
+        "last_pcm_bytes": 0
+      },
+      "automatic_capture_after": {
+        "enabled": false,
+        "running": false,
+        "accepting_speech": false,
+        "state": "已停止",
+        "noise": 0,
+        "threshold": 0,
+        "last_error": 0,
+        "frames": 0,
+        "utterances": 0,
+        "asr_calls": 0,
+        "rejected": 0,
+        "last_pcm_bytes": 0
+      },
+      "normal_quit_result_code": 0,
+      "host_forwarder_exit_code": 0,
+      "text_input_model_qa": {
+        "input": "请用一句话解释什么是待办清单。",
+        "submitted_result_code": 0,
+        "llm_ms": [
+          2635
+        ],
+        "tts_start_to_first_play_callback_ms": [
+          2302
+        ],
+        "playback_completed": true,
+        "text_request_to_playback_complete_seconds": 15.353,
+        "pcm": {
+          "peak": 23040,
+          "capacity": 65536,
+          "rc": 0,
+          "rx": 307200,
+          "played": 307200,
+          "low": 0,
+          "chunks": 101,
+          "min_chunk": 640,
+          "max_chunk": 3200,
+          "rx_ms": 10152,
+          "rx_Bps": 30260,
+          "dma_ms": 6408,
+          "play_ms": 9991,
+          "ideal_ms": 6400,
+          "count": 16,
+          "empty_ms": 2227,
+          "max_empty_ms": 327,
+          "gap_ms": 3580,
+          "max_gap_ms": 327,
+          "fragment_wait_ms": 1350,
+          "full_wait_ms": 0
+        }
+      }
+    },
+    {
+      "variant": "pc_ppp_accm_zero_intermediate",
+      "firmware_sha256": "ea2fa60e8524695de452c75e7447dcbe9920b81ef985c2808d40c5f65f9084c3",
+      "acceptance_state": "all_requests_completed_long_no_underrun_short_and_qa_still_underflow",
+      "fixed_text_measurements": [
+        {
+          "name": "short",
+          "fixed_public_text": "你好，朝夕语音测试成功。",
+          "result_code": 0,
+          "request_to_playback_complete_seconds": 6.647,
+          "tts_start_to_first_play_callback_ms": 2538,
+          "provider": {
+            "text_bytes": 36,
+            "first_pcm_ms": 1874,
+            "http": 200,
+            "rc": 0,
+            "total_ms": 5726,
+            "pcm_bytes": 138240
+          },
+          "pcm": {
+            "peak": 24960,
+            "capacity": 65536,
+            "rc": 0,
+            "rx": 138240,
+            "played": 138240,
+            "low": 0,
+            "chunks": 46,
+            "min_chunk": 640,
+            "max_chunk": 3200,
+            "rx_ms": 3843,
+            "rx_Bps": 35971,
+            "dma_ms": 2892,
+            "play_ms": 3773,
+            "ideal_ms": 2880,
+            "count": 3,
+            "empty_ms": 601,
+            "max_empty_ms": 355,
+            "gap_ms": 880,
+            "max_gap_ms": 355,
+            "fragment_wait_ms": 276,
+            "full_wait_ms": 0
+          }
+        },
+        {
+          "name": "long",
+          "fixed_public_text": "我是朝夕，可以帮你回答问题、记录待办，并在约定的时间提醒你。",
+          "result_code": 0,
+          "request_to_playback_complete_seconds": 8.463,
+          "tts_start_to_first_play_callback_ms": 2501,
+          "provider": {
+            "text_bytes": 90,
+            "first_pcm_ms": 1861,
+            "http": 200,
+            "rc": 0,
+            "total_ms": 6818,
+            "pcm_bytes": 268800
+          },
+          "pcm": {
+            "peak": 65280,
+            "capacity": 65536,
+            "rc": 0,
+            "rx": 268800,
+            "played": 268800,
+            "low": 19200,
+            "chunks": 88,
+            "min_chunk": 1280,
+            "max_chunk": 3200,
+            "rx_ms": 4947,
+            "rx_Bps": 54335,
+            "dma_ms": 5614,
+            "play_ms": 5621,
+            "ideal_ms": 5600,
+            "count": 0,
+            "empty_ms": 0,
+            "max_empty_ms": 0,
+            "gap_ms": 5,
+            "max_gap_ms": 1,
+            "fragment_wait_ms": 0,
+            "full_wait_ms": 0
+          }
+        }
+      ],
+      "automatic_capture_before": {
+        "enabled": false,
+        "running": false,
+        "accepting_speech": false,
+        "state": "已停止",
+        "noise": 0,
+        "threshold": 0,
+        "last_error": 0,
+        "frames": 0,
+        "utterances": 0,
+        "asr_calls": 0,
+        "rejected": 0,
+        "last_pcm_bytes": 0
+      },
+      "automatic_capture_after": {
+        "enabled": false,
+        "running": false,
+        "accepting_speech": false,
+        "state": "已停止",
+        "noise": 0,
+        "threshold": 0,
+        "last_error": 0,
+        "frames": 0,
+        "utterances": 0,
+        "asr_calls": 0,
+        "rejected": 0,
+        "last_pcm_bytes": 0
+      },
+      "normal_quit_result_code": 0,
+      "host_forwarder_exit_code": 0,
+      "text_input_model_qa": {
+        "input": "请用一句话解释什么是待办清单。",
+        "submitted_result_code": 0,
+        "llm_ms": [
+          2574
+        ],
+        "tts_start_to_first_play_callback_ms": [
+          2839
+        ],
+        "playback_completed": true,
+        "text_request_to_playback_complete_seconds": 14.492,
+        "pcm": {
+          "peak": 35200,
+          "capacity": 65536,
+          "rc": 0,
+          "rx": 322560,
+          "played": 322560,
+          "low": 0,
+          "chunks": 106,
+          "min_chunk": 640,
+          "max_chunk": 3200,
+          "rx_ms": 8741,
+          "rx_Bps": 36901,
+          "dma_ms": 6736,
+          "play_ms": 8608,
+          "ideal_ms": 6720,
+          "count": 6,
+          "empty_ms": 1127,
+          "max_empty_ms": 406,
+          "gap_ms": 1868,
+          "max_gap_ms": 406,
+          "fragment_wait_ms": 736,
+          "full_wait_ms": 0
+        }
+      }
+    },
+    {
+      "variant": "frame_atomic_pc_uplink_production",
+      "role": "production_default",
+      "firmware_sha256": "4e22a19662433dca3acc301e380a68187efd2bf73d1cd3fc492fd090620d06f2",
+      "acceptance_state": "all_requests_completed_first_audio_improved_continuity_not_fully_passed",
+      "fixed_text_measurements": [
+        {
+          "name": "short",
+          "fixed_public_text": "你好，朝夕语音测试成功。",
+          "result_code": 0,
+          "request_to_playback_complete_seconds": 7.245,
+          "tts_start_to_first_play_callback_ms": 2795,
+          "provider": {
+            "text_bytes": 36,
+            "first_pcm_ms": 2132,
+            "http": 200,
+            "rc": 0,
+            "total_ms": 6140,
+            "pcm_bytes": 130560
+          },
+          "pcm": {
+            "peak": 27520,
+            "capacity": 65536,
+            "rc": 0,
+            "rx": 130560,
+            "played": 130560,
+            "low": 0,
+            "chunks": 43,
+            "min_chunk": 1280,
+            "max_chunk": 3200,
+            "rx_ms": 3998,
+            "rx_Bps": 32656,
+            "dma_ms": 2726,
+            "play_ms": 3998,
+            "ideal_ms": 2720,
+            "count": 6,
+            "empty_ms": 703,
+            "max_empty_ms": 428,
+            "gap_ms": 1268,
+            "max_gap_ms": 428,
+            "fragment_wait_ms": 561,
+            "full_wait_ms": 0
+          }
+        },
+        {
+          "name": "long",
+          "fixed_public_text": "我是朝夕，可以帮你回答问题、记录待办，并在约定的时间提醒你。",
+          "result_code": 0,
+          "request_to_playback_complete_seconds": 8.469,
+          "tts_start_to_first_play_callback_ms": 2354,
+          "provider": {
+            "text_bytes": 90,
+            "first_pcm_ms": 1692,
+            "http": 200,
+            "rc": 0,
+            "total_ms": 6918,
+            "pcm_bytes": 276480
+          },
+          "pcm": {
+            "peak": 55680,
+            "capacity": 65536,
+            "rc": 0,
+            "rx": 276480,
+            "played": 276480,
+            "low": 1920,
+            "chunks": 91,
+            "min_chunk": 640,
+            "max_chunk": 3200,
+            "rx_ms": 5217,
+            "rx_Bps": 52995,
+            "dma_ms": 5769,
+            "play_ms": 5774,
+            "ideal_ms": 5760,
+            "count": 0,
+            "empty_ms": 0,
+            "max_empty_ms": 0,
+            "gap_ms": 2,
+            "max_gap_ms": 1,
+            "fragment_wait_ms": 0,
+            "full_wait_ms": 0
+          }
+        }
+      ],
+      "automatic_capture_before": {
+        "enabled": false,
+        "running": false,
+        "accepting_speech": false,
+        "state": "已停止",
+        "noise": 0,
+        "threshold": 0,
+        "last_error": 0,
+        "frames": 0,
+        "utterances": 0,
+        "asr_calls": 0,
+        "rejected": 0,
+        "last_pcm_bytes": 0
+      },
+      "automatic_capture_after": {
+        "enabled": false,
+        "running": false,
+        "accepting_speech": false,
+        "state": "已停止",
+        "noise": 0,
+        "threshold": 0,
+        "last_error": 0,
+        "frames": 0,
+        "utterances": 0,
+        "asr_calls": 0,
+        "rejected": 0,
+        "last_pcm_bytes": 0
+      },
+      "normal_quit_result_code": 0,
+      "host_forwarder_exit_code": 0,
+      "text_input_model_qa": {
+        "input": "请用一句话解释什么是待办清单。",
+        "submitted_result_code": 0,
+        "llm_ms": [
+          1866
+        ],
+        "tts_start_to_first_play_callback_ms": [
+          1999
+        ],
+        "playback_completed": true,
+        "text_request_to_playback_complete_seconds": 13.06,
+        "pcm": {
+          "peak": 50560,
+          "capacity": 65536,
+          "rc": 0,
+          "rx": 307200,
+          "played": 307200,
+          "low": 0,
+          "chunks": 101,
+          "min_chunk": 640,
+          "max_chunk": 3200,
+          "rx_ms": 8877,
+          "rx_Bps": 34606,
+          "dma_ms": 6405,
+          "play_ms": 8717,
+          "ideal_ms": 6400,
+          "count": 4,
+          "empty_ms": 1981,
+          "max_empty_ms": 802,
+          "gap_ms": 2306,
+          "max_gap_ms": 802,
+          "fragment_wait_ms": 321,
+          "full_wait_ms": 0
+        }
+      }
+    },
+    {
+      "variant": "same_firmware_private_75k_pacing_experiment",
+      "role": "private_host_experiment",
+      "firmware_sha256": "4e22a19662433dca3acc301e380a68187efd2bf73d1cd3fc492fd090620d06f2",
+      "acceptance_state": "all_requests_completed_some_underruns_remaining_not_production_default",
+      "fixed_text_measurements": [
+        {
+          "name": "short",
+          "fixed_public_text": "你好，朝夕语音测试成功。",
+          "result_code": 0,
+          "request_to_playback_complete_seconds": 5.533,
+          "tts_start_to_first_play_callback_ms": 2578,
+          "provider": {
+            "text_bytes": 36,
+            "first_pcm_ms": 1915,
+            "http": 200,
+            "rc": 0,
+            "total_ms": 4369,
+            "pcm_bytes": 122880
+          },
+          "pcm": {
+            "peak": 37760,
+            "capacity": 65536,
+            "rc": 0,
+            "rx": 122880,
+            "played": 122880,
+            "low": 13440,
+            "chunks": 41,
+            "min_chunk": 640,
+            "max_chunk": 3200,
+            "rx_ms": 2446,
+            "rx_Bps": 50237,
+            "dma_ms": 2572,
+            "play_ms": 2574,
+            "ideal_ms": 2560,
+            "count": 0,
+            "empty_ms": 0,
+            "max_empty_ms": 0,
+            "gap_ms": 0,
+            "max_gap_ms": 0,
+            "fragment_wait_ms": 0,
+            "full_wait_ms": 0
+          }
+        },
+        {
+          "name": "long",
+          "fixed_public_text": "我是朝夕，可以帮你回答问题、记录待办，并在约定的时间提醒你。",
+          "result_code": 0,
+          "request_to_playback_complete_seconds": 9.339,
+          "tts_start_to_first_play_callback_ms": 2429,
+          "provider": {
+            "text_bytes": 90,
+            "first_pcm_ms": 1767,
+            "http": 200,
+            "rc": 0,
+            "total_ms": 8394,
+            "pcm_bytes": 284160
+          },
+          "pcm": {
+            "peak": 27520,
+            "capacity": 65536,
+            "rc": 0,
+            "rx": 284160,
+            "played": 284160,
+            "low": 0,
+            "chunks": 93,
+            "min_chunk": 1280,
+            "max_chunk": 3200,
+            "rx_ms": 6621,
+            "rx_Bps": 42917,
+            "dma_ms": 5921,
+            "play_ms": 6619,
+            "ideal_ms": 5920,
+            "count": 3,
+            "empty_ms": 234,
+            "max_empty_ms": 124,
+            "gap_ms": 696,
+            "max_gap_ms": 125,
+            "fragment_wait_ms": 451,
+            "full_wait_ms": 0
+          }
+        }
+      ],
+      "automatic_capture_before": {
+        "enabled": false,
+        "running": false,
+        "accepting_speech": false,
+        "state": "已停止",
+        "noise": 0,
+        "threshold": 0,
+        "last_error": 0,
+        "frames": 0,
+        "utterances": 0,
+        "asr_calls": 0,
+        "rejected": 0,
+        "last_pcm_bytes": 0
+      },
+      "automatic_capture_after": {
+        "enabled": false,
+        "running": false,
+        "accepting_speech": false,
+        "state": "已停止",
+        "noise": 0,
+        "threshold": 0,
+        "last_error": 0,
+        "frames": 0,
+        "utterances": 0,
+        "asr_calls": 0,
+        "rejected": 0,
+        "last_pcm_bytes": 0
+      },
+      "normal_quit_result_code": 0,
+      "host_forwarder_exit_code": 0,
+      "text_input_model_qa": {
+        "input": "请用一句话解释什么是待办清单。",
+        "submitted_result_code": 0,
+        "llm_ms": [
+          8656
+        ],
+        "tts_start_to_first_play_callback_ms": [
+          2337
+        ],
+        "playback_completed": true,
+        "text_request_to_playback_complete_seconds": 18.218,
+        "pcm": {
+          "peak": 35840,
+          "capacity": 65536,
+          "rc": 0,
+          "rx": 299520,
+          "played": 299520,
+          "low": 0,
+          "chunks": 98,
+          "min_chunk": 1280,
+          "max_chunk": 3200,
+          "rx_ms": 6723,
+          "rx_Bps": 44551,
+          "dma_ms": 6253,
+          "play_ms": 6722,
+          "ideal_ms": 6240,
+          "count": 2,
+          "empty_ms": 249,
+          "max_empty_ms": 167,
+          "gap_ms": 462,
+          "max_gap_ms": 167,
+          "fragment_wait_ms": 211,
+          "full_wait_ms": 0
+        }
+      },
+      "experiment_notes": [
+        "Same board firmware as production. Only a private host wrapper paced serial writes at 75000 bytes/s.",
+        "This wrapper is not the production default and is not required to run the delivered host tool.",
+        "Single-run LLM duration 8656 ms is not evidence that pacing caused the model delay. No causal inference or stable latency guarantee is made."
+      ]
+    }
+  ],
+  "pending": [
+    "Attended listening confirmation for the frozen production firmware; measured underruns remain in the short and model-QA playback.",
+    "Full automatic voice latency and three business function acceptance remain separate from these text-input tests."
+  ],
+  "uart_receive_buffer_constraint": {
+    "attempted_config_bytes": 16383,
+    "actual_linked_symbol": "g_uart0rxbuffer",
+    "actual_linked_symbol_bytes": 4095,
+    "symbol_owner": "prebuilt libbeschip archive, bes_serial.o",
+    "configuration_only_change_effective": false,
+    "configuration_change_reverted": true,
+    "candidate_prefix": "fdea",
+    "candidate_flashed_to_board": false,
+    "conclusion": "A configuration-only full rebuild did not replace the precompiled UART receive buffer. No 16 KiB hardware acceptance is claimed."
+  },
+  "ppp_header_comparison": {
+    "capture_direction": "board_to_pc",
+    "contains_application_payload": false,
+    "timing_limit": "Capture contains no timestamps and TCP has no timestamp option; exact retransmission delays and upstream-versus-UART loss location cannot be determined.",
+    "interpretation": "ACCM-zero reduced serial wire expansion. SACK ACKs persisted across the compared sessions; the capture cannot locate receive gaps or reordering to the Internet versus UART or measure retransmission delay.",
+    "sessions": {
+      "ready": {
+        "firmware_sha256": "8b3f19e98dbf9db6a7f1a2c7ae173de087692039b967202781cbdb23b5520fa6",
+        "valid_ppp_fcs_frames": 1755,
+        "crc_invalid_header_candidate_frames": 1,
+        "crc_valid_after_log_insertion_removed": [
+          {
+            "removed_octets": 282,
+            "insert_position": 52,
+            "tcp_flags": 16,
+            "tcp_payload_length": 0
+          }
+        ],
+        "board_to_pc_wire_expansion": 1.343759,
+        "pc_to_board_wire_per_network_octet": 1.176583,
+        "flows": {
+          "short_tts": {
+            "outbound_packets": 342,
+            "sack_ack_packets": 90,
+            "sack_fraction": 0.2632,
+            "distinct_sack_ack_positions": 14,
+            "zero_window_advertisements": 0
+          },
+          "long_tts": {
+            "outbound_packets": 672,
+            "sack_ack_packets": 163,
+            "sack_fraction": 0.2426,
+            "distinct_sack_ack_positions": 11,
+            "zero_window_advertisements": 0
+          },
+          "model_text": {
+            "outbound_packets": 37,
+            "sack_ack_packets": 0,
+            "sack_fraction": 0.0,
+            "distinct_sack_ack_positions": 0,
+            "zero_window_advertisements": 0
+          },
+          "qa_tts": {
+            "outbound_packets": 663,
+            "sack_ack_packets": 125,
+            "sack_fraction": 0.1885,
+            "distinct_sack_ack_positions": 9,
+            "zero_window_advertisements": 0
+          }
+        }
+      },
+      "final": {
+        "firmware_sha256": "0437a79fec2044ecd4c33e026756ab1ad7df948026ee5e4b451efa39db365335",
+        "valid_ppp_fcs_frames": 1603,
+        "crc_invalid_header_candidate_frames": 0,
+        "crc_valid_after_log_insertion_removed": [],
+        "board_to_pc_wire_expansion": 1.335818,
+        "pc_to_board_wire_per_network_octet": 1.177561,
+        "flows": {
+          "short_tts": {
+            "outbound_packets": 361,
+            "sack_ack_packets": 88,
+            "sack_fraction": 0.2438,
+            "distinct_sack_ack_positions": 12,
+            "zero_window_advertisements": 0
+          },
+          "long_tts": {
+            "outbound_packets": 586,
+            "sack_ack_packets": 98,
+            "sack_fraction": 0.1672,
+            "distinct_sack_ack_positions": 15,
+            "zero_window_advertisements": 0
+          },
+          "model_text": {
+            "outbound_packets": 42,
+            "sack_ack_packets": 0,
+            "sack_fraction": 0.0,
+            "distinct_sack_ack_positions": 0,
+            "zero_window_advertisements": 0
+          },
+          "qa_tts": {
+            "outbound_packets": 562,
+            "sack_ack_packets": 0,
+            "sack_fraction": 0.0,
+            "distinct_sack_ack_positions": 0,
+            "zero_window_advertisements": 0
+          }
+        }
+      },
+      "accm": {
+        "firmware_sha256": "ea2fa60e8524695de452c75e7447dcbe9920b81ef985c2808d40c5f65f9084c3",
+        "valid_ppp_fcs_frames": 1643,
+        "crc_invalid_header_candidate_frames": 0,
+        "crc_valid_after_log_insertion_removed": [],
+        "board_to_pc_wire_expansion": 1.042868,
+        "pc_to_board_wire_per_network_octet": 1.022476,
+        "flows": {
+          "short_tts": {
+            "outbound_packets": 296,
+            "sack_ack_packets": 7,
+            "sack_fraction": 0.0236,
+            "distinct_sack_ack_positions": 2,
+            "zero_window_advertisements": 0
+          },
+          "long_tts": {
+            "outbound_packets": 573,
+            "sack_ack_packets": 131,
+            "sack_fraction": 0.2286,
+            "distinct_sack_ack_positions": 19,
+            "zero_window_advertisements": 0
+          },
+          "model_text": {
+            "outbound_packets": 40,
+            "sack_ack_packets": 0,
+            "sack_fraction": 0.0,
+            "distinct_sack_ack_positions": 0,
+            "zero_window_advertisements": 0
+          },
+          "qa_tts": {
+            "outbound_packets": 683,
+            "sack_ack_packets": 163,
+            "sack_fraction": 0.2387,
+            "distinct_sack_ack_positions": 9,
+            "zero_window_advertisements": 0
+          }
+        }
+      },
+      "frame": {
+        "firmware_sha256": "4e22a19662433dca3acc301e380a68187efd2bf73d1cd3fc492fd090620d06f2",
+        "valid_ppp_fcs_frames": 1624,
+        "crc_invalid_header_candidate_frames": 0,
+        "crc_valid_after_log_insertion_removed": [],
+        "board_to_pc_wire_expansion": 1.043712,
+        "pc_to_board_wire_per_network_octet": 1.022394,
+        "flows": {
+          "short_tts": {
+            "outbound_packets": 285,
+            "sack_ack_packets": 0,
+            "sack_fraction": 0.0,
+            "distinct_sack_ack_positions": 0,
+            "zero_window_advertisements": 0
+          },
+          "long_tts": {
+            "outbound_packets": 581,
+            "sack_ack_packets": 0,
+            "sack_fraction": 0.0,
+            "distinct_sack_ack_positions": 0,
+            "zero_window_advertisements": 0
+          },
+          "model_text": {
+            "outbound_packets": 39,
+            "sack_ack_packets": 0,
+            "sack_fraction": 0.0,
+            "distinct_sack_ack_positions": 0,
+            "zero_window_advertisements": 0
+          },
+          "qa_tts": {
+            "outbound_packets": 674,
+            "sack_ack_packets": 155,
+            "sack_fraction": 0.23,
+            "distinct_sack_ack_positions": 14,
+            "zero_window_advertisements": 0
+          }
+        }
+      },
+      "paced_recovered": {
+        "firmware_sha256": "4e22a19662433dca3acc301e380a68187efd2bf73d1cd3fc492fd090620d06f2",
+        "valid_ppp_fcs_frames": 1292,
+        "crc_invalid_header_candidate_frames": 0,
+        "crc_valid_after_log_insertion_removed": [],
+        "board_to_pc_wire_expansion": 1.040441,
+        "pc_to_board_wire_per_network_octet": 1.022033,
+        "flows": {
+          "short_tts": {
+            "outbound_packets": 204,
+            "sack_ack_packets": 0,
+            "sack_fraction": 0.0,
+            "distinct_sack_ack_positions": 0,
+            "zero_window_advertisements": 0
+          },
+          "long_tts": {
+            "outbound_packets": 459,
+            "sack_ack_packets": 21,
+            "sack_fraction": 0.0458,
+            "distinct_sack_ack_positions": 2,
+            "zero_window_advertisements": 0
+          },
+          "model_text": {
+            "outbound_packets": 35,
+            "sack_ack_packets": 0,
+            "sack_fraction": 0.0,
+            "distinct_sack_ack_positions": 0,
+            "zero_window_advertisements": 0
+          },
+          "qa_tts": {
+            "outbound_packets": 549,
+            "sack_ack_packets": 127,
+            "sack_fraction": 0.2313,
+            "distinct_sack_ack_positions": 18,
+            "zero_window_advertisements": 0
+          }
+        }
+      }
+    }
+  },
+  "production_release": {
+    "firmware_sha256": "4e22a19662433dca3acc301e380a68187efd2bf73d1cd3fc492fd090620d06f2",
+    "firmware_bytes": 1329688,
+    "full_build_completed": true,
+    "flashed_to_board": true,
+    "flash_method": "software reboot and local downloader",
+    "host_default": "tools/pc_link/start.py",
+    "host_pacing_production_parameter_added": false,
+    "latest_production_measurement_variant": "frame_atomic_pc_uplink_production",
+    "microphone_capture_requested": false,
+    "three_text_requests_completed": true,
+    "all_playback_underruns_eliminated": false,
+    "attended_listening_confirmation": "pending_for_this_final_firmware"
+  },
+  "code_validation": {
+    "host_regression_tests_passed": 55,
+    "sdk_patches_replayed": 32,
+    "sdk_files_compared": 23,
+    "apps_patch_sequence": [
+      25,
+      42,
+      46,
+      47
+    ],
+    "apps_regression_groups_passed": 5,
+    "apps_replay_matches_build_source": true,
+    "full_board_build_completed": true,
+    "note": "Passing code checks and complete text requests do not replace continuity or full automatic voice acceptance."
+  }
+}

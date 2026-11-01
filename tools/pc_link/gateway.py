@@ -26,6 +26,9 @@ try:
         if not piece:raise EOFError('Authentication transport closed')
         auth.extend(piece)
     if not hmac.compare_digest(bytes(auth).strip(),config['token'].encode()):raise RuntimeError('Authentication failed')
+    # PPP control/ACK frames are small; do not coalesce them behind an
+    # unacknowledged partial frame on the Windows/WSL loopback transport.
+    peer.setsockopt(socket.IPPROTO_TCP,socket.TCP_NODELAY,1)
     route=json.loads(subprocess.check_output(['ip','-j','route','get','223.5.5.5']))[0]
     dev=route['dev']
     if previous!='1':forward.write_text('1\n');changed=True
@@ -36,8 +39,9 @@ try:
     logfile=(root/'linux_pppd.log').open('ab')
     proc=subprocess.Popen(['pppd','notty','nodetach','noauth','local','passive','noccp','noipdefault','noipv6',
         'nodefaultroute','noproxyarp','unit','42','10.254.42.1:10.254.42.2',
-        'ms-dns','223.5.5.5','mtu','512','mru','512','asyncmap','ffffffff',
-        'escape',','.join(f'{x:02x}' for x in list(range(32))+[127]),
+        # Both UART endpoints use raw bytes without XON/XOFF. Negotiate no
+        # optional control-octet escaping; PPP still escapes 0x7d and 0x7e.
+        'ms-dns','223.5.5.5','mtu','512','mru','512','asyncmap','0',
         'novj','novjccomp','nopcomp','noaccomp','lcp-echo-interval','0','debug',
         'logfile',str(root/'linux_pppd.log')],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=logfile,bufsize=0)
     peer.settimeout(None)

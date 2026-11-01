@@ -1,0 +1,26 @@
+--- a/src/voice/voice_channel.c
++++ b/src/voice/voice_channel.c
+@@ -1049,7 +1049,11 @@
+  * sockets and only drives the blocking BES DMA API. Buffering is bounded to
+  * about 1.36 s at 24 kHz mono; backpressure never drops audio samples. */
+ #define TTS_QUEUE_BYTES 65536
+-#define TTS_QUEUE_PREFILL 9600
++/* Real board IRQ playback now matches sample duration. A 640ms initial
++ * cushion absorbs observed 80-111ms serial/TLS bursts near realtime speed;
++ * EOF still flushes short utterances immediately, with no extra silence. */
++#define TTS_QUEUE_PREFILL 30720
++#define TTS_QUEUE_PREFILL_MS 640
+ #define TTS_QUEUE_BLOCK 3200
+ #define TTS_PCM_PRIORITY 110
+ struct tts_pcm_queue {
+@@ -1116,8 +1120,8 @@
+             if (!started) {
+                 if (q->used && !first_data) first_data=now;
+                 if (q->used && (q->eof || q->used>=TTS_QUEUE_PREFILL ||
+-                                now-first_data>=200)) break;
+-                if (q->used && first_data) wait_ms=(unsigned)(200-(now-first_data));
++                                now-first_data>=TTS_QUEUE_PREFILL_MS)) break;
++                if (q->used && first_data) wait_ms=(unsigned)(TTS_QUEUE_PREFILL_MS-(now-first_data));
+             } else if (q->used) {
+                 /* Count actual starvation only if more PCM arrives. Waiting
+                  * for the final SSE/DONE after all audio is not an underrun. */

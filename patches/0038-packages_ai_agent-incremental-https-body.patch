@@ -1,0 +1,352 @@
+--- a/src/infra/vela_tls.c
++++ b/src/infra/vela_tls.c
+@@ -30,6 +30,7 @@
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <string.h>
++#include <strings.h>
+ 
+ /* POSIX networking */
+ #include <netdb.h>
+@@ -784,6 +785,264 @@
+ 
+     return http_status;
+ }
++
++/* ── Bounded incremental HTTP response delivery ────────────── */
++
++#define TLS_STREAM_MAX_BODY (32u * 1024u * 1024u)
++#define TLS_STREAM_TIMEOUT_MS 180000
++
++typedef struct {
++    mbedtls_net_context *net;
++    int64_t deadline;
++} tls_stream_bio_t;
++
++static int64_t tls_stream_now_ms(void)
++{
++    struct timespec now;
++    clock_gettime(CLOCK_MONOTONIC, &now);
++    return (int64_t)now.tv_sec * 1000 + now.tv_nsec / 1000000;
++}
++
++static int tls_stream_send(void *opaque, const unsigned char *data, size_t length)
++{
++    tls_stream_bio_t *bio = opaque;
++    if (tls_stream_now_ms() >= bio->deadline) return MBEDTLS_ERR_SSL_TIMEOUT;
++    return mbedtls_net_send(bio->net, data, length);
++}
++
++static int tls_stream_recv(void *opaque, unsigned char *data, size_t length)
++{
++    tls_stream_bio_t *bio = opaque;
++    int64_t left = bio->deadline - tls_stream_now_ms();
++    if (left <= 0) return MBEDTLS_ERR_SSL_TIMEOUT;
++    /* A per-receive timeout also bounds an idle record; checking the absolute
++     * deadline here bounds a peer dripping one byte at a time inside TLS. */
++    if (left > 1000) left = 1000;
++    struct timeval timeout = {.tv_sec = left / 1000,
++                              .tv_usec = (left % 1000) * 1000};
++    if (setsockopt(bio->net->fd, SOL_SOCKET, SO_RCVTIMEO,
++                   &timeout, sizeof(timeout)) < 0)
++        return MBEDTLS_ERR_NET_RECV_FAILED;
++#ifdef CONFIG_ZHAOXI_BES_AUDIO
++    return zhaoxi_tls_recv(bio->net, data, length);
++#else
++    return mbedtls_net_recv(bio->net, data, length);
++#endif
++}
++
++typedef struct {
++    tls_ctx_t *ctx;
++    unsigned char buffer[2048];
++    size_t position, length, delivered;
++    int64_t deadline;
++} tls_stream_reader_t;
++
++static int tls_stream_fill(tls_stream_reader_t *reader)
++{
++    if (reader->position < reader->length) return 1;
++    for (;;) {
++        if (tls_stream_now_ms() >= reader->deadline) return VELA_TLS_ERR_TIMEOUT;
++        int rc = mbedtls_ssl_read(&reader->ctx->ssl, reader->buffer,
++                                 sizeof(reader->buffer));
++        if (rc > 0) {
++            reader->position = 0; reader->length = (size_t)rc;
++            return 1;
++        }
++        if (!rc || rc == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY) return 0;
++        if (rc == MBEDTLS_ERR_SSL_TIMEOUT) return VELA_TLS_ERR_TIMEOUT;
++        if (rc != MBEDTLS_ERR_SSL_WANT_READ && rc != MBEDTLS_ERR_SSL_WANT_WRITE)
++            return VELA_TLS_ERR_READ;
++        usleep(1000);
++    }
++}
++
++static int tls_stream_byte(tls_stream_reader_t *reader, unsigned char *out)
++{
++    int rc = tls_stream_fill(reader);
++    if (rc == 1) *out = reader->buffer[reader->position++];
++    return rc;
++}
++
++static int tls_stream_line(tls_stream_reader_t *reader, char *line, size_t capacity)
++{
++    size_t used = 0;
++    for (;;) {
++        unsigned char value;
++        int rc = tls_stream_byte(reader, &value);
++        if (rc != 1) return rc < 0 ? rc : VELA_TLS_ERR_PROTOCOL;
++        if (!value || value == '\n') return VELA_TLS_ERR_PROTOCOL;
++        if (value == '\r') {
++            rc = tls_stream_byte(reader, &value);
++            if (rc != 1) return rc < 0 ? rc : VELA_TLS_ERR_PROTOCOL;
++            if (value != '\n') return VELA_TLS_ERR_PROTOCOL;
++            line[used] = 0; return 0;
++        }
++        if (used + 1 >= capacity) return VELA_TLS_ERR_OVERFLOW;
++        line[used++] = (char)value;
++    }
++}
++
++static int tls_stream_deliver(tls_stream_reader_t *reader, size_t count,
++                              vela_https_body_cb callback, void *user)
++{
++    if (count > TLS_STREAM_MAX_BODY - reader->delivered)
++        return VELA_TLS_ERR_OVERFLOW;
++    while (count) {
++        int rc = tls_stream_fill(reader);
++        if (rc != 1) return rc < 0 ? rc : VELA_TLS_ERR_PROTOCOL;
++        size_t amount = reader->length - reader->position;
++        if (amount > count) amount = count;
++        rc = callback(reader->buffer + reader->position, amount, user);
++        if (rc) return rc < 0 ? rc : VELA_TLS_ERR_PROTOCOL;
++        reader->position += amount; reader->delivered += amount; count -= amount;
++    }
++    return 0;
++}
++
++static int tls_stream_decimal(const char *value, size_t *number)
++{
++    size_t result = 0;
++    if (!*value) return VELA_TLS_ERR_PROTOCOL;
++    for (; *value; value++) {
++        if (*value < '0' || *value > '9') return VELA_TLS_ERR_PROTOCOL;
++        unsigned digit = (unsigned)(*value - '0');
++        if (result > (TLS_STREAM_MAX_BODY - digit) / 10)
++            return VELA_TLS_ERR_OVERFLOW;
++        result = result * 10 + digit;
++    }
++    *number = result; return 0;
++}
++
++static int tls_stream_chunk_size(const char *line, size_t *number)
++{
++    size_t value = 0; unsigned digits = 0;
++    for (; *line && *line != ';'; line++) {
++        unsigned digit;
++        if (*line >= '0' && *line <= '9') digit = (unsigned)(*line - '0');
++        else if (*line >= 'a' && *line <= 'f') digit = (unsigned)(*line - 'a' + 10);
++        else if (*line >= 'A' && *line <= 'F') digit = (unsigned)(*line - 'A' + 10);
++        else return VELA_TLS_ERR_PROTOCOL;
++        if (value > (TLS_STREAM_MAX_BODY - digit) / 16)
++            return VELA_TLS_ERR_OVERFLOW;
++        value = value * 16 + digit; digits++;
++    }
++    if (!digits) return VELA_TLS_ERR_PROTOCOL;
++    /* Extensions are ignored but cannot smuggle control characters. */
++    for (; *line; line++)
++        if ((unsigned char)*line < 32 || (unsigned char)*line == 127)
++            return VELA_TLS_ERR_PROTOCOL;
++    *number = value; return 0;
++}
++
++static int tls_read_response_stream(tls_ctx_t *ctx, vela_https_body_cb callback,
++                                    void *user, int64_t deadline)
++{
++    tls_stream_reader_t *reader = calloc(1, sizeof(*reader));
++    char *headers = malloc(VELA_TLS_HDR_BUF);
++    if (!reader || !headers) {
++        free(reader); free(headers); return VELA_TLS_ERR_OVERFLOW;
++    }
++    reader->ctx = ctx; reader->deadline = deadline;
++    int result = VELA_TLS_ERR_PROTOCOL; size_t used = 0;
++    /* Bound the whole header section, including arbitrary fragmented CRLF. */
++    while (used + 1 < VELA_TLS_HDR_BUF) {
++        unsigned char value; int rc = tls_stream_byte(reader, &value);
++        if (rc != 1) { result = rc < 0 ? rc : VELA_TLS_ERR_PROTOCOL; goto done; }
++        if (!value) goto done;
++        headers[used++] = (char)value;
++        if (used >= 4 && !memcmp(headers + used - 4, "\r\n\r\n", 4)) break;
++    }
++    if (used < 4 || memcmp(headers + used - 4, "\r\n\r\n", 4)) {
++        result = VELA_TLS_ERR_OVERFLOW; goto done;
++    }
++    headers[used] = 0;
++    char *line = headers, *end = strstr(line, "\r\n");
++    if (!end) goto done;
++    *end = 0;
++    if ((strncmp(line, "HTTP/1.1 ", 9) && strncmp(line, "HTTP/1.0 ", 9)) ||
++        strlen(line) < 12 || line[9] < '1' || line[9] > '5' ||
++        line[10] < '0' || line[10] > '9' || line[11] < '0' || line[11] > '9' ||
++        (line[12] && line[12] != ' ')) goto done;
++    int status = (line[9] - '0') * 100 + (line[10] - '0') * 10 + line[11] - '0';
++    /* Error payloads are never delivered to an audio/SSE consumer. An
++     * ephemeral connection may close immediately without draining them. */
++    if (status != 200) { result = status; goto done; }
++    bool has_length = false, chunked = false; size_t content_length = 0;
++    line = end + 2;
++    while (*line) {
++        end = strstr(line, "\r\n"); if (!end) goto done;
++        if (end == line) break;
++        *end = 0;
++        char *colon = strchr(line, ':'); if (!colon || colon == line) goto done;
++        for (char *name = line; name < colon; name++)
++            if (!( (*name >= 'a' && *name <= 'z') || (*name >= 'A' && *name <= 'Z') ||
++                   (*name >= '0' && *name <= '9') || strchr("!#$%&'*+-.^_`|~", *name)))
++                goto done;
++        *colon++ = 0;
++        while (*colon == ' ' || *colon == '\t') colon++;
++        char *last = colon + strlen(colon);
++        while (last > colon && (last[-1] == ' ' || last[-1] == '\t')) *--last = 0;
++        for (char *value = colon; *value; value++)
++            if (((unsigned char)*value < 32 && *value != '\t') || (unsigned char)*value == 127)
++                goto done;
++        if (!strcasecmp(line, "Content-Length")) {
++            if (has_length) goto done;
++            int rc = tls_stream_decimal(colon, &content_length);
++            if (rc) { result = rc; goto done; }
++            has_length = true;
++        } else if (!strcasecmp(line, "Transfer-Encoding")) {
++            if (chunked || strcasecmp(colon, "chunked")) goto done;
++            chunked = true;
++        } else if (!strcasecmp(line, "Content-Encoding") && strcasecmp(colon, "identity")) {
++            goto done;
++        }
++        line = end + 2;
++    }
++    if (has_length && chunked) goto done;
++    if (chunked) {
++        char chunk_line[256]; size_t trailers = 0;
++        for (;;) {
++            result = tls_stream_line(reader, chunk_line, sizeof(chunk_line));
++            if (result) goto done;
++            size_t count;
++            result = tls_stream_chunk_size(chunk_line, &count);
++            if (result) goto done;
++            if (!count) {
++                do {
++                    result = tls_stream_line(reader, chunk_line, sizeof(chunk_line));
++                    if (result) goto done;
++                    trailers += strlen(chunk_line) + 2;
++                    if (trailers > VELA_TLS_HDR_BUF) { result = VELA_TLS_ERR_OVERFLOW; goto done; }
++                    if (*chunk_line && !strchr(chunk_line, ':')) { result = VELA_TLS_ERR_PROTOCOL; goto done; }
++                } while (*chunk_line);
++                break;
++            }
++            result = tls_stream_deliver(reader, count, callback, user);
++            if (result) goto done;
++            unsigned char a, b;
++            int rc = tls_stream_byte(reader, &a);
++            if (rc != 1) { result = rc < 0 ? rc : VELA_TLS_ERR_PROTOCOL; goto done; }
++            rc = tls_stream_byte(reader, &b);
++            if (rc != 1) { result = rc < 0 ? rc : VELA_TLS_ERR_PROTOCOL; goto done; }
++            if (a != '\r' || b != '\n') { result = VELA_TLS_ERR_PROTOCOL; goto done; }
++        }
++    } else if (has_length) {
++        result = tls_stream_deliver(reader, content_length, callback, user);
++        if (result) goto done;
++    } else {
++        for (;;) {
++            int rc = tls_stream_fill(reader);
++            if (rc < 0) { result = rc; goto done; }
++            if (!rc) break;
++            result = tls_stream_deliver(reader, reader->length - reader->position, callback, user);
++            if (result) goto done;
++        }
++    }
++    result = 200;
++done:
++    free(headers); free(reader); return result;
++}
++
+ 
+ /* ── Public API ──────────────────────────────────────────────── */
+ 
+@@ -926,6 +1185,45 @@
+         json_body, body_len, resp_buf, resp_cap, NULL);
+ }
+ 
++int vela_https_post_json_stream(const char *host, const char *port, const char *path,
++    const vela_header_t *extra_headers, const char *json_body,
++    vela_https_body_cb callback, void *user)
++{
++    if (!host || !*host || !port || !*port || !path || path[0] != '/' ||
++        !json_body || !callback || strchr(host, '\r') || strchr(host, '\n') ||
++        strchr(path, '\r') || strchr(path, '\n')) return VELA_TLS_ERR_PROTOCOL;
++    vela_header_t merged[32]; unsigned n = 0;
++    merged[n++] = (vela_header_t){"Content-Type", "application/json"};
++    merged[n++] = (vela_header_t){"Accept", "text/event-stream"};
++    merged[n++] = (vela_header_t){"Accept-Encoding", "identity"};
++    if (extra_headers) for (const vela_header_t *h = extra_headers; h->name; h++) {
++        if (n >= 31 || !h->value || strchr(h->name, '\r') || strchr(h->name, '\n') ||
++            strchr(h->value, '\r') || strchr(h->value, '\n')) return VELA_TLS_ERR_OVERFLOW;
++        merged[n++] = *h;
++    }
++    merged[n] = (vela_header_t){NULL, NULL};
++    tls_ctx_t *ctx = calloc(1, sizeof(*ctx));
++    if (!ctx) return VELA_TLS_ERR_OVERFLOW;
++    int result = tls_ctx_connect(ctx, host, port);
++    if (!result) result = tls_write_request(ctx, "POST", host, path, merged,
++                                           json_body, strlen(json_body));
++    if (!result) {
++        tls_stream_bio_t bio = {&ctx->net, tls_stream_now_ms() + TLS_STREAM_TIMEOUT_MS};
++        mbedtls_ssl_set_bio(&ctx->ssl, &bio, tls_stream_send, tls_stream_recv, NULL);
++        result = tls_read_response_stream(ctx, callback, user, bio.deadline);
++        /* The stack BIO must not outlive this block during close_notify. */
++        mbedtls_ssl_set_bio(&ctx->ssl, &ctx->net, mbedtls_net_send,
++#ifdef CONFIG_ZHAOXI_BES_AUDIO
++                             zhaoxi_tls_recv,
++#else
++                             mbedtls_net_recv,
++#endif
++                             NULL);
++    }
++    tls_ctx_free(ctx); free(ctx); return result;
++}
++
++
+ int vela_https_head_date(const char* host, const char* port, const char* path,
+     char* date_out, size_t date_cap)
+ {
+--- a/src/infra/vela_tls.h
++++ b/src/infra/vela_tls.h
+@@ -32,6 +32,8 @@
+ #define VELA_TLS_ERR_WRITE     -3
+ #define VELA_TLS_ERR_READ      -4
+ #define VELA_TLS_ERR_OVERFLOW  -5
++#define VELA_TLS_ERR_PROTOCOL  -6
++#define VELA_TLS_ERR_TIMEOUT   -7
+ 
+ /**
+  * Extra header entry; pass an array terminated by {NULL, NULL}.
+@@ -87,6 +89,19 @@
+                          char *resp_buf, size_t resp_cap);
+ 
+ /**
++ * Incremental HTTP-200 body delivery. The callback receives transfer-decoded
++ * bytes with no NUL terminator; return 0 to continue or a negative error to
++ * cancel (propagated unchanged). Positive callback results are invalid.
++ * HTTP errors are returned without invoking the callback. Truncated framing,
++ * a response over 32 MiB or a response lasting over 180 seconds is an error.
++ * A dedicated connection is opened and released in the calling task.
++ */
++typedef int (*vela_https_body_cb)(const unsigned char *data, size_t length, void *user);
++int vela_https_post_json_stream(const char *host, const char *port, const char *path,
++    const vela_header_t *extra_headers, const char *json_body,
++    vela_https_body_cb callback, void *user);
++
++/**
+  * Plain HTTP (no TLS) POST with Content-Type: application/json.
+  * Used for internal/intranet endpoints that don't support HTTPS.
+  */

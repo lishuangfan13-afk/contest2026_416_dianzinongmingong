@@ -25,6 +25,12 @@ static ssize_t fake_write(int, const void *, size_t);
 static int fake_poll(struct pollfd *, nfds_t, int);
 static unsigned fake_sleep(unsigned);
 static int fake_clock_gettime(clockid_t, struct timespec *);
+static int fake_usleep(useconds_t);
+#ifdef PPP_FRAME_TX_TEST
+static ssize_t test_frame_write(int,const void *,size_t);
+static int test_frame_space(void);
+static void test_frame_wait(void);
+#endif
 #define open fake_open
 #define close fake_close
 #define fcntl fake_fcntl
@@ -34,6 +40,7 @@ static int fake_clock_gettime(clockid_t, struct timespec *);
 #define poll fake_poll
 #define sleep fake_sleep
 #define clock_gettime fake_clock_gettime
+#define usleep fake_usleep
 #include "pppd.c"
 #undef open
 #undef close
@@ -44,33 +51,84 @@ static int fake_clock_gettime(clockid_t, struct timespec *);
 #undef poll
 #undef sleep
 #undef clock_gettime
+#undef usleep
 
 static int opened, closed, downs, writes, sleeps, disconnects, chats, inits, connects;
+static size_t written_bytes;
 static int fail_open, mode;
 static bool stopping;
 static time_t monotonic_seconds;
+static unsigned monotonic_milliseconds;
 static int ready_callbacks, negotiation_step;
+static bool advance_poll_time;
+struct fake_rx_s {
+  unsigned char bytes[16384];
+  size_t length, position, fragment, calls, maximum_request;
+  int next_error;
+  bool eof;
+};
+static struct fake_rx_s rx[2];
 static void reset(void)
 {
   opened=closed=downs=writes=sleeps=disconnects=chats=inits=connects=0;
+  written_bytes=0;monotonic_milliseconds=0;
   stopping=false; fail_open=0; mode=0; monotonic_seconds=0;
   ready_callbacks=negotiation_step=0;
+  advance_poll_time=false;
+  memset(rx,0,sizeof(rx));
 }
 static int fake_open(const char *path, int flags, ...)
 { (void)path; (void)flags; return ++opened==fail_open ? -1 : 20+opened; }
 static int fake_close(int fd) { assert(fd>=21 && fd<=22); closed++; return 0; }
 static int fake_fcntl(int fd, int cmd, ...) { (void)fd; (void)cmd; return 0; }
 static int fake_ioctl(int fd, unsigned long cmd, ...)
-{ (void)fd; (void)cmd; return 0; }
+{
+  (void)fd;
+  if(cmd==FIONSPACE) {
+    va_list args;va_start(args,cmd);int *out=(int *)va_arg(args,unsigned long);va_end(args);
+#ifdef PPP_FRAME_TX_TEST
+    *out=test_frame_space();
+#else
+    *out=4094;
+#endif
+  }
+  return 0;
+}
 static ssize_t fake_read(int fd, void *out, size_t size)
-{ (void)fd; (void)out; (void)size; return 0; }
+{
+  if(fd<21 || fd>22){errno=EAGAIN;return -1;}
+  struct fake_rx_s *input=&rx[fd-21];input->calls++;
+  if(size>input->maximum_request)input->maximum_request=size;
+  if(input->next_error){errno=input->next_error;input->next_error=0;return -1;}
+  if(input->position==input->length){if(input->eof)return 0;errno=EAGAIN;return -1;}
+  size_t count=input->length-input->position;
+  if(count>size)count=size;
+  if(input->fragment && count>input->fragment)count=input->fragment;
+  memcpy(out,input->bytes+input->position,count);input->position+=count;return count;
+}
 static ssize_t fake_write(int fd, const void *out, size_t size)
-{ (void)fd; (void)out; writes++; return size; }
+{
+  writes++;written_bytes+=size;
+#ifdef PPP_FRAME_TX_TEST
+  return test_frame_write(fd,out,size);
+#else
+  (void)fd;(void)out;return size;
+#endif
+}
 static int fake_poll(struct pollfd *p, nfds_t n, int timeout)
-{ (void)p; (void)n; (void)timeout; return 0; }
+{ (void)p; (void)n; if(advance_poll_time)monotonic_seconds+=timeout/1000;return 0; }
 static unsigned fake_sleep(unsigned seconds) { sleeps++; return 0; }
+static int fake_usleep(useconds_t microseconds)
+{
+  monotonic_milliseconds+=microseconds/1000;
+  monotonic_seconds+=monotonic_milliseconds/1000;monotonic_milliseconds%=1000;
+#ifdef PPP_FRAME_TX_TEST
+  test_frame_wait();
+#endif
+  return 0;
+}
 static int fake_clock_gettime(clockid_t clock, struct timespec *out)
-{ assert(clock==CLOCK_MONOTONIC);out->tv_sec=monotonic_seconds;out->tv_nsec=0;return 0; }
+{ assert(clock==CLOCK_MONOTONIC);out->tv_sec=monotonic_seconds;out->tv_nsec=monotonic_milliseconds*1000000;return 0; }
 size_t strlcpy(char *out,const char *in,size_t size)
 { size_t n=strlen(in); if(size){size_t c=n<size-1?n:size-1;memcpy(out,in,c);out[c]=0;}return n; }
 int netlib_ifdown(const char *name) { assert(!strncmp(name,"ppp",3)); downs++; return 0; }
@@ -79,16 +137,27 @@ int chat(struct chat_ctl *ctl, const char *script)
 bool zhaoxi_pc_link_stopping(void) { return stopping; }
 void zhaoxi_pc_link_ipv4_ready(void) { ready_callbacks++; }
 void ppp_init(struct ppp_context_s *ctx)
-{ inits++; ctx->ppp_flags=0; ctx->lcp_state=0;ctx->pc_link_last_rx=monotonic_seconds; }
+{
+  inits++; ctx->ppp_flags=0; ctx->lcp_state=0;ctx->pc_link_last_rx=monotonic_seconds;
+#ifdef PPP_UART_BUFFER_TEST
+  ahdlc_init(ctx);ahdlc_rx_ready(ctx);
+#endif
+}
 void ppp_connect(struct ppp_context_s *ctx) { connects++; ctx->ppp_flags=PPP_RX_READY; }
 void lcp_disconnect(struct ppp_context_s *ctx, uint8_t id)
 { (void)ctx; (void)id; disconnects++; }
 void ppp_send(struct ppp_context_s *ctx) { (void)ctx; }
+#ifndef PPP_UART_BUFFER_TEST
 void ppp_poll(struct ppp_context_s *ctx)
 {
   if(mode==1) ctx->lcp_state |= LCP_TX_TIMEOUT;
   else if(mode==2) stopping=true;
   else if(mode==3) monotonic_seconds=63;
+#ifdef PPP_FRAME_TX_TEST
+  else if(mode==6) {
+    ppp_arch_putchar(ctx,0x7e);ppp_arch_putchar(ctx,0x55);ppp_arch_putchar(ctx,0x7e);
+  }
+#endif
   else if(mode==4 || mode==5) {
     negotiation_step++;
     if(negotiation_step==1) {
@@ -107,6 +176,7 @@ void ppp_poll(struct ppp_context_s *ctx)
   }
   else abort();
 }
+#endif
 
 int main(void)
 {

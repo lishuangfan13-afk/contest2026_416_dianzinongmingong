@@ -11,16 +11,20 @@ def main():
     apps=args.apps.resolve()
     with tempfile.TemporaryDirectory(prefix='zhaoxi-ppp-') as folder:
         out=Path(folder); source=out/'netutils/pppd';source.mkdir(parents=True)
-        for name in ['pppd.c','ppp.h','ppp_conf.h','ppp_arch.h','ahdlc.h','ahdlc.c','lcp.h','ipcp.h','pap.h']:
+        for name in ['pppd.c','ppp.h','ppp_conf.h','ppp_arch.h','ahdlc.h','ahdlc.c','lcp.c','lcp.h','ipcp.h','pap.h']:
             upstream=subprocess.check_output(['git','-C',str(apps),'show','HEAD:netutils/pppd/'+name])
             (source/name).write_bytes(upstream)
-        subprocess.run(['patch','-p1','--batch','-i',str(ROOT/'patches/0025-apps-pppd-bounded-pc-link-lifecycle.patch')],cwd=out,check=True,capture_output=True)
-        for name in ['pppd.c','ppp.h','ahdlc.c']:
+        for patch in ['0025-apps-pppd-bounded-pc-link-lifecycle.patch',
+                      '0042-apps-pppd-buffer-pc-uart.patch',
+                      '0046-apps-pppd-negotiate-raw-pc-link.patch',
+                      '0047-apps-pppd-submit-atomic-pc-frames.patch']:
+            subprocess.run(['patch','-p1','--batch','-i',str(ROOT/'patches'/patch)],cwd=out,check=True,capture_output=True)
+        for name in ['pppd.c','ppp.h','ahdlc.c','lcp.c']:
             if (apps/'netutils/pppd'/name).read_bytes() != (source/name).read_bytes():
-                raise RuntimeError('Actual workspace '+name+' does not equal pristine plus patch25')
+                raise RuntimeError('Actual workspace '+name+' does not equal pristine plus patch25/42/46/47')
         stubs=out/'include'
         for name,text in {
-            'nuttx/config.h':'#pragma once\n#include <stdbool.h>\n#include <stddef.h>\n#define FAR\n#define CONFIG_EXAMPLES_ZHAOXI 1\nsize_t strlcpy(char *, const char *, size_t);\n',
+            'nuttx/config.h':'#pragma once\n#include <stdbool.h>\n#include <stddef.h>\n#define FAR\n#define CONFIG_EXAMPLES_ZHAOXI 1\n#define FIONSPACE 0x5458\nsize_t strlcpy(char *, const char *, size_t);\n',
             'nuttx/net/tun.h':'#pragma once\n#define TUNSETIFF 0x400454ca\n#define IFF_TUN 1\n',
             'debug.h':'#pragma once\n#define ninfo(...) ((void)0)\n',
             'netutils/netlib.h':'#pragma once\nint netlib_ifdown(const char *);\n',
@@ -38,4 +42,23 @@ def main():
                         '-Wall','-Wextra','-Wno-unused-parameter','-I'+str(stubs),'-I'+str(source),
                         str(ROOT/'tests/headless/ppp/test_ahdlc_burst.c'),'-o',str(burst)],check=True)
         subprocess.run([str(burst)],check=True)
+        actual_poll=(apps/'netutils/pppd/ppp.c').read_text()
+        begin=actual_poll.index('void ppp_poll(')
+        end=actual_poll.index('\n}\n',begin)+3
+        (source/'ppp_poll_actual.h').write_text(actual_poll[begin:end])
+        buffered=out/'test_uart_buffer'
+        subprocess.run(['gcc','-std=gnu11','-g','-O1','-fsanitize=address,undefined','-fno-omit-frame-pointer',
+                        '-Wall','-Wextra','-Wno-unused-parameter','-I'+str(stubs),'-I'+str(source),
+                        str(ROOT/'tests/headless/ppp/test_uart_buffer.c'),'-o',str(buffered)],check=True)
+        subprocess.run([str(buffered)],check=True)
+        accm=out/'test_asyncmap'
+        subprocess.run(['gcc','-std=gnu11','-g','-O1','-fsanitize=address,undefined','-fno-omit-frame-pointer',
+                        '-Wall','-Wextra','-Wno-unused-parameter','-I'+str(stubs),'-I'+str(source),
+                        str(ROOT/'tests/headless/ppp/test_asyncmap.c'),'-o',str(accm)],check=True)
+        subprocess.run([str(accm)],check=True)
+        frame=out/'test_uart_frame'
+        subprocess.run(['gcc','-std=gnu11','-g','-O1','-fsanitize=address,undefined','-fno-omit-frame-pointer',
+                        '-Wall','-Wextra','-Wno-unused-parameter','-I'+str(stubs),'-I'+str(source),
+                        str(ROOT/'tests/headless/ppp/test_uart_frame.c'),'-o',str(frame)],check=True)
+        subprocess.run([str(frame)],check=True)
 if __name__=='__main__':main()

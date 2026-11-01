@@ -13,7 +13,11 @@ def main():
         original={name:(sdk/name).read_bytes() for name in names}
         for name in names:(temp/name).write_bytes(original[name])
         patches=[ROOT/'patches/0034-packages_ai_agent-autonomous-local-voice-terminal.patch',
-                 ROOT/'patches/0036-packages_ai_agent-fix-automatic-turn-boundaries.patch']
+                 ROOT/'patches/0036-packages_ai_agent-fix-automatic-turn-boundaries.patch',
+                 ROOT/'patches/0039-packages_ai_agent-buffer-streamed-pcm-playback.patch',
+                 ROOT/'patches/0041-packages_ai_agent-observe-and-coalesce-pcm-queue.patch',
+                 ROOT/'patches/0043-packages_ai_agent-prioritize-pcm-consumer.patch',
+                 ROOT/'patches/0045-packages_ai_agent-cushion-initial-stream-playback.patch']
         for patch in reversed(patches):
             subprocess.run(['patch','-R','-p1','--batch','-i',str(patch)],cwd=temp,check=True,capture_output=True)
         for patch in patches:

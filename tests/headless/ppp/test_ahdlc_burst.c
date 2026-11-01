@@ -56,7 +56,7 @@ int main(void)
   assert(received==1 && ctx.ahdlc_tx_offline==0);
   for(int i=0;i<6;i++)ahdlc_tx(&ctx,IPV4,NULL,data,0,sizeof(data));
   assert(downs==0 && ctx.ppp_tx_frame_count==6);
-  double serialized_ms=(double)writes*10.0*1000.0/921600.0;
+  double serialized_ms=(double)written_bytes*10.0*1000.0/921600.0;
   assert(serialized_ms<100.0);
   /* A healthy peer can take 100 ms to reply. A seven-frame burst must not
    * disconnect simply because the next response is still in flight. */

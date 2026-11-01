@@ -7,6 +7,7 @@
 #include "voice/voice_channel.h"
 #include <errno.h>
 #include <pthread.h>
+#include <semaphore.h>
 #include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -45,10 +46,32 @@ struct dma_config {
 _Static_assert(sizeof(struct codec_config) == 24, "BES codec ABI");
 _Static_assert(sizeof(struct dma_config) == 28, "BES DMA ABI");
 
-struct completion { atomic_bool done; unsigned remain, error; };
+struct completion {
+    sem_t signal;
+    atomic_bool armed, done;
+    atomic_uint remain, error;
+};
 static struct completion completion[2];
+static pthread_once_t completion_once = PTHREAD_ONCE_INIT;
+static int completion_init_error;
 static pthread_mutex_t owner_lock = PTHREAD_MUTEX_INITIALIZER;
 static int owner = -1;
+
+/* These counting semaphores outlive all sessions: an IRQ never targets a
+ * destroyed object. NuttX sem_post supports ISR signaling with PRIO_NONE. */
+static void completion_init(void)
+{
+    for (unsigned i = 0; i < 2; i++) {
+        if (sem_init(&completion[i].signal, 0, 0)) {
+            completion_init_error = -errno; return;
+        }
+#ifdef SEM_PRIO_NONE
+        if (sem_setprotocol(&completion[i].signal, SEM_PRIO_NONE)) {
+            completion_init_error = -errno; return;
+        }
+#endif
+    }
+}
 
 struct pcm_session {
     struct dma_config dma;
@@ -71,19 +94,24 @@ static unsigned milliseconds(void)
 static void capture_done(uint8_t ch, unsigned remain, unsigned error, void *next)
 {
     (void)ch; (void)next;
+    if (!atomic_exchange(&completion[1].armed, false)) return;
     completion[1].remain = remain; completion[1].error = error;
     atomic_store(&completion[1].done, true);
+    sem_post(&completion[1].signal);
 }
 static void playback_done(uint8_t ch, unsigned remain, unsigned error, void *next)
 {
     (void)ch; (void)next;
+    if (!atomic_exchange(&completion[0].armed, false)) return;
     completion[0].remain = remain; completion[0].error = error;
     atomic_store(&completion[0].done, true);
+    sem_post(&completion[0].signal);
 }
 
 static void close_session(struct pcm_session *s)
 {
     if (!s) return;
+    atomic_store(&completion[s->direction].armed, false);
     if (s->direction == 0 && s->phase >= 2) hal_codec_dac_mute(1);
     if (s->channel != 255) hal_dma_cancel(s->channel);
     if (s->phase >= 3) codec_int_stream_stop(s->direction);
@@ -99,6 +127,9 @@ static void close_session(struct pcm_session *s)
 
 static int open_session(struct pcm_session *s, unsigned direction, unsigned rate)
 {
+    int initialized = pthread_once(&completion_once, completion_init);
+    if (initialized || completion_init_error)
+        return initialized ? -initialized : completion_init_error;
     memset(s, 0, sizeof(*s));
     s->direction = direction; s->channel = 255; s->rate = rate;
     pthread_mutex_lock(&owner_lock);
@@ -172,15 +203,27 @@ static int transfer(struct pcm_session *s, unsigned samples)
     if (s->direction) s->dma.dst = (uint32_t)(uintptr_t)s->buffer;
     else s->dma.src = (uint32_t)(uintptr_t)s->buffer;
     struct completion *done = &completion[s->direction];
+    while (sem_trywait(&done->signal) == 0) {}
+    if (errno != EAGAIN && errno != EINTR) return -errno;
     done->remain = done->error = ~0u; atomic_store(&done->done, false);
     hal_dma_sync_for_device(s->buffer, samples * 2);
-    if (hal_dma_start(&s->dma)) return -EIO;
-    unsigned start = milliseconds();
+    struct timespec deadline;
+    clock_gettime(CLOCK_MONOTONIC, &deadline);
+    deadline.tv_nsec += 750000000;
+    if (deadline.tv_nsec >= 1000000000) { deadline.tv_sec++; deadline.tv_nsec -= 1000000000; }
+    atomic_store(&done->armed, true);
+    if (hal_dma_start(&s->dma)) { atomic_store(&done->armed, false); return -EIO; }
     while (!atomic_load(&done->done)) {
-        if (atomic_load(&s->aborted)) { hal_dma_cancel(s->channel); return -ECANCELED; }
-        if (milliseconds() - start > 750) { hal_dma_cancel(s->channel); return -ETIMEDOUT; }
-        usleep(500);
+        int error = 0;
+        if (atomic_load(&s->aborted)) error = -ECANCELED;
+        else if (sem_clockwait(&done->signal, CLOCK_MONOTONIC, &deadline) && errno != EINTR)
+            error = -errno;
+        if (error && !atomic_load(&done->done)) {
+            atomic_store(&done->armed, false);
+            hal_dma_cancel(s->channel); return error;
+        }
     }
+    if (atomic_load(&s->aborted)) { hal_dma_cancel(s->channel); return -ECANCELED; }
     if (done->remain || done->error || hal_dma_chan_busy(s->channel)) return -EIO;
     if (s->direction) hal_dma_sync_for_cpu(s->buffer, samples * 2);
     return 0;
@@ -219,6 +262,7 @@ int audio_capture_abort(audio_capture_t *cap)
 {
     if (!cap) return -EINVAL;
     atomic_store(&cap->pcm.aborted, true);
+    sem_post(&completion[1].signal);
     return 0;
 }
 void audio_capture_close(audio_capture_t *cap) { if (cap) { close_session(&cap->pcm); free(cap); } }
@@ -251,7 +295,13 @@ int audio_playback_write(audio_playback_t *pb, const void *buffer, size_t length
     }
     return (int)length;
 }
-void audio_playback_stop(audio_playback_t *pb) { if (pb) atomic_store(&pb->pcm.aborted, true); }
+void audio_playback_stop(audio_playback_t *pb)
+{
+    if (pb) {
+        atomic_store(&pb->pcm.aborted, true);
+        sem_post(&completion[0].signal);
+    }
+}
 void audio_playback_close(audio_playback_t *pb) { if (pb) { close_session(&pb->pcm); free(pb); } }
 
 /* Cues are emitted only after the automatic worker releases capture. */

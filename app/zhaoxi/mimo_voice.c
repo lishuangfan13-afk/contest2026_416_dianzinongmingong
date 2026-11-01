@@ -4,12 +4,15 @@
  */
 #include "voice/voice_asr.h"
 #include "voice/voice_tts.h"
+#include "voice/voice_channel.h"
 #include "infra/config_store.h"
 #include "infra/vela_tls.h"
+#include "mimo_sse.h"
 #include "mbedtls/base64.h"
 #include "cJSON.h"
 #include <errno.h>
 #include <stdint.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -145,17 +148,68 @@ static int synthesize(const char *text, unsigned char *out, size_t capacity, siz
     *length = count * 2; free(pcm); return 0;
 }
 
+struct stream_output {
+    voice_tts_chunk_cb callback;
+    void *user;
+    int64_t started, first_pcm;
+};
+
+static int stream_pcm(const unsigned char *pcm, size_t length, void *opaque)
+{
+    struct stream_output *out = opaque;
+    int rc = voice_channel_tts_stream_error();
+    if (rc) return rc;
+    if (out->first_pcm < 0) {
+        out->first_pcm = monotonic_ms() - out->started;
+        printf("MIMOVOICE phase=tts first_pcm_ms=%lld\n", (long long)out->first_pcm);
+    }
+    out->callback(pcm, length, 0, out->user);
+    return voice_channel_tts_stream_error();
+}
+
+static int stream_body(const unsigned char *bytes, size_t length, void *opaque)
+{
+    int rc = voice_channel_tts_stream_error();
+    return rc ? rc : mimo_sse_feed(opaque, bytes, length);
+}
+
 int zhaoxi_mimo_tts_stream(const char *text, voice_tts_chunk_cb callback, void *data)
 {
-    if (!callback) return -EINVAL;
-    unsigned char *pcm; size_t length;
-    int rc = fetch_speech(text, &pcm, &length); if (rc) return rc;
-    /* Deliver decoded PCM in bounded playback chunks after this batch request. */
-    for (size_t offset = 0; offset < length; offset += 3200) {
-        size_t chunk = length - offset; if (chunk > 3200) chunk = 3200;
-        callback(pcm + offset, chunk, offset + chunk == length, data);
+    if (!callback || !text || !text[0] || strlen(text) > 2048) return -EINVAL;
+    char key[128] = {0}, host[128] = {0};
+    int rc = credentials(key, host);
+    if (rc) return rc;
+    cJSON *body = cJSON_CreateObject();
+    if (!body) { memset(key, 0, sizeof(key)); return -ENOMEM; }
+    cJSON_AddStringToObject(body, "model", "mimo-v2.5-tts");
+    cJSON_AddBoolToObject(body, "stream", true);
+    cJSON *messages = cJSON_AddArrayToObject(body, "messages"), *m = cJSON_CreateObject();
+    cJSON_AddItemToArray(messages, m); cJSON_AddStringToObject(m, "role", "assistant");
+    cJSON_AddStringToObject(m, "content", text);
+    cJSON *audio = cJSON_AddObjectToObject(body, "audio");
+    cJSON_AddStringToObject(audio, "format", "pcm16");
+    cJSON_AddStringToObject(audio, "voice", "mimo_default");
+    char *payload = cJSON_PrintUnformatted(body); cJSON_Delete(body);
+    struct stream_output output = {callback, data, monotonic_ms(), -1};
+    mimo_sse_t *sse = mimo_sse_create(stream_pcm, &output);
+    if (!payload || !sse) {
+        free(payload); mimo_sse_destroy(sse); memset(key, 0, sizeof(key)); return -ENOMEM;
     }
-    free(pcm); return 0;
+    vela_header_t headers[] = {{"api-key", key}, {"Accept", "text/event-stream"}, {NULL, NULL}};
+    printf("MIMOVOICE phase=tts begin mode=stream text_bytes=%lu\n", (unsigned long)strlen(text));
+    int status = vela_https_post_json_stream(host, "443", "/v1/chat/completions", headers,
+        payload, stream_body, sse);
+    free(payload); memset(key, 0, sizeof(key));
+    rc = status == 200 ? mimo_sse_finish(sse) : status < 0 ? status : -EIO;
+    if (!rc) {
+        callback(NULL, 0, 1, data);
+        rc = voice_channel_tts_stream_error();
+    }
+    printf("MIMOVOICE phase=tts mode=stream http=%d rc=%d first_pcm_ms=%lld total_ms=%lld pcm_bytes=%lu\n",
+        status, rc, (long long)output.first_pcm, (long long)(monotonic_ms() - output.started),
+        (unsigned long)mimo_sse_pcm_bytes(sse));
+    mimo_sse_destroy(sse);
+    return rc;
 }
 
 int zhaoxi_mimo_register(void)

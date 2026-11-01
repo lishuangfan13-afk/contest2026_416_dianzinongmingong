@@ -1,0 +1,44 @@
+--- a/src/voice/voice_channel.c
++++ b/src/voice/voice_channel.c
+@@ -36,6 +36,7 @@
+ #include <fcntl.h>
+ #include <pthread.h>
+ #include <semaphore.h>
++#include <sched.h>
+ #include <stdio.h>
+ #include <stdint.h>
+ #include <stdlib.h>
+@@ -1050,6 +1051,7 @@
+ #define TTS_QUEUE_BYTES 65536
+ #define TTS_QUEUE_PREFILL 9600
+ #define TTS_QUEUE_BLOCK 3200
++#define TTS_PCM_PRIORITY 110
+ struct tts_pcm_queue {
+     pthread_mutex_t lock;
+     pthread_cond_t changed;
+@@ -1232,10 +1234,21 @@
+     result=pthread_cond_init(&q->changed,NULL);
+     if (result) { pthread_mutex_destroy(&q->lock); free(q->data); return -result; }
+     pthread_attr_t attr;
+-    pthread_attr_init(&attr);
+-    pthread_attr_setstacksize(&attr,AGENT_VOICE_STACK);
+-    result=pthread_create(thread,&attr,tts_pcm_consumer,q);
+-    pthread_attr_destroy(&attr);
++    result=pthread_attr_init(&attr);
++    if(!result) {
++        result=pthread_attr_setstacksize(&attr,AGENT_VOICE_STACK);
++#ifdef __NuttX__
++        /* PPP uses priority 100. PCM completion must preempt it promptly,
++         * while staying below the BSP host bus and HP work queues (>220).
++         * The worker blocks on IRQ completion; it does not busy-spin. */
++        struct sched_param priority={.sched_priority=TTS_PCM_PRIORITY};
++        if(!result)result=pthread_attr_setinheritsched(&attr,PTHREAD_EXPLICIT_SCHED);
++        if(!result)result=pthread_attr_setschedpolicy(&attr,SCHED_RR);
++        if(!result)result=pthread_attr_setschedparam(&attr,&priority);
++#endif
++        if(!result)result=pthread_create(thread,&attr,tts_pcm_consumer,q);
++        pthread_attr_destroy(&attr);
++    }
+     if (result) {
+         pthread_cond_destroy(&q->changed); pthread_mutex_destroy(&q->lock);
+         free(q->data); return -result;
