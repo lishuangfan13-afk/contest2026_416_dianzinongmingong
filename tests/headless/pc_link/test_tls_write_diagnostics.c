@@ -11,6 +11,7 @@
 #include <sys/ioctl.h>
 #include <syslog.h>
 #include <time.h>
+#include <unistd.h>
 #include "infra/vela_tls.h"
 
 #define MBEDTLS_ERR_SSL_WANT_READ -101
@@ -18,6 +19,9 @@
 #define MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY -103
 #define MBEDTLS_ERR_NET_RECV_FAILED -104
 #define TLS_RAW_BUF_SIZE 8192
+#define TLS_STREAM_MAX_BODY (32u * 1024u * 1024u)
+#define AGENT_LLM_SOCKET_TIMEOUT_SEC 35
+#define MBEDTLS_ERR_SSL_TIMEOUT -105
 typedef struct {int fd;} mbedtls_net_context;
 typedef struct {int marker;} fake_ssl;
 typedef struct {fake_ssl ssl;mbedtls_net_context net;} tls_ctx_t;
@@ -98,8 +102,6 @@ static int mbedtls_ssl_read(fake_ssl *ssl,unsigned char *bytes,size_t length)
 static char raw[TLS_RAW_BUF_SIZE];
 static char *tls_raw_acquire(void) {f.raw_acquires++;return raw;}
 static void tls_raw_release(char *p) {assert(p==raw);f.raw_releases++;}
-static size_t decode_chunked(char *b,size_t n) {(void)b;return n;}
-static int chunked_end_seen(const char *b,size_t n) {(void)b;(void)n;return 0;}
 
 /* ACTUAL_TLS_WRITER_READER */
 
@@ -125,6 +127,8 @@ static void assert_private(void)
 }
 int main(void)
 {
+    (void)tls_read_response_stream;
+    (void)fixture_syslog; (void)TAG;
     tls_ctx_t ctx={.net={42}};
     char body[40001];memset(body,'x',40000);body[40000]=0;
     memcpy(body,"SECRET_BODY_SENTINEL",20);
@@ -181,7 +185,7 @@ int main(void)
     assert(post(&ctx,body)==VELA_TLS_ERR_WRITE); /* Existing behavior retained. */
 
     reset();f.read_error=MBEDTLS_ERR_NET_RECV_FAILED;
-    char response[128];assert(tls_read_response(&ctx,response,sizeof(response),NULL,NULL)==VELA_TLS_ERR_READ);
+    char response[128];assert(tls_read_response(&ctx,response,sizeof(response),NULL,NULL,false)==VELA_TLS_ERR_READ);
     assert(f.raw_acquires==1 && f.raw_releases==1);
 #ifdef CONFIG_ZHAOXI_BES_AUDIO
     assert(strstr(f.logs,"stage=header-read-fail"));
@@ -190,13 +194,13 @@ int main(void)
     assert_private();
 
     reset();f.response="HTTP/1.1 200";f.fragment=3;f.read_error=MBEDTLS_ERR_NET_RECV_FAILED;
-    assert(tls_read_response(&ctx,response,sizeof(response),NULL,NULL)==VELA_TLS_ERR_READ);
+    assert(tls_read_response(&ctx,response,sizeof(response),NULL,NULL,false)==VELA_TLS_ERR_READ);
 #ifdef CONFIG_ZHAOXI_BES_AUDIO
     assert(strstr(f.logs,"plain_rx=12 ssl_ret=-104 bio_errno=107"));
 #endif
     reset();f.response="HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\nokay";
     size_t count=0;bool keep=true;
-    assert(tls_read_response(&ctx,response,sizeof(response),&count,&keep)==200);
+    assert(tls_read_response(&ctx,response,sizeof(response),&count,&keep,false)==200);
     assert(count==4 && !memcmp(response,"okay",4) && !keep);
     assert(f.raw_acquires==1 && f.raw_releases==1);
     assert_private();

@@ -15,6 +15,7 @@ HARNESS = r'''
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <stdio.h>
 #include <pthread.h>
 #include <sys/socket.h>
@@ -54,8 +55,9 @@ static int tls_write_request(tls_ctx_t *c, const char *m, const char *h,
     if (c->ssl.owner != group || descriptors[group][c->net.fd] != 1) { wrong_group++; return -12; }
     return failure == 2 ? -13 : 0;
 }
-static int tls_read_response(tls_ctx_t *c, char *b, size_t cap, size_t *n, bool *keep)
+static int tls_read_response(tls_ctx_t *c, char *b, size_t cap, size_t *n, bool *keep, bool head_only)
 {
+    (void)head_only;
     assert(c->ssl.owner == group);
     if (failure == 3) return -14;
     snprintf(b, cap, "ok"); if (n) *n = 2; if (keep) *keep = true; return 200;

@@ -1,0 +1,432 @@
+diff --git a/src/infra/vela_tls.c b/src/infra/vela_tls.c
+--- a/src/infra/vela_tls.c
++++ b/src/infra/vela_tls.c
+@@ -124,25 +124,6 @@
+     }
+ 
+     return (size_t)(dst - buf);
+-}
+-
+-/* Check whether the raw accumulated body ends with the chunked
+- * terminator ("...\r\n0\r\n\r\n", or "0\r\n\r\n" for an empty body).
+- * Without this check the read loop below blocks on keep-alive
+- * connections until the server closes them (~60s idle timeout),
+- * tripping the agent's 60s LLM watchdog. */
+-static int chunked_end_seen(const char* buf, size_t len)
+-{
+-    static const char term_empty[] = "0\r\n\r\n";
+-    static const char term_last[] = "\r\n0\r\n\r\n";
+-    size_t n1 = sizeof(term_empty) - 1; /* 5 */
+-    size_t n2 = sizeof(term_last) - 1;  /* 7 */
+-
+-    if (len >= n2 && memcmp(buf + len - n2, term_last, n2) == 0)
+-        return 1;
+-    if (len >= n1 && memcmp(buf + len - n1, term_empty, n1) == 0)
+-        return 1;
+-    return 0;
+ }
+ 
+ /* ── TLS context ─────────────────────────────────────────────── */
+@@ -828,133 +809,6 @@
+     }
+ }
+ 
+-static int tls_read_response(tls_ctx_t* ctx, char* resp_buf, size_t resp_cap,
+-    size_t* out_body_len, bool* out_keep_alive)
+-{
+-    /* Use static buffers to avoid heap fragmentation */
+-    char* raw = tls_raw_acquire();
+-    size_t raw_len = 0;
+-    int eof = 0;
+-    int ret;
+-
+-    /* Read until we have the full header (double CRLF) or buffer full */
+-    while (!eof && raw_len < TLS_RAW_BUF_SIZE - 1) {
+-        ret = mbedtls_ssl_read(&ctx->ssl,
+-            (unsigned char*)(raw + raw_len),
+-            TLS_RAW_BUF_SIZE - 1 - raw_len);
+-        if (ret > 0) {
+-            raw_len += (size_t)ret;
+-            if (memmem(raw, raw_len, "\r\n\r\n", 4))
+-                break;
+-        } else if (ret == 0 || ret == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY) {
+-#ifdef CONFIG_ZHAOXI_BES_AUDIO
+-            tls_diag_socket(ctx, "header-eof", raw_len, ret, 0);
+-#endif
+-            eof = 1;
+-            break;
+-        } else if (ret != MBEDTLS_ERR_SSL_WANT_READ) {
+-#ifdef CONFIG_ZHAOXI_BES_AUDIO
+-            tls_diag_socket(ctx, "header-read-fail", raw_len, ret, errno);
+-#endif
+-            syslog(LOG_ERR, "[%s] ssl_read (header) ret=0x%x\n", TAG, -ret);
+-            tls_raw_release(raw);
+-            return VELA_TLS_ERR_READ;
+-        }
+-    }
+-    raw[raw_len] = '\0';
+-
+-    /* Parse status line */
+-    int http_status = 0;
+-    if (sscanf(raw, "HTTP/1.%*d %d", &http_status) != 1) {
+-        syslog(LOG_ERR, "[%s] Failed to parse HTTP status from: %.80s\n", TAG, raw);
+-        tls_raw_release(raw);
+-        return VELA_TLS_ERR_READ;
+-    }
+-
+-    /* Find header/body split */
+-    char* body_start = (char*)memmem(raw, raw_len, "\r\n\r\n", 4);
+-    if (!body_start) {
+-        resp_buf[0] = '\0';
+-        tls_raw_release(raw);
+-        return http_status;
+-    }
+-
+-    /* Determine keep-alive from Connection header (default true for HTTP/1.1) */
+-    if (out_keep_alive) {
+-        *out_keep_alive = true;  /* HTTP/1.1 default */
+-        char* conn_hdr = strcasestr(raw, "Connection:");
+-        if (conn_hdr && conn_hdr < body_start) {
+-            *out_keep_alive = (strcasestr(conn_hdr, "keep-alive") != NULL);
+-        }
+-    }
+-    body_start += 4; /* skip double CRLF */
+-
+-    /* Extract content-length if present */
+-    long content_length = -1;
+-    {
+-        char* cl_hdr = strcasestr(raw, "Content-Length:");
+-        if (cl_hdr && cl_hdr < body_start) {
+-            cl_hdr += strlen("Content-Length:");
+-            content_length = strtol(cl_hdr, NULL, 10);
+-            if (content_length < 0 || content_length > 10 * 1024 * 1024) {
+-                content_length = -1; /* reject absurd values */
+-            }
+-        }
+-    }
+-    int chunked = 0;
+-    {
+-        char* te_hdr = strcasestr(raw, "Transfer-Encoding:");
+-        if (te_hdr && te_hdr < body_start) {
+-            chunked = (strcasestr(te_hdr, "chunked") != NULL);
+-        }
+-    }
+-
+-    /* Initial fragment already in raw buffer */
+-    size_t initial = (size_t)(raw + raw_len - body_start);
+-    size_t resp_pos = 0;
+-
+-    /* Copy initial fragment */
+-    size_t copy = initial < resp_cap - 1 ? initial : resp_cap - 1;
+-    memcpy(resp_buf, body_start, copy);
+-    resp_pos = copy;
+-
+-    /* Keep reading body */
+-    if (!eof) {
+-        while (resp_pos < resp_cap - 1) {
+-            if (content_length >= 0 && (long)resp_pos >= content_length)
+-                break;
+-            if (chunked && chunked_end_seen(resp_buf, resp_pos))
+-                break;
+-            ret = mbedtls_ssl_read(&ctx->ssl,
+-                (unsigned char*)(resp_buf + resp_pos),
+-                resp_cap - 1 - resp_pos);
+-            if (ret > 0) {
+-                resp_pos += (size_t)ret;
+-                if (chunked && chunked_end_seen(resp_buf, resp_pos))
+-                    break;
+-            } else if (ret == 0 || ret == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY) {
+-                break;
+-            } else if (ret != MBEDTLS_ERR_SSL_WANT_READ) {
+-                break;
+-            }
+-        }
+-    }
+-
+-    resp_buf[resp_pos] = '\0';
+-    tls_raw_release(raw);
+-
+-    /* Chunked decode */
+-    if (chunked) {
+-        resp_pos = decode_chunked(resp_buf, resp_pos);
+-        resp_buf[resp_pos] = '\0';
+-    }
+-
+-    if (out_body_len)
+-        *out_body_len = resp_pos;
+-
+-    return http_status;
+-}
+-
+ /* ── Bounded incremental HTTP response delivery ────────────── */
+ 
+ #define TLS_STREAM_MAX_BODY (32u * 1024u * 1024u)
+@@ -1013,7 +867,8 @@
+ typedef struct {
+     tls_ctx_t *ctx;
+     unsigned char buffer[2048];
+-    size_t position, length, delivered;
++    size_t position, length, delivered, received, limit;
++    int last_ssl_ret, last_ssl_errno;
+     int64_t deadline;
+ } tls_stream_reader_t;
+ 
+@@ -1024,7 +879,9 @@
+         if (tls_stream_now_ms() >= reader->deadline) return VELA_TLS_ERR_TIMEOUT;
+         int rc = mbedtls_ssl_read(&reader->ctx->ssl, reader->buffer,
+                                  sizeof(reader->buffer));
++        reader->last_ssl_ret = rc; reader->last_ssl_errno = errno;
+         if (rc > 0) {
++            reader->received += (size_t)rc;
+             reader->position = 0; reader->length = (size_t)rc;
+             return 1;
+         }
+@@ -1065,7 +922,7 @@
+ static int tls_stream_deliver(tls_stream_reader_t *reader, size_t count,
+                               vela_https_body_cb callback, void *user)
+ {
+-    if (count > TLS_STREAM_MAX_BODY - reader->delivered)
++    if (count > (reader->limit ? reader->limit : TLS_STREAM_MAX_BODY) - reader->delivered)
+         return VELA_TLS_ERR_OVERFLOW;
+     while (count) {
+         int rc = tls_stream_fill(reader);
+@@ -1079,14 +936,14 @@
+     return 0;
+ }
+ 
+-static int tls_stream_decimal(const char *value, size_t *number)
++static int tls_stream_decimal(const char *value, size_t *number, size_t limit)
+ {
+     size_t result = 0;
+     if (!*value) return VELA_TLS_ERR_PROTOCOL;
+     for (; *value; value++) {
+         if (*value < '0' || *value > '9') return VELA_TLS_ERR_PROTOCOL;
+         unsigned digit = (unsigned)(*value - '0');
+-        if (result > (TLS_STREAM_MAX_BODY - digit) / 10)
++        if (result > (limit - digit) / 10)
+             return VELA_TLS_ERR_OVERFLOW;
+         result = result * 10 + digit;
+     }
+@@ -1114,20 +971,32 @@
+     *number = value; return 0;
+ }
+ 
+-static int tls_read_response_stream(tls_ctx_t *ctx, vela_https_body_cb callback,
+-                                    void *user, int64_t deadline)
++static int tls_read_response_body(tls_ctx_t *ctx, vela_https_body_cb callback,
++    void *user, int64_t deadline, bool collect_errors, bool *out_keep_alive,
++    char *raw_headers, bool head_only)
+ {
+     tls_stream_reader_t *reader = calloc(1, sizeof(*reader));
+-    char *headers = malloc(VELA_TLS_HDR_BUF);
++    size_t header_capacity = raw_headers ? TLS_RAW_BUF_SIZE : VELA_TLS_HDR_BUF;
++    char *headers = raw_headers ? raw_headers : malloc(header_capacity);
++    if (out_keep_alive) *out_keep_alive = false;
+     if (!reader || !headers) {
+-        free(reader); free(headers); return VELA_TLS_ERR_OVERFLOW;
++        free(reader); if (!raw_headers) free(headers); return VELA_TLS_ERR_OVERFLOW;
+     }
+     reader->ctx = ctx; reader->deadline = deadline;
+-    int result = VELA_TLS_ERR_PROTOCOL; size_t used = 0;
++    reader->limit = collect_errors ? 10u * 1024u * 1024u : TLS_STREAM_MAX_BODY;
++    int result = VELA_TLS_ERR_PROTOCOL; size_t used = 0; unsigned interim = 0;
++read_headers:
++    used = 0;
+     /* Bound the whole header section, including arbitrary fragmented CRLF. */
+-    while (used + 1 < VELA_TLS_HDR_BUF) {
++    while (used + 1 < header_capacity) {
+         unsigned char value; int rc = tls_stream_byte(reader, &value);
+-        if (rc != 1) { result = rc < 0 ? rc : VELA_TLS_ERR_PROTOCOL; goto done; }
++        if (rc != 1) {
++#ifdef CONFIG_ZHAOXI_BES_AUDIO
++            if (collect_errors) tls_diag_socket(ctx, rc < 0 ? "header-read-fail" : "header-eof",
++                reader->received, reader->last_ssl_ret, reader->last_ssl_errno);
++#endif
++            result = rc < 0 ? rc : VELA_TLS_ERR_PROTOCOL; goto done;
++        }
+         if (!value) goto done;
+         headers[used++] = (char)value;
+         if (used >= 4 && !memcmp(headers + used - 4, "\r\n\r\n", 4)) break;
+@@ -1146,7 +1015,8 @@
+     int status = (line[9] - '0') * 100 + (line[10] - '0') * 10 + line[11] - '0';
+     /* Error payloads are never delivered to an audio/SSE consumer. An
+      * ephemeral connection may close immediately without draining them. */
+-    if (status != 200) { result = status; goto done; }
++    if (status != 200 && status >= 200 && !collect_errors) { result = status; goto done; }
++    bool keep_alive = !strncmp(line, "HTTP/1.1 ", 9), connection_close = false;
+     bool has_length = false, chunked = false; size_t content_length = 0;
+     line = end + 2;
+     while (*line) {
+@@ -1167,18 +1037,50 @@
+                 goto done;
+         if (!strcasecmp(line, "Content-Length")) {
+             if (has_length) goto done;
+-            int rc = tls_stream_decimal(colon, &content_length);
++            int rc = tls_stream_decimal(colon, &content_length,
++                head_only || status == 304 || status < 200 ? SIZE_MAX : TLS_STREAM_MAX_BODY);
+             if (rc) { result = rc; goto done; }
+             has_length = true;
+         } else if (!strcasecmp(line, "Transfer-Encoding")) {
+             if (chunked || strcasecmp(colon, "chunked")) goto done;
+             chunked = true;
+-        } else if (!strcasecmp(line, "Content-Encoding") && strcasecmp(colon, "identity")) {
++        } else if (!strcasecmp(line, "Content-Encoding") && strcasecmp(colon, "identity") &&
++                   !head_only && status != 304 && status >= 200) {
+             goto done;
++        } else if (!strcasecmp(line, "Connection")) {
++            /* Token boundaries prevent values in another header/body from
++             * accidentally enabling reuse. Close always wins. */
++            bool close_seen = false, keep_seen = false;
++            char *token = colon;
++            while (*token) {
++                while (*token == ' ' || *token == '\t' || *token == ',') token++;
++                char *finish = token;
++                while (*finish && *finish != ',') finish++;
++                char *trim = finish;
++                while (trim > token && (trim[-1] == ' ' || trim[-1] == '\t')) trim--;
++                if (trim - token == 5 && !strncasecmp(token, "close", 5)) close_seen = true;
++                if (trim - token == 10 && !strncasecmp(token, "keep-alive", 10)) keep_seen = true;
++                token = *finish ? finish + 1 : finish;
++            }
++            if (close_seen) connection_close = true;
++            if (connection_close) keep_alive = false;
++            else if (keep_seen) keep_alive = true;
+         }
+         line = end + 2;
+     }
+     if (has_length && chunked) goto done;
++    if (status < 200) {
++        /* Informational responses have no body and can share a TLS record
++         * with the final response. Reuse buffered bytes, with a fixed bound. */
++        if (status == 101 || ++interim > 8) { result = VELA_TLS_ERR_PROTOCOL; goto done; }
++        goto read_headers;
++    }
++    if (head_only || status == 204 || status == 304) {
++        result = status;
++        if (out_keep_alive) *out_keep_alive = keep_alive && reader->position == reader->length;
++        goto done;
++    }
++    if (has_length && content_length > reader->limit) { result = VELA_TLS_ERR_OVERFLOW; goto done; }
+     if (chunked) {
+         char chunk_line[256]; size_t trailers = 0;
+         for (;;) {
+@@ -1193,7 +1095,21 @@
+                     if (result) goto done;
+                     trailers += strlen(chunk_line) + 2;
+                     if (trailers > VELA_TLS_HDR_BUF) { result = VELA_TLS_ERR_OVERFLOW; goto done; }
+-                    if (*chunk_line && !strchr(chunk_line, ':')) { result = VELA_TLS_ERR_PROTOCOL; goto done; }
++                    if (*chunk_line) {
++                        char *colon = strchr(chunk_line, ':');
++                        if (!colon || colon == chunk_line) { result = VELA_TLS_ERR_PROTOCOL; goto done; }
++                        for (char *p = chunk_line; p < colon; p++) {
++                            if (!((*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') ||
++                                  (*p >= '0' && *p <= '9') || strchr("!#$%&'*+-.^_`|~", *p))) {
++                                result = VELA_TLS_ERR_PROTOCOL; goto done;
++                            }
++                        }
++                        for (char *p = colon + 1; *p; p++) {
++                            if (((unsigned char)*p < 32 && *p != '\t') || (unsigned char)*p == 127) {
++                                result = VELA_TLS_ERR_PROTOCOL; goto done;
++                            }
++                        }
++                    }
+                 } while (*chunk_line);
+                 break;
+             }
+@@ -1218,9 +1134,53 @@
+             if (result) goto done;
+         }
+     }
+-    result = 200;
++    result = status;
++    if (out_keep_alive) *out_keep_alive = keep_alive && (chunked || has_length) &&
++                                          reader->position == reader->length;
+ done:
+-    free(headers); free(reader); return result;
++    if (!raw_headers) free(headers);
++    free(reader); return result;
++}
++
++static int tls_read_response_stream(tls_ctx_t *ctx, vela_https_body_cb callback,
++                                    void *user, int64_t deadline)
++{
++    return tls_read_response_body(ctx, callback, user, deadline, false, NULL, NULL, false);
++}
++
++typedef struct {
++    char *buffer;
++    size_t capacity, used;
++} tls_body_collector_t;
++
++static int tls_collect_body(const unsigned char *bytes, size_t count, void *user)
++{
++    tls_body_collector_t *collector = user;
++    if (count > collector->capacity - 1 - collector->used) return VELA_TLS_ERR_OVERFLOW;
++    memcpy(collector->buffer + collector->used, bytes, count);
++    collector->used += count;
++    return 0;
++}
++
++/* Buffered JSON requests share the strict framing decoder, but unlike SSE
++ * retain HTTP error bodies. A partial/oversized response is never success. */
++static int tls_read_response(tls_ctx_t *ctx, char *resp_buf, size_t resp_cap,
++    size_t *out_body_len, bool *out_keep_alive, bool head_only)
++{
++    if (out_body_len) *out_body_len = 0;
++    if (out_keep_alive) *out_keep_alive = false;
++    if (!resp_buf || !resp_cap) return VELA_TLS_ERR_PROTOCOL;
++    resp_buf[0] = 0;
++    char *raw = tls_raw_acquire();
++    tls_body_collector_t collector = {resp_buf, resp_cap, 0};
++    int64_t deadline = tls_stream_now_ms() + (int64_t)AGENT_LLM_SOCKET_TIMEOUT_SEC * 1000;
++    int result = tls_read_response_body(ctx, tls_collect_body, &collector, deadline,
++                                        true, out_keep_alive, raw, head_only);
++    tls_raw_release(raw);
++    if (result < 0) { resp_buf[0] = 0; return result; }
++    resp_buf[collector.used] = 0;
++    if (out_body_len) *out_body_len = collector.used;
++    return result;
+ }
+ 
+ 
+@@ -1274,7 +1234,7 @@
+         ret = tls_write_request(&slot->ctx, method, host, path, headers, body, body_len);
+         if (ret == 0) {
+             bool keep = false;
+-            ret = tls_read_response(&slot->ctx, resp_buf, resp_cap, out_body_len, &keep);
++            ret = tls_read_response(&slot->ctx, resp_buf, resp_cap, out_body_len, &keep, !strcasecmp(method, "HEAD"));
+             if (ret > 0) {
+                 pool_release(slot, host, port, keep);
+                 return ret;
+@@ -1305,7 +1265,7 @@
+             syslog(LOG_ERR, "[%s] Write request failed: %d\n", TAG, ret);
+             goto ephemeral_done;
+         }
+-        ret = tls_read_response(tmp_ctx, resp_buf, resp_cap, out_body_len, NULL);
++        ret = tls_read_response(tmp_ctx, resp_buf, resp_cap, out_body_len, NULL, !strcasecmp(method, "HEAD"));
+     ephemeral_done:
+         tls_ctx_free(tmp_ctx);
+ #ifdef CONFIG_EXAMPLES_ZHAOXI
+@@ -1329,7 +1289,7 @@
+     }
+ 
+     bool keep = false;
+-    ret = tls_read_response(&slot->ctx, resp_buf, resp_cap, out_body_len, &keep);
++    ret = tls_read_response(&slot->ctx, resp_buf, resp_cap, out_body_len, &keep, !strcasecmp(method, "HEAD"));
+     pool_release(slot, host, port, ret > 0 && keep);
+     return ret;
+ }
+diff --git a/src/infra/vela_tls.h b/src/infra/vela_tls.h
+--- a/src/infra/vela_tls.h
++++ b/src/infra/vela_tls.h
+@@ -59,7 +59,9 @@
+  * @return HTTP status code (200, 400, etc.) on success, negative VELA_TLS_ERR_* on failure
+  *
+  * The response body is written to resp_buf as a NUL-terminated string.
+- * If the body is larger than resp_cap-1, it is silently truncated.
++ * Bodies larger than resp_cap-1 return VELA_TLS_ERR_OVERFLOW. Malformed or
++ * truncated framing returns an error; on error resp_buf is empty and the
++ * optional out_body_len is zero. HTTP error statuses retain their full body.
+  */
+ int vela_https_request(
+     const char       *host,
