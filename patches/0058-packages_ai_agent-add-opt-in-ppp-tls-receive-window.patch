@@ -1,0 +1,90 @@
+--- a/src/infra/vela_tls.c
++++ b/src/infra/vela_tls.c
+@@ -52,6 +52,12 @@
+ #ifdef CONFIG_ZHAOXI_BES_AUDIO
+ #include <limits.h>
+ #include <sys/ioctl.h>
++#if defined(CONFIG_EXAMPLES_ZHAOXI) && defined(CONFIG_NETUTILS_PPPD)
++#include "infra/config_store.h"
++#include <ifaddrs.h>
++#include <net/if.h>
++#include <netinet/in.h>
++#endif
+ #endif
+ 
+ static int simple_entropy_func(void* data, unsigned char* output, size_t len)
+@@ -278,6 +284,63 @@
+ /* Proposed helper for CONFIG_ZHAOXI_BES_AUDIO only.
+  * DNS retains NuttX's configured retry bound; the deadline below applies to
+  * the TCP stage after resolution. The product sets IPv4 DNS once at startup. */
++#if defined(CONFIG_EXAMPLES_ZHAOXI) && defined(CONFIG_NETUTILS_PPPD)
++/* ZHAOXI_PPP_RX_WINDOW_BEGIN */
++/* An opt-in diagnostic cap, never a replacement for the default TCP window.
++ * config_store accepts string values only. Check a real live PPP interface
++ * before applying the cap; no WiFi, proxy or non-product defaults change. */
++static int zhaoxi_ppp_rx_window(void)
++{
++    char value[32] = {0};
++    if (claw_config_get("ppp_tls_rx_window", value, sizeof(value)) != 0 ||
++        !strcmp(value, "0")) return 0;
++    int requested = !strcmp(value, "2048") ? 2048 :
++                    !strcmp(value, "4096") ? 4096 :
++                    !strcmp(value, "8192") ? 8192 : 0;
++    if (!requested) {
++        syslog(LOG_WARNING,
++            "[%s] TLS_PPP_RX_WINDOW config=invalid; default kept\n", TAG);
++        return 0;
++    }
++    struct ifaddrs *interfaces = NULL;
++    if (getifaddrs(&interfaces) != 0) return 0;
++    bool active = false;
++    for (struct ifaddrs *at = interfaces; at; at = at->ifa_next) {
++        if (!at->ifa_name || strcmp(at->ifa_name, "ppp0") || !at->ifa_addr ||
++            at->ifa_addr->sa_family != AF_INET ||
++            (at->ifa_flags & (IFF_UP | IFF_RUNNING)) != (IFF_UP | IFF_RUNNING))
++            continue;
++        const struct sockaddr_in *address = (const struct sockaddr_in *)at->ifa_addr;
++        if (address->sin_addr.s_addr != 0) { active = true; break; }
++    }
++    freeifaddrs(interfaces);
++    return active ? requested : 0;
++}
++
++static void zhaoxi_apply_ppp_rx_window(int fd)
++{
++    int saved_errno = errno;
++    int requested = zhaoxi_ppp_rx_window();
++    if (!requested) { errno = saved_errno; return; }
++    int actual = -1, get_rc = -1, get_errno = 0;
++    socklen_t size = sizeof(actual);
++    int set_rc = setsockopt(fd, SOL_SOCKET, SO_RCVBUF,
++                           &requested, sizeof(requested));
++    int set_errno = set_rc < 0 ? errno : 0;
++    if (!set_rc) {
++        get_rc = getsockopt(fd, SOL_SOCKET, SO_RCVBUF, &actual, &size);
++        get_errno = get_rc < 0 ? errno : 0;
++        if (get_rc || size != sizeof(actual)) actual = -1;
++    }
++    syslog(set_rc || get_rc || actual != requested ? LOG_WARNING : LOG_INFO,
++        "[%s] TLS_PPP_RX_WINDOW requested=%d actual=%d set_rc=%d set_errno=%d "
++        "get_rc=%d get_errno=%d\n", TAG, requested, actual, set_rc, set_errno,
++        get_rc, get_errno);
++    errno = saved_errno;
++}
++/* ZHAOXI_PPP_RX_WINDOW_END */
++#endif
++
+ static int zhaoxi_tcp_connect(mbedtls_net_context *net, const char *host,
+                               const char *port, unsigned timeout_ms)
+ {
+@@ -295,6 +358,10 @@
+     for (struct addrinfo *at = addresses; at; at = at->ai_next) {
+         int fd = socket(at->ai_family, at->ai_socktype, at->ai_protocol);
+         if (fd < 0) continue;
++#if defined(CONFIG_EXAMPLES_ZHAOXI) && defined(CONFIG_NETUTILS_PPPD)
++        /* Before connect: the peer must see this cap in the first SYN. */
++        zhaoxi_apply_ppp_rx_window(fd);
++#endif
+         int flags = fcntl(fd, F_GETFL, 0);
+         if (flags < 0 || fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0) {
+             close(fd);

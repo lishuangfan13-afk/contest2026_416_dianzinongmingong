@@ -2,6 +2,7 @@
 #include <nuttx/config.h>
 #include <nuttx/arch.h>
 #include <nuttx/timers/rtc.h>
+#include <nuttx/timers/arch_rtc.h>
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>

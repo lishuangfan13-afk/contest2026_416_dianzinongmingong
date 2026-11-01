@@ -310,7 +310,7 @@ void voice_channel_auto_feedback(int event)
     static atomic_uint previous = ATOMIC_VAR_INIT(0);
     bool ready = event == VOICE_AUTO_FEEDBACK_READY;
     bool accepted = event == VOICE_AUTO_FEEDBACK_ACCEPTED;
-    if (ready) puts("AUTO_VOICE_READY：提示音后可以说下一句。");
+    if (ready) puts("AUTO_VOICE_READY：收音已就绪；唤醒模式先说“朝夕”，对话中可接着提问。");
     else if (accepted) puts("AUTO_VOICE_ACCEPTED：本句话已收取，正在处理；回答结束再说下一句。");
     else {
         unsigned now = milliseconds(), last = atomic_exchange(&previous, now);

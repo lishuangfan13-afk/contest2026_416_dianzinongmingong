@@ -6,9 +6,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 
 int zhaoxi_main(int argc, char **argv);
+time_t __wrap_time(time_t *value)
+{ time_t now=(time_t)1793548800; if(value)*value=now; return now; }
 /* Explicit hardware test doubles: these do not verify real audio. */
 static int audio_result = -1;
 static int started, stopped;
@@ -39,7 +42,7 @@ static void expect(int argc, char **argv, const char *channel, const char *text)
 static void expect_local_voice(int argc, char **argv, const char *text)
 {
     assert(zhaoxi_main(argc, argv) == 0);
-    no_message(); /* Explicit TODO operations must never call the model. */
+    no_message(); /* Explicit storage operations must never call the model. */
     agent_msg_t reply = {0};
     assert(message_bus_pop_outbound(&reply, 0) == 0);
     assert(!strcmp(reply.channel, "voice") && strstr(reply.content, text));
@@ -50,12 +53,17 @@ int main(void)
 {
     mkdir(AGENT_DATA_DIR, 0700);
     unlink(AGENT_DATA_DIR "/TASKS.md"); /* This executable's isolated test fixture. */
+    unlink(AGENT_DATA_DIR "/memory/daily/2026-11-02.md");
     char *ask[] = {"zhaoxi", "ask", "hello", "world"};
     assert(!message_bus_is_ready());
     char *shutdown[] = {"zhaoxi", "stop"};
     assert(zhaoxi_main(2, shutdown) != 0);
     assert(shutdown_requests == 0);
     assert(zhaoxi_main(4, ask) != 0);
+    char *offline_note[]={"zhaoxi","--text","note","add","离线先保存"};
+    assert(zhaoxi_main(5,offline_note)==0); /* No Agent, model or network. */
+    char *offline_list[]={"zhaoxi","--text","note","list"};
+    assert(zhaoxi_main(4,offline_list)==0);
     message_bus_wakeup(); /* Also safe before initialization. */
     assert(message_bus_init() == 0);
     assert(message_bus_is_ready());
@@ -78,9 +86,14 @@ int main(void)
     char *text[] = {"zhaoxi", "--text", "ask", "你好"};
     expect(4, text, "cli", "你好");
     char *note[] = {"zhaoxi", "note", "图书馆借书"};
-    expect(3, note, "voice", "图书馆借书");
+    expect_local_voice(3, note, "已记录并读回确认：图书馆借书");
     char *notes[] = {"zhaoxi", "note", "list"};
-    expect(3, notes, "voice", "读取今天的真实备忘");
+    expect_local_voice(3, notes, "图书馆借书");
+    char *explicit_note[]={"zhaoxi","note","add","保留原记录"};
+    expect_local_voice(4,explicit_note,"已记录并读回确认：保留原记录");
+    char *note_text[]={"zhaoxi","--text","note","add","文字不播音"};
+    assert(zhaoxi_main(5,note_text)==0);no_message();
+    assert(message_bus_pop_outbound(&spoken,0)!=0);
     char *add[] = {"zhaoxi", "todo", "add", "交作业"};
     expect_local_voice(4, add, "已添加待办 [1]：交作业");
     char *list[] = {"zhaoxi", "todo", "list"};
@@ -135,6 +148,7 @@ int main(void)
     assert(zhaoxi_main(4, ask) != 0);
     message_bus_destroy();
     unlink(AGENT_DATA_DIR "/TASKS.md");
+    unlink(AGENT_DATA_DIR "/memory/daily/2026-11-02.md");
     assert(!message_bus_is_ready());
     puts("PASS: routes, UTF-8, validation, full queue, pre-init, shutdown and audio API error propagation.");
     return 0;

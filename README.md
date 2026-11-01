@@ -2,7 +2,7 @@
 
 朝夕是一台基于 **BES2800BP 和 openvela** 的桌面助手，把问答、随手记、待办和定时提醒放在同一块开发板上。它使用板载麦克风采集声音，通过 MiMo 处理语言，再用喇叭播报；备忘、待办和提醒保存在板上的持久存储中。
 
-当前作品采用无屏设计，演示时由电脑经 USB2UART 提供网络。语言识别、模型调用、文件操作、提醒调度和语音播放都在 BES 上运行，电脑负责网络转发和操作入口。
+当前作品以语音交互为主，演示时由电脑经 USB2UART 提供网络。BES 负责采集声音、发起 MiMo 语音识别与模型请求、执行本地业务并播放合成语音，电脑负责网络转发和操作入口。可选的 EasyMatrix 像素屏用于显示朝夕的工作状态。
 
 ## 三个核心功能
 
@@ -12,7 +12,7 @@
 | 记事与待办 | 记录当天备忘；添加、查询和完成带固定编号的待办 | “记一下明天带学生证”；添加“交作业”后按编号完成 |
 | 定时提醒 | 创建、查询、取消提醒；到期播报事项，网络不可用时使用本机提示音 | “三十秒后提醒我喝水” |
 
-待办命令直接读写本地文件，添加和完成操作不需要模型。自然语言记事、待办和提醒使用 AI Agent 的工具流程，取得成功保存的结果后再确认完成。
+明确的记事、待办和相对时间提醒优先在本地完成。例如“帮我记一下明天带学生证”“添加待办交作业”“三十秒后提醒我喝水”会直接保存并回读，省去文本模型等待；普通问答及更复杂的表达交给 AI Agent。支持的句式见 [本地中文指令](docs/本地中文指令.md)，备忘保存方式见 [本地记事](docs/本地记事.md)。
 
 ## 硬件与运行架构
 
@@ -45,7 +45,7 @@ python -m pip install pyserial==3.5
 python tools/pc_link/launch.py --check-only
 ```
 
-1. 接好开发板供电和 **USB2UART** 数据线，关闭其他占用该串口的程序。
+1. 接好开发板供电和 **USB2UART** 数据线，关闭其他占用该串口的程序。从完全断电重新接电时，按住板上 **POWER 约 2 秒**开机，看到启动输出后松开。
 2. 双击 [仅共享网络.cmd](tools/pc_link/仅共享网络.cmd)，或执行下面的命令：
 
    ```powershell
@@ -86,17 +86,28 @@ python tools/pc_link/control.py --reminders
 
 要取消某条提醒，使用 `python tools/pc_link/control.py --cmd remind cancel a123b456`，把 `a123b456` 换成实际返回的八位编号。更多自然语言输入、数据格式和操作方式见 [核心功能使用说明](docs/无屏核心功能.md)。
 
-## 开发状态
+## 生活提醒与表情扩展
 
-当前演示方式以**电脑供网、文字业务输入与语音播报**为主。连续语音交互和板载 Wi-Fi 独立联网仍在联调，自动监听默认关闭；需要现场体验时，由使用者主动选择 [开始自动语音](tools/pc_link/开始自动语音.cmd)。
+| 扩展 | 使用方式 |
+| --- | --- |
+| [喝水提醒](docs/喝水提醒.md) | 说“开启喝水提醒／查询喝水提醒／关闭喝水提醒”本地执行，默认每 60 分钟提示；也保留 `drink` 命令 |
+| [ASR 唤醒短语](docs/ASR唤醒短语.md) | 主动开启自动语音后先说“朝夕”，会话内可继续提问，空闲后回到等待唤醒 |
+| [飞书通知](docs/飞书通知接口.md) | 配置固定收件目标，使用 `notify test/send` 发送并读取服务回执 |
+| [EasyMatrix 颜文字屏](docs/颜文字屏使用.md) | 通过独立 CH343 USB 串口显示聆听、思考、播报、成功等状态，退出后恢复时钟 |
 
-最新 AP 构建为 `0c915c38…`，已完成编译和烧录，包含本地待办及记事／提醒的工具执行确认。当前镜像、安装方法和测试范围统一记录在 [构建与验收](docs/BES固件构建与验收.md)。
+像素屏与 BES 分别连接电脑，运行 `python tools/display_link.py` 即可跟随当前会话；也可以双击 [启动颜文字屏](tools/pc_link/启动颜文字屏.cmd)。屏端发布应用和依赖信息见 [EasyMatrix 固件](firmware/easymatrix/EasyMatrix.ino.manifest.json) 与 [扩展源码](extension/EasyMatrix/README_zh-cn.md)。
+
+## 当前演示与版本
+
+当前 46 项 SDK 集成固件已完成完整构建与烧录，麦克风关闭状态下的 37 项核心业务检查通过，覆盖真实问答、本地中文记事／待办／提醒、喝水任务、旧数据保留和正常退出；同一固件还通过了 10 次连续完整启停，均无需按 RESET。自动语音的新逻辑与听感安排在有人在场时复核；飞书实发还需填写 App ID、App Secret 和固定目标，独立 Wi-Fi 继续联调。默认联网策略见 [联网配置](docs/联网方式配置.md)。BES 当前版本以 [AP manifest](firmware/headless_pc_link/nuttx_ap_headless.manifest.json) 为准，安装与检查见 [构建说明](docs/BES固件构建与验收.md)。
 
 ## 源码与文档
 
 | 目录或文档 | 内容 |
 | --- | --- |
 | [app/zhaoxi](app/zhaoxi/README.md) | 产品命令、本地待办、提醒、BES 音频、MiMo 适配和电脑供网 |
+| [本地中文指令](docs/本地中文指令.md) | 明确记事、待办与相对提醒的快捷句式 |
+| [extension/EasyMatrix](extension/EasyMatrix/README_zh-cn.md) | 像素钟表情协议、源程序与固定构建依赖 |
 | [assets/agent_deploy](assets/agent_deploy/README.md) | 人格配置、智能记事本与智能提醒 Skill、空白提醒模板 |
 | [tools/pc_link](tools/pc_link/README_zh-cn.md) | Windows 一键启动、UTC 授时、网络转发与控制命令 |
 | [patches](patches/README.md) | AI Agent、apps、BES 启动和 NuttX 的集成补丁与顺序 |

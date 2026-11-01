@@ -1,0 +1,123 @@
+{
+  "arduino_cli": {
+    "version": "1.5.1",
+    "asset_sha256": "fabe42e0eb04d00e776a66178299ff95a46c623dbc260f997e58fd514853dd40"
+  },
+  "esp32_core": {
+    "version": "3.3.12",
+    "url": "https://github.com/espressif/arduino-esp32/releases/download/3.3.12/esp32-core-3.3.12.zip",
+    "checksum": "SHA-256:87401004f279a206781e368b66098a8383b7cf87cce7811a6afd0163503fa78f"
+  },
+  "libraries": [
+    {
+      "name": "Adafruit NeoMatrix",
+      "version": "1.3.3",
+      "url": "https://downloads.arduino.cc/libraries/github.com/adafruit/Adafruit_NeoMatrix-1.3.3.zip",
+      "archiveFileName": "Adafruit_NeoMatrix-1.3.3.zip",
+      "size": 49059,
+      "checksum": "SHA-256:2eb347c22552a6e666265af7001777186df0765cd62b4fbb2779450dd51f4e01"
+    },
+    {
+      "name": "Adafruit NeoPixel",
+      "version": "1.15.5",
+      "url": "https://downloads.arduino.cc/libraries/github.com/adafruit/Adafruit_NeoPixel-1.15.5.zip",
+      "archiveFileName": "Adafruit_NeoPixel-1.15.5.zip",
+      "size": 85934,
+      "checksum": "SHA-256:3d767caa011ab3078df7fe3c3e0456359ce2bc309eba343932690a2c1612fd16"
+    },
+    {
+      "name": "Adafruit GFX Library",
+      "version": "1.13.0",
+      "url": "https://downloads.arduino.cc/libraries/github.com/adafruit/Adafruit_GFX_Library-1.13.0.zip",
+      "archiveFileName": "Adafruit_GFX_Library-1.13.0.zip",
+      "size": 357665,
+      "checksum": "SHA-256:202ec716ff222fb08ffc544a5f315cb47b8630c35fbbc9944fc9f8c93d903924"
+    },
+    {
+      "name": "OneButton",
+      "version": "2.6.2",
+      "url": "https://downloads.arduino.cc/libraries/github.com/mathertel/OneButton-2.6.2.zip",
+      "archiveFileName": "OneButton-2.6.2.zip",
+      "size": 35465,
+      "checksum": "SHA-256:262799fc8c3a848b2c70898d35140d81792b0c3c5fd518b21c5de78ab14e5960"
+    },
+    {
+      "name": "arduinoFFT",
+      "version": "2.0.4",
+      "url": "https://downloads.arduino.cc/libraries/github.com/kosme/arduinoFFT-2.0.4.zip",
+      "archiveFileName": "arduinoFFT-2.0.4.zip",
+      "size": 37493,
+      "checksum": "SHA-256:7f798ad9b9d76aff8b365e5cd2a67d709dec564e75e9bd3bf813f66ba5b83dff"
+    },
+    {
+      "name": "Adafruit BusIO",
+      "version": "1.17.4",
+      "url": "https://downloads.arduino.cc/libraries/github.com/adafruit/Adafruit_BusIO-1.17.4.zip",
+      "archiveFileName": "Adafruit_BusIO-1.17.4.zip",
+      "size": 31084,
+      "checksum": "SHA-256:c7bab1b6c6eee64b50964c8e149b795719a01f1d9dfcdcef170b35daa696349b"
+    }
+  ],
+  "fqbn": "esp32:esp32:AirM2M_CORE_ESP32C3:CDCOnBoot=default,PartitionScheme=huge_app,EraseFlash=none",
+  "library_index_sha256": "e5b41bfe7042d528896236acc19616baa9c636721d48132401b07be7b1e59a0d",
+  "hardware_execution_performed": false,
+  "target_firmware_build_status": "passed",
+  "application": {
+    "image": "EasyMatrix.ino.bin",
+    "size": 1194544,
+    "sha256": "6f8fd7b2335664e55538f56e0a1e32bfcde8f574922259607ec628732d8da5ba",
+    "target_architecture": "ELF32 RISC-V / ESP32-C3",
+    "flash_address": "0x10000",
+    "max_app_bytes_from_live_partition": 3145728
+  },
+  "source_inputs_unchanged_during_build": true,
+  "generated_partition_matches_live_device": true,
+  "source_text_line_endings": "LF",
+  "git_source_blobs_match_working_bytes": true,
+  "base_source_sha256_describes_original_archive_raw_bytes": true,
+  "serial_transport": "UART0 Serial0 at 115200 through existing USB-UART bridge",
+  "native_tests": [
+    "JSON valid/error/integer/TTL cases and 6000 malformed inputs",
+    "seven 32x8 raster frames and buffer guard bytes",
+    "matrix.show before ACK, TTL/wrap/clock restoration, guarded worker deletion"
+  ],
+  "source_sha256": {
+    "buzzer.cpp": "771b815d2666d2c9daac6f0ef2972c7c6cef6ea94a1b0a954ea8c285a2f4148d",
+    "buzzer.h": "d10743b64b3493e4a3ffecc350b5c420721dd80e384f7fadc11d0093eb5100c1",
+    "common.h": "f0f9bed04c0625e2d28ab68b7ba43490e3ada96135f77e269916349f4ed85fa3",
+    "drawPage.h": "a80bdc1e467b09817a67f1a7fbcbc95e22cb71c5de8ab8aa417fa4926055cac5",
+    "EasyMatrix.ino": "ef51fd7a98a1578f7f7a517398ea3730d25b69b51caac3b6e5ed95290aa39ef8",
+    "emotion_display.cpp": "ce4b60f1c7623b0161745b52ee8371ca7ccaa708902a54f67261de99f2bc6f32",
+    "emotion_display.h": "5fac0ef1844adfb36800e7f00a459d4581091ae53548a8ad232dc45a173241ae",
+    "emotion_face.cpp": "b0183cf557b9ee75fc861926b55e6d238a1d509ce2f1239bf9f789db1e82047c",
+    "emotion_face.h": "4fcbaffbf148ee625ecbbc682633651c1275d17c701b3a24fbf0186ad3e622b2",
+    "emotion_protocol.cpp": "28e7d29c5f5cffa143262f522a04c0394ff6f3928494af697afecc22ee358da2",
+    "emotion_protocol.h": "dd8f03b06a2ab373f016f4dde4428be5ccc208028cda26c467e7589e7a3e3ab4",
+    "light.cpp": "30b2f6b0a1b841b100e9ea7262f9c98b1e8aeb653e3e9a3eeb38873391e46f84",
+    "light.h": "3552abb94d55c0f7b675ad5ba8c9f80b4a8c0c5ffe7ec1812321c2cd119279b0",
+    "MyFont.h": "5cc2029dbb17db762282e12fcd3c65d325fdaec339acd498e5eeac3e75009faa",
+    "net.cpp": "69b12bf9187403d2f5210aaf9365e1c84c1c1d88bdcb9547c54c4f3145ae02d1",
+    "net.h": "269090f778cf1bec770eea0585269c43d18940bc4b0fc288dbe4ffe452f40631",
+    "partitions.csv": "e39452f977157205bd93262744d48459c573e0eaee18c6e093e5274e8cf1cc27",
+    "preferencesUtil.cpp": "a61e4a1b22fca755012842fb7a9869794165e0509dce7c97c8d5df3767cf2503",
+    "preferencesUtil.h": "baf21431e5e2b79ef219e69dace21cb229ef0b2b0ddde4983ea6375138105ce3",
+    "songs.h": "5423d066129f25652dd4d254777cfd83fcab9d0e3e0b32f85896c0b247d2615f",
+    "task.cpp": "90f94e21de694c30641ab0099ab7bb711cbfcb87e5cb368e7ce7db35937a9edb",
+    "task.h": "aaab1e5aba1954bf9fc0603e65bea212223e72b52ab2ffcff6c9485cf53b58ab",
+    "img/animHack.h": "5af91aceae7ff66d6eaeea0399ed9482b07508c988244fa15c0d9a9bd3a1a924",
+    "img/bell.h": "94c45a8792bca6c435e76e96ea0740fe61a09fa3896e8d010fe4bbd36d99eb33",
+    "img/checkingTime.h": "09ec9d18e3b17ff447899ea4f9901de1c87b86af3e7923f47808858bb8578188",
+    "img/timeAnim0.h": "2443a4f7c1dd967a2f249c4eb7cdf579eb1aa74ba4811a8b17c7b3546d84d335",
+    "img/timeAnim1.h": "408c3c2b37a292693046d04c90bbae7cc8b5f64b4b2187e6ee4975d03b918821",
+    "img/timeAnim2.h": "23524a825e84a5fd8103163002d0a160fa8a10068869cc0db39328f3da17a517",
+    "img/timeAnim3.h": "1a78e96d3618c78715f54bf237dcea3310557caa981cfc6928fbfa82220f0c29",
+    "img/timeAnim4.h": "09a47fd524fd54dd69b8d5132a07ccc3de0259746d7c1a9fca73378969746eda",
+    "img/timeAnim5.h": "0c700295e278ab48417d9d70e4e41594997d8070cc72dee6e0eb603411e8f250",
+    "img/timeAnim6.h": "53f29d8c731fd3d5204a398e0aabcee85007fcd46141a4de3e28f65fc286346a",
+    "img/timeAnim7.h": "6fcb947594643670d32615fb62167f755dc8b88b75c76a2d496ce705514e79c1",
+    "img/timeAnim8.h": "63c63a51bb0a51974ef0d9bff0c8bf5d8627b45f2ac0bbbcb80b4e9cb4e5d879",
+    "img/timeIcons.h": "96941d2bf58e159ca09dc80042babeb351e19f3d172b80de7451033ea4154ff0",
+    "img/weatherIcons.h": "4173861e1dc6f902c742a42ca45d0809345f051e6faef3c62cadfba6e3075852"
+  },
+  "generated_build_files_excluded_from_source": []
+}

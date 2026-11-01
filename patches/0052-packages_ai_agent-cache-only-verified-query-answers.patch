@@ -1,0 +1,44 @@
+--- a/src/core/agent_loop.c
++++ b/src/core/agent_loop.c
+@@ -1260,6 +1260,7 @@
+     int last_total_tokens = 0;
+     bool watchdog_fired = false;
+     bool cacheable = true;
++    bool cache_response_ok = false;
+ #ifdef CONFIG_EXAMPLES_ZHAOXI
+     product_mutation_t mutation = product_mutation_intent(msg->content);
+     int mutation_first = cJSON_GetArraySize(messages);
+@@ -1469,6 +1470,7 @@
+ 
+                     if (err == OK && resp.text && resp.text_len > 0) {
+                         final_text = strdup(resp.text);
++                        cache_response_ok = !resp.tool_use && final_text != NULL;
+                         free(fallback_text);
+                         fallback_text = NULL;
+                     } else {
+@@ -1490,12 +1492,16 @@
+ 
+             if (resp.text && resp.text_len > 0 && !final_text) {
+                 final_text = strdup(resp.text);
++                cache_response_ok = final_text != NULL;
+             }
+             agent_trace_step(&trace, iteration, NULL, latency_ms, 1);
+             llm_response_free(&resp);
+             break;
+         }
+ 
++        /* Tool-based replies depend on mutable state and may contain errors;
++         * only a verified ordinary model answer is eligible for this cache. */
++        cacheable = false;
+         if (automatic_voice_cancelled(msg)) {
+             llm_response_free(&resp);
+             agent_trace_end(&trace, AGENT_TRACE_FAIL);
+@@ -1629,7 +1635,7 @@
+ 
+ send_reply:
+     /* Cache store: save simple query responses for future reuse */
+-    if (cacheable && final_text && msg->content
++    if (cacheable && cache_response_ok && !watchdog_fired && final_text && msg->content
+         && complexity == LLM_COMPLEXITY_SIMPLE) {
+         llm_cache_put(msg->content, strlen(msg->content), final_text);
+         if (last_total_tokens > 0) {

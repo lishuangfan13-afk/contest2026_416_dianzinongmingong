@@ -1,0 +1,183 @@
+--- a/src/infra/task_lifecycle.c
++++ b/src/infra/task_lifecycle.c
+@@ -4,11 +4,16 @@
+ #include <stdlib.h>
+ #include <string.h>
+ #include <syslog.h>
++#include <stdint.h>
++#include <time.h>
++#include <unistd.h>
+ 
+ extern bool agent_shutdown_requested(void);
++extern void agent_request_shutdown(void);
+ static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+ static pthread_cond_t changed = PTHREAD_COND_INITIALIZER;
+ static bool active;
++static uint64_t active_owner, pending_owner, owner_sequence;
+ static unsigned workers, network_workers;
+ 
+ struct tracked_task {
+@@ -17,20 +22,93 @@
+     bool network;
+ };
+ 
++uint64_t agent_session_owner_new(void)
++{
++    pthread_mutex_lock(&lock);
++    uint64_t owner = 0;
++    if (!pending_owner) {
++        if (++owner_sequence == 0) ++owner_sequence;
++        owner = pending_owner = owner_sequence;
++    }
++    pthread_mutex_unlock(&lock);
++    return owner;
++}
++
++bool agent_instance_acquire_owned(uint64_t owner, void (*prepare)(void))
++{
++    pthread_mutex_lock(&lock);
++    bool acquired = !active && (!owner || owner == pending_owner);
++    if (acquired) {
++        /* Initialize shutdown under the same lock before ownership becomes
++         * observable; an immediate stop cannot be erased by late startup. */
++        if (prepare) prepare();
++        active = true;
++        active_owner = owner;
++        if (owner) pending_owner = 0;
++    }
++    pthread_mutex_unlock(&lock);
++    return acquired;
++}
++
+ bool agent_instance_acquire(void)
+ {
+-    pthread_mutex_lock(&lock);
+-    bool acquired = !active;
+-    if (acquired) active = true;
+-    pthread_mutex_unlock(&lock);
+-    return acquired;
++    return agent_instance_acquire_owned(0, NULL);
+ }
+ 
+ void agent_instance_release(void)
+ {
+     pthread_mutex_lock(&lock);
+     active = false;
++    active_owner = 0;
++    pthread_cond_broadcast(&changed);
+     pthread_mutex_unlock(&lock);
++}
++
++bool agent_instance_is_active(void)
++{
++    pthread_mutex_lock(&lock);
++    bool result = active;
++    pthread_mutex_unlock(&lock);
++    return result;
++}
++
++bool agent_instance_is_owned(uint64_t owner)
++{
++    pthread_mutex_lock(&lock);
++    bool result = owner && active && active_owner == owner;
++    pthread_mutex_unlock(&lock);
++    return result;
++}
++
++bool agent_instance_shutdown_owned(uint64_t owner)
++{
++    if (!owner) return false;
++    pthread_mutex_lock(&lock);
++    if (pending_owner == owner) pending_owner = 0;
++    bool owned = active && active_owner == owner;
++    if (owned) agent_request_shutdown();
++    pthread_mutex_unlock(&lock);
++    return owned;
++}
++
++int agent_instance_wait_owned(uint64_t owner, unsigned timeout_ms)
++{
++    if (!owner) return -EINVAL;
++    struct timespec begin, now;
++    if (clock_gettime(CLOCK_MONOTONIC, &begin)) return -errno;
++    for (;;) {
++        if (!agent_instance_is_owned(owner)) return 0;
++        if (clock_gettime(CLOCK_MONOTONIC, &now)) return -errno;
++        int64_t elapsed = (int64_t)(now.tv_sec - begin.tv_sec) * 1000 +
++                          (now.tv_nsec - begin.tv_nsec) / 1000000;
++        if (elapsed >= (int64_t)timeout_ms) return -ETIMEDOUT;
++        unsigned remaining = timeout_ms - (unsigned)(elapsed > 0 ? elapsed : 0);
++        /* A short monotonic poll remains bounded even if host UTC is adjusted
++         * during shutdown; no realtime condition deadline can jump backwards. */
++        struct timespec pause = {.tv_sec = 0,
++            .tv_nsec = (long)(remaining < 20 ? remaining : 20) * 1000000};
++        nanosleep(&pause, NULL);
++    }
+ }
+ 
+ static void task_finished(void *argument)
+--- a/src/infra/task_lifecycle.h
++++ b/src/infra/task_lifecycle.h
+@@ -2,9 +2,21 @@
+ #pragma once
+ #include <pthread.h>
+ #include <stdbool.h>
++#include <stdint.h>
+ 
+ bool agent_instance_acquire(void);
+ void agent_instance_release(void);
+ int agent_tracked_pthread_create(pthread_t *thread, const pthread_attr_t *attr,
+     void *(*function)(void *), void *argument, const char *name);
+ void agent_tasks_wait(bool network_only);
++
++/* Internal leases identify an Agent actually launched by one wired session.
++ * Owner 0 is an ordinary external instance and is never stopped by a lease. */
++uint64_t agent_session_owner_new(void);
++bool agent_instance_acquire_owned(uint64_t owner, void (*prepare)(void));
++bool agent_instance_is_active(void);
++bool agent_instance_is_owned(uint64_t owner);
++/* Also revokes a not-yet-started lease, so a delayed launch cannot outlive
++ * the network session. The request callback must not reenter this module. */
++bool agent_instance_shutdown_owned(uint64_t owner);
++int agent_instance_wait_owned(uint64_t owner, unsigned timeout_ms);
+--- a/src/agent_main.c
++++ b/src/agent_main.c
+@@ -101,6 +101,9 @@
+ /* Set by cmd_quit via agent_request_shutdown(); checked by main loop
+  * to trigger graceful teardown instead of calling exit(). */
+ static volatile bool g_shutdown_requested = false;
++#ifdef CONFIG_EXAMPLES_ZHAOXI
++static void agent_prepare_instance(void) { g_shutdown_requested = false; }
++#endif
+ 
+ void agent_request_shutdown(void)
+ {
+@@ -565,7 +568,9 @@
+         return ERROR;
+     }
+ #endif
++#ifndef CONFIG_EXAMPLES_ZHAOXI
+     g_shutdown_requested = false;
++#endif
+ 
+     struct timespec t0;
+     clock_gettime(CLOCK_MONOTONIC, &t0);
+@@ -915,7 +920,17 @@
+ int ai_agent_main(int argc, char *argv[])
+ {
+ #ifdef CONFIG_EXAMPLES_ZHAOXI
+-    if (!agent_instance_acquire()) {
++    uint64_t owner = 0;
++    /* Private launch tag for the wired session. Normal CLI remains owner 0. */
++    if (argc == 4 && !strcmp(argv[1], "--headless") && !strcmp(argv[2], "--pc-owner")) {
++        char *end = NULL;
++        errno = 0;
++        unsigned long long parsed = strtoull(argv[3], &end, 10);
++        if (errno || !parsed || argv[3][0] == '-' || !end || *end) return ERROR;
++        owner = (uint64_t)parsed;
++        argc = 2;
++    }
++    if (!agent_instance_acquire_owned(owner, agent_prepare_instance)) {
+         printf("Agent is already running or stopping; wait for its exit log.\n");
+         return ERROR;
+     }

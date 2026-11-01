@@ -9,7 +9,8 @@ def main():
     args=parser.parse_args();sdk=args.sdk.resolve()
     with tempfile.TemporaryDirectory(prefix='zhaoxi-auto-voice-') as folder:
         temp=Path(folder);source=temp/'src/voice/voice_channel.c';source.parent.mkdir(parents=True)
-        names=['src/voice/voice_channel.c','src/voice/voice_channel.h']
+        names=['src/voice/voice_channel.c','src/voice/voice_channel.h',
+               'src/voice/voice_wake.c','src/voice/voice_wake.h','CMakeLists.txt','Makefile']
         original={name:(sdk/name).read_bytes() for name in names}
         for name in names:(temp/name).write_bytes(original[name])
         patches=[ROOT/'patches/0034-packages_ai_agent-autonomous-local-voice-terminal.patch',
@@ -17,7 +18,8 @@ def main():
                  ROOT/'patches/0039-packages_ai_agent-buffer-streamed-pcm-playback.patch',
                  ROOT/'patches/0041-packages_ai_agent-observe-and-coalesce-pcm-queue.patch',
                  ROOT/'patches/0043-packages_ai_agent-prioritize-pcm-consumer.patch',
-                 ROOT/'patches/0045-packages_ai_agent-cushion-initial-stream-playback.patch']
+                 ROOT/'patches/0045-packages_ai_agent-cushion-initial-stream-playback.patch',
+                 ROOT/'patches/0054-packages_ai_agent-gate-automatic-voice-with-asr-wake-phrases.patch']
         for patch in reversed(patches):
             subprocess.run(['patch','-R','-p1','--batch','-i',str(patch)],cwd=temp,check=True,capture_output=True)
         for patch in patches:
@@ -48,10 +50,10 @@ int agent_task_create(void *(*f)(void *),const char *,int,void *,int);
 ''')
         exe=temp/'test_auto_voice'
         subprocess.run(['gcc','-std=gnu11','-g','-O1','-fsanitize=address,undefined',
-                        '-fno-omit-frame-pointer','-ffunction-sections','-fdata-sections',
+                        '-fno-omit-frame-pointer','-fno-sanitize-recover=all','-ffunction-sections','-fdata-sections',
                         '-Wl,--gc-sections','-pthread','-Wall','-Wextra','-DCONFIG_ZHAOXI_BES_AUDIO=1',
                         '-I'+str(inc),'-I'+str(sdk/'include'),'-I'+str(sdk/'src'),
                         '-DVOICE_CHANNEL_SOURCE="'+str(source)+'"',
-                        str(Path(__file__).with_name('test_auto_voice.c')),'-o',str(exe)],check=True)
+                        str(Path(__file__).with_name('test_auto_voice.c')),str(sdk/'src/voice/voice_wake.c'),'-o',str(exe)],check=True)
         subprocess.run([str(exe)],check=True,timeout=35)
 if __name__=='__main__':main()

@@ -1,7 +1,8 @@
 if(CONFIG_EXAMPLES_ZHAOXI)
-  set(ZHAOXI_SRCS zhaoxi_main.c todo_store.c)
+  set(ZHAOXI_SRCS zhaoxi_main.c todo_store.c journal.c local_intent.c)
   if(CONFIG_ZHAOXI_BES_AUDIO)
-    list(APPEND ZHAOXI_SRCS bes_audio.c bes_clock.c reminder.c dns_diag.c)
+    list(APPEND ZHAOXI_SRCS bes_audio.c bes_clock.c reminder.c drink.c dns_diag.c
+         notifications/feishu_notify.c notifications/feishu_notify_sdk.c)
   endif()
   if(CONFIG_ZHAOXI_MIMO_VOICE)
     list(APPEND ZHAOXI_SRCS mimo_voice.c mimo_sse.c)

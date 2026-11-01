@@ -7,6 +7,9 @@
 | 文件 | 作用 |
 | --- | --- |
 | [zhaoxi_main.c](zhaoxi_main.c) | 命令解析、业务路由、语音启停与状态查询 |
+| [journal.c](journal.c) | 北京日期的本地备忘追加、同步与回读确认 |
+| [drink.c](drink.c) | 独立喝水周期任务与启停状态 |
+| [notifications](notifications/) | 固定收件目标的飞书通知、鉴权与服务回执 |
 | [todo_store.c](todo_store.c) | 本地待办添加、查询、精确完成与持久保存 |
 | [reminder.c](reminder.c) | 本机相对时间提醒、查询、取消和到期播报／提示音 |
 | [bes_audio.c](bes_audio.c) | 实际 BES PCM／DMA／DAC 录音与播放 |
@@ -31,8 +34,8 @@
 | 命令 | 行为 |
 | --- | --- |
 | `zhaoxi [--text] ask <问题>` | 向 Agent 提交问答 |
-| `zhaoxi [--text] note [add] <内容>` | 记录当天备忘 |
-| `zhaoxi [--text] note list` | 查询当天备忘 |
+| `zhaoxi [--text] note [add] <内容>` | 本地追加当天备忘，保存后回读 |
+| `zhaoxi [--text] note list` | 本地读取当天备忘 |
 | `zhaoxi [--text] todo add <内容>` | 本地添加待办并返回编号 |
 | `zhaoxi [--text] todo list` | 本地查询未完成待办 |
 | `zhaoxi [--text] todo done <编号>` | 本地完成指定待办 |
@@ -43,10 +46,19 @@
 | `zhaoxi say <文本>` | 直接合成并播放文本 |
 | `zhaoxi test-speaker` | 播放两秒本机提示音 |
 | `zhaoxi auto start\|stop\|status` | 管理自动语音循环 |
+| `zhaoxi auto wake on\|off\|status` | 设置或查询 ASR 唤醒 gate |
+| `zhaoxi [--text] drink start [分钟]`、`stop`、`status` | 管理独立喝水提醒 |
+| `zhaoxi notify status`、`test <事件编号>`、`send <事件编号> <文本>` | 固定目标通知与服务回执 |
 | `zhaoxi listen start\|stop` | 手动分段录音诊断 |
 | `zhaoxi status`、`zhaoxi stop` | 查询消息总线或请求停止 Agent |
 
-默认回复通道是 `voice`，`--text` 改为串口文字。模型类命令先入队，再由 Agent 返回业务结果；本地待办直接执行存储操作。合并后的业务请求上限为 511 个 UTF-8 字节，包含应用增加的意图前缀。
+默认回复通道是 `voice`，`--text` 改为串口文字。模型类命令先入队，再由 Agent 返回业务结果；明确的备忘和待办命令直接执行存储操作。合并后的业务请求上限为 511 个 UTF-8 字节，包含应用增加的意图前缀。
+
+## 本地备忘
+
+`journal.c` 把明确的 `note add/list` 命令映射到北京时间对应的 `memory/daily/YYYY-MM-DD.md`。新增以追加方式保留旧内容，写入后 `fsync` 并回读比对原前缀和新增文本，检查文件路径仍对应同一对象，再返回确认。记录文本上限 511 个 UTF-8 字节，每日文件上限 64 KiB。
+
+本地备忘需要有效 UTC 时钟，日期换算由模块统一完成。`--text` 可在 Agent 未启动时使用；默认 voice 入口将已验证的结果交给语音播报。错误回执区分未保存和存储状态待核对，便于通过当天文件查询实际内容。
 
 ## 本地待办
 
@@ -71,13 +83,19 @@
 
 本机相对时间提醒支持 1～31536000 秒的整数，先检查时钟和存储，再调用实际 cron 服务。到期时通过语音通道播报；网络或合成失败时输出提醒文字并尝试两秒本机提示音。周期恢复由 0049 实现：无外部 action 的固定间隔任务跳过错过的周期，继续安排未来一次；未授时则等待时间恢复。
 
-TTS 使用 24 kHz PCM16LE 单声道，HTTPS 增量读取 SSE 后写入固定 64 KiB 队列，播放线程由 DMA 完成中断唤醒。ASR 在封句后上传整段音频。自动语音采用约 1.2 秒静音封句，识别与播报时暂停采集；当前连续交互仍在联调，日常默认关闭监听。
+TTS 使用 24 kHz PCM16LE 单声道，HTTPS 增量读取 SSE 后写入固定 64 KiB 队列，播放线程由 DMA 完成中断唤醒。ASR 在封句后上传整段音频。自动语音采用约 1.2 秒静音封句，识别与播报时暂停采集。ASR 唤醒 gate 默认匹配“朝夕”“你好朝夕”“小朝夕”，会话内空闲 60 秒后回到等待唤醒；具体字段和调用接口见 [唤醒短语](../../docs/ASR唤醒短语.md)。连续语音仍待真人验收，日常默认关闭监听。
+
+扩展接口分别见 [喝水提醒](../../docs/喝水提醒.md)、[飞书通知](../../docs/飞书通知接口.md) 与 [颜文字屏](../../docs/颜文字屏使用.md)。联网默认采用电脑 PPP，使用者可通过运行配置选择 Wi-Fi，配置和会话退出规则见 [联网方式](../../docs/联网方式配置.md)。
 
 ## 检查入口
 
 在 Linux／WSL 中运行，路径替换为实际工作区：
 
 ```bash
+python3 tests/headless/check_journal.py
+
+python3 tests/headless/check_drink.py --sdk /path/to/openvela/packages/ai_agent --cjson /path/to/openvela/apps/netutils/cjson/cJSON
+
 python3 tools/check_headless.py \
   --agent-root /path/to/openvela/packages/ai_agent \
   --arm-prefix /path/to/arm-none-eabi-

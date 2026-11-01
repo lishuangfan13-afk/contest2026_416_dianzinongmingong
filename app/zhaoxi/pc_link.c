@@ -6,6 +6,7 @@
 #include "infra/vela_tls.h"
 #include "cJSON.h"
 #include "core/message_bus.h"
+#include "infra/task_lifecycle.h"
 #include "voice/voice_channel.h"
 #include <nuttx/config.h>
 #include <nuttx/net/dns.h>
@@ -68,6 +69,19 @@ static int route_half(int fd, unsigned first, bool add)
                  delroute(fd, &target, &mask, sizeof(target));
 }
 
+/* The command server has already sent and drained the quit reply. Keep
+ * PPP/routes/DNS alive while this session's Agent exits its real workers. */
+static int stop_session_agent(uint64_t owner, unsigned budget_ms, cJSON *report)
+{
+    if (!owner) return 0; /* A borrowed external instance is not ours to stop. */
+    bool requested = agent_instance_shutdown_owned(owner);
+    int result = agent_instance_wait_owned(owner, budget_ms);
+    cJSON_AddBoolToObject(report, "agent_owned_shutdown_requested", requested);
+    cJSON_AddNumberToObject(report, "agent_shutdown_wait_rc", result);
+    cJSON_AddBoolToObject(report, "agent_owned_instance_exited", result == 0);
+    return result;
+}
+
 int zhaoxi_pc_link(unsigned seconds)
 {
     bool serving = seconds == 0;
@@ -75,6 +89,7 @@ int zhaoxi_pc_link(unsigned seconds)
     if (seconds < 45 || seconds > 600) return -EINVAL;
     bool expected = true;
     if (!atomic_compare_exchange_strong(&stopping, &expected, false)) return -EBUSY;
+    uint64_t session_owner = 0;
     struct saved_dns saved = {0};
     if (dns_foreach_nameserver(save_dns, &saved) < 0) { atomic_store(&stopping, true); return -EIO; }
     struct pppd_settings_s settings = {0};
@@ -179,10 +194,20 @@ int zhaoxi_pc_link(unsigned seconds)
     freeaddrinfo(answer);
     if (serving) {
         if (!message_bus_is_ready()) {
-            if (system("ai_agent --headless &")) { result = -EIO; goto stop; }
+            /* A stopping external instance is still alive even though its
+             * bus is closed; never launch over it or claim its ownership. */
+            if (agent_instance_is_active()) { result = -EBUSY; goto stop; }
+            session_owner = agent_session_owner_new();
+            if (!session_owner) { result = -EBUSY; goto stop; }
+            char launch[96];
+            snprintf(launch, sizeof(launch), "ai_agent --headless --pc-owner %llu &",
+                     (unsigned long long)session_owner);
+            if (system(launch)) { result = -EIO; goto stop; }
             for (unsigned i = 0; i < 20 && !message_bus_is_ready(); i++) usleep(500000);
             if (!message_bus_is_ready()) { result = -ETIMEDOUT; goto stop; }
         }
+        cJSON_AddBoolToObject(report, "agent_started_by_link",
+                              agent_instance_is_owned(session_owner));
         result = zhaoxi_pc_control(); goto stop;
     }
     char key[128] = {0};
@@ -205,6 +230,10 @@ int zhaoxi_pc_link(unsigned seconds)
     cJSON_Delete(body); free(response);
 stop:
     if (serving) voice_channel_auto_stop();
+    /* Do not remove a healthy PPP link first: net_watch could enter a
+     * synchronous BES reconnect and never reach the shutdown flag again. */
+    int shutdown_result = stop_session_agent(session_owner, 45000, report);
+    if (shutdown_result && !result) result = shutdown_result;
     atomic_store(&stopping, true);
     pthread_join(worker, NULL);
     if (route0) route_half(fd, 0, false);

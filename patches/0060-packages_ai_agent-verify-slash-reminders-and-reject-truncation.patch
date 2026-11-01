@@ -1,0 +1,138 @@
+--- a/src/core/agent_loop.c
++++ b/src/core/agent_loop.c
+@@ -28,6 +28,7 @@
+ #include "core/context_builder.h"
+ #include "core/message_bus.h"
+ #include "core/session_mgr.h"
++#include "infra/cron_service.h"
+ #include "llm/llm_cache.h"
+ #include "llm/llm_proxy.h"
+ #include "llm/llm_router.h"
+@@ -720,33 +721,82 @@
+ /* /remind sub-handler */
+ static char* handle_slash_remind(const agent_msg_t* msg)
+ {
+-    int secs = 0;
+-    char remind_msg[512];
+-
+-    remind_msg[0] = '\0';
+-    if (sscanf(msg->content + 8, "%d %511[^\n]",
+-            &secs, remind_msg)
+-        < 1) {
+-        return NULL;
+-    }
+-    if (!remind_msg[0]) {
+-        strncpy(remind_msg, "提醒时间到", sizeof(remind_msg) - 1);
+-    }
+-
+-    char input[1024];
+-    snprintf(input, sizeof(input),
+-        "{\"name\":\"remind\",\"schedule_type\":\"at\","
+-        "\"at_epoch\":%lld,\"message\":\"%s\","
+-        "\"channel\":\"%s\",\"chat_id\":\"%s\"}",
+-        (long long)(time(NULL) + secs), remind_msg,
+-        msg->channel, msg->chat_id);
+-
+-    char* reply = calloc(1, 512);
+-    if (reply) {
+-        tool_registry_execute("cron_add", input, reply, 512);
+-        snprintf(reply, 512, "好的，%d 秒后提醒你：%s",
+-            secs, remind_msg);
+-    }
++    if (!msg || !msg->content || strncmp(msg->content, "/remind ", 8))
++        return strdup("Error: use /remind <integer seconds> <message>");
++    const char *text = msg->content + 8;
++    while (*text == ' ' || *text == '\t') text++;
++    if (*text < '0' || *text > '9')
++        return strdup("Error: reminder seconds must be an integer in 1..31536000");
++    uint32_t seconds = 0;
++    do {
++        unsigned digit = (unsigned)(*text++ - '0');
++        if (seconds > (31536000U - digit) / 10)
++            return strdup("Error: reminder seconds must be an integer in 1..31536000");
++        seconds = seconds * 10 + digit;
++    } while (*text >= '0' && *text <= '9');
++    if (!seconds || (*text && *text != ' ' && *text != '\t'))
++        return strdup("Error: reminder seconds must be an integer in 1..31536000");
++    while (*text == ' ' || *text == '\t') text++;
++    if (!*text) text = "提醒时间到";
++    if (strlen(text) > 255)
++        return strdup("Error: reminder message exceeds 255 UTF-8 bytes; nothing created");
++    for (const unsigned char *p = (const unsigned char *)text; *p; p++)
++        if (*p < 32 || *p == 127)
++            return strdup("Error: reminder message must be one complete line");
++    time_t now = time(NULL);
++    if ((int64_t)now < 1735689600LL || (int64_t)now > 4102444800LL - seconds)
++        return strdup("Error: clock is not synchronized or reminder is outside supported time range");
++    int64_t epoch = (int64_t)now + seconds;
++#ifdef CONFIG_EXAMPLES_ZHAOXI
++    const char *chat = "zhaoxi";
++#else
++    const char *chat = msg->chat_id;
++#endif
++    cJSON *input = cJSON_CreateObject();
++    bool built = input && cJSON_AddStringToObject(input, "name", "remind") &&
++        cJSON_AddStringToObject(input, "schedule_type", "at") &&
++        cJSON_AddNumberToObject(input, "at_epoch", (double)epoch) &&
++        cJSON_AddStringToObject(input, "message", text) &&
++        cJSON_AddStringToObject(input, "channel", msg->channel) &&
++        cJSON_AddStringToObject(input, "chat_id", chat) &&
++        cJSON_AddBoolToObject(input, "delete_after_run", true);
++    char *json = built ? cJSON_PrintUnformatted(input) : NULL;
++    cJSON_Delete(input);
++    char *reply = calloc(1, 512);
++    cron_job_t *jobs = calloc(AGENT_CRON_MAX_JOBS, sizeof(*jobs));
++    if (!json || !reply || !jobs) {
++        free(json); free(reply); free(jobs);
++        return strdup("Error: insufficient memory; reminder not created");
++    }
++    int rc = tool_registry_execute("cron_add", json, reply, 512);
++    free(json);
++    if (rc != OK || strncmp(reply, "OK: Added one-shot job 'remind' ",
++                            strlen("OK: Added one-shot job 'remind' "))) {
++        free(jobs);
++        if (strncmp(reply, "Error:", 6))
++            snprintf(reply, 512, "Error: reminder save not confirmed; query existing reminders before retrying");
++        return reply;
++    }
++    const char *marker = strstr(reply, "(id=");
++    char id[9] = {0};
++    bool valid_id = marker && strlen(marker) >= 13 && marker[12] == ')';
++    for (int i = 0; valid_id && i < 8; i++) {
++        char ch = marker[4+i];
++        if (!((ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f') ||
++              (ch >= 'A' && ch <= 'F'))) valid_id = false;
++        else id[i] = ch;
++    }
++    int count = valid_id ? cron_list_jobs(jobs, AGENT_CRON_MAX_JOBS) : ERROR;
++    int matched = 0;
++    for (int i = 0; count >= 0 && i < count && i < AGENT_CRON_MAX_JOBS; i++)
++        if (!strcmp(jobs[i].id, id) && jobs[i].kind == CRON_KIND_AT &&
++            jobs[i].at_epoch == epoch && jobs[i].delete_after_run && jobs[i].enabled &&
++            !strcmp(jobs[i].message, text) && !strcmp(jobs[i].channel, msg->channel) &&
++            !strcmp(jobs[i].chat_id, chat)) matched++;
++    free(jobs);
++    if (count < 0 || count > AGENT_CRON_MAX_JOBS || matched != 1)
++        snprintf(reply, 512, "Error: reminder readback not confirmed; query existing reminders before retrying");
++    else snprintf(reply, 512, "好的，%u 秒后提醒你：%s", (unsigned)seconds, text);
+     return reply;
+ }
+ 
+--- a/src/tools/tool_cron.c
++++ b/src/tools/tool_cron.c
+@@ -193,6 +193,15 @@
+ 
+     if (chat_id) {
+         strncpy(job.chat_id, chat_id, sizeof(job.chat_id) - 1);
++    }
++
++    /* Never save a truncated model request and then confirm it as complete. */
++    if (strlen(name) >= sizeof(job.name) || strlen(message) >= sizeof(job.message) ||
++        (channel && strlen(channel) >= sizeof(job.channel)) ||
++        (chat_id && strlen(chat_id) >= sizeof(job.chat_id))) {
++        snprintf(output, output_size, "Error: name, message, channel or chat_id exceeds storage capacity; job not created");
++        cJSON_Delete(root);
++        return ERROR;
+     }
+ 
+     const char* action = cJSON_GetStringValue(

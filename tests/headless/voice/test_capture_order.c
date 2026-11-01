@@ -32,6 +32,8 @@ static int allow_bus, fail_asr;
 static atomic_int block_asr, asr_release;
 static atomic_int fake_followup_begin;
 static char last_chat_id[32];
+static char last_content[512];
+static const char *fake_batch_text="fixture_batch";
 static pthread_t auto_test_thread;
 
 static void reset_fixture(void)
@@ -46,6 +48,10 @@ static void reset_fixture(void)
     allow_bus=fail_asr=0;
     atomic_store(&block_asr,0);atomic_store(&asr_release,0);last_chat_id[0]=0;
     atomic_store(&fake_followup_begin,-1);
+    last_content[0]=0;fake_batch_text="fixture_batch";
+#ifdef CONFIG_ZHAOXI_BES_AUDIO
+    assert(voice_channel_auto_wake_set_enabled(false)==0);
+#endif
 }
 static void *test_malloc(size_t size)
 {
@@ -117,7 +123,7 @@ int voice_asr_recognize(const unsigned char *pcm, size_t size, char *out, size_t
   assert(pcm && size);atomic_fetch_add(&fake_asr_calls,1);
   while(atomic_load(&block_asr) && !atomic_load(&asr_release))usleep(1000);
   if(fail_asr)return -EIO;
-  snprintf(out,cap,"fixture_batch"); return 0;
+  snprintf(out,cap,"%s",fake_batch_text); return 0;
 }
 int volc_asr_register(void) { return 0; }
 int volc_tts_register(void) { return 0; }
@@ -129,6 +135,7 @@ int message_bus_push_inbound(const agent_msg_t *msg)
   assert(!strcmp(msg->channel,"voice") && !strncmp(msg->chat_id,"voice_auto_",11));
   assert(strlen(msg->chat_id)<sizeof(last_chat_id));
   memcpy(last_chat_id,msg->chat_id,strlen(msg->chat_id)+1);
+  snprintf(last_content,sizeof(last_content),"%s",msg->content);
   atomic_fetch_add(&fake_bus_messages,1);free(msg->content);return 0;
 }
 bool agent_shutdown_requested(void) { return atomic_load(&fake_shutdown)!=0; }

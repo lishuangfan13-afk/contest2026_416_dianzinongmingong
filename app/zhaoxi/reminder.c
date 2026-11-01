@@ -67,6 +67,54 @@ static int reminder_list(void)
     return 0;
 }
 
+int zhaoxi_reminder_create(unsigned delay, const char *text, const char *channel,
+                          struct zhaoxi_reminder_result *result, char **reply)
+{
+    if (!result || !reply) return -EINVAL;
+    memset(result, 0, sizeof(*result)); *reply = NULL;
+    if (!message_bus_is_ready()) return -ENOTCONN;
+    if (!delay || delay > 31536000 || !text || !*text || !channel ||
+        (strcmp(channel, "voice") && strcmp(channel, "cli"))) return -EINVAL;
+    cron_job_t job = {0};
+    size_t size = strlen(text);
+    if (size >= sizeof(job.message)) return -E2BIG;
+    for (size_t i = 0; i < size; i++)
+        if ((unsigned char)text[i] < 32 || (unsigned char)text[i] == 127) return -EINVAL;
+    time_t now = time(NULL);
+    if ((int64_t)now < 1735689600LL || (int64_t)now > 4102444800LL - delay) return -EINVAL;
+    char *answer = malloc(512);
+    cron_job_t *jobs = calloc(AGENT_CRON_MAX_JOBS, sizeof(*jobs));
+    if (!answer || !jobs) { free(answer); free(jobs); return -ENOMEM; }
+    strcpy(job.message, text); strcpy(job.name, "本地提醒");
+    strcpy(job.chat_id, "zhaoxi");
+    snprintf(job.channel, sizeof(job.channel), "%s", channel);
+    job.kind = CRON_KIND_AT;
+    job.at_epoch = (int64_t)now + delay;
+    job.delete_after_run = true;
+    int rc = cron_add_job(&job);
+    if (!rc) {
+        result->storage_uncertain = 1;
+        snprintf(result->id, sizeof(result->id), "%s", job.id);
+        result->at_epoch = job.at_epoch;
+        int count = cron_list_jobs(jobs, AGENT_CRON_MAX_JOBS);
+        int matched = 0;
+        for (int i = 0; count >= 0 && i < count && i < AGENT_CRON_MAX_JOBS; i++) {
+            if (!strcmp(jobs[i].id, job.id) && jobs[i].kind == CRON_KIND_AT &&
+                jobs[i].at_epoch == job.at_epoch && jobs[i].delete_after_run && jobs[i].enabled &&
+                !strcmp(jobs[i].channel, channel) && !strcmp(jobs[i].chat_id, "zhaoxi") &&
+                !strcmp(jobs[i].message, text)) matched++;
+        }
+        if (count < 0 || count > AGENT_CRON_MAX_JOBS || matched != 1) rc = -EIO;
+    }
+    if (!rc) {
+        result->verified = 1; result->storage_uncertain = 0;
+        snprintf(answer, 512, "已设置%u秒后的提醒：%s", delay, text);
+        *reply = answer;
+    } else free(answer);
+    free(jobs);
+    return rc;
+}
+
 int zhaoxi_reminder_command(int argc, char **argv, int at, const char *channel)
 {
     if (!message_bus_is_ready()) {
@@ -98,32 +146,25 @@ int zhaoxi_reminder_command(int argc, char **argv, int at, const char *channel)
         puts("提醒秒数需要在 1 至 31536000 之间。");
         return 1;
     }
-    time_t now = time(NULL);
-    if (now < 1735689600LL || (int64_t)now + delay > 4102444800LL) {
-        puts("系统时间尚未校准，未创建提醒。");
-        return 1;
-    }
-    cron_job_t job = {0};
+    char text[256] = "";
     size_t used = 0;
     for (int i = at + 3; i < argc; i++) {
         size_t n = strlen(argv[i]), separator = i > at + 3 ? 1 : 0;
-        if (!n || n + separator >= sizeof(job.message) - used) return 1;
+        if (!n || n + separator >= sizeof(text) - used) return 1;
         for (size_t j = 0; j < n; j++) if ((unsigned char)argv[i][j] < 32) return 1;
-        if (separator) job.message[used++] = ' ';
-        memcpy(job.message + used, argv[i], n + 1);
+        if (separator) text[used++] = ' ';
+        memcpy(text + used, argv[i], n + 1);
         used += n;
     }
-    strcpy(job.name, "本地提醒");
-    strcpy(job.chat_id, "zhaoxi");
-    snprintf(job.channel, sizeof(job.channel), "%s", channel);
-    job.kind = CRON_KIND_AT;
-    job.at_epoch = (int64_t)now + delay;
-    job.delete_after_run = true;
-    if (cron_add_job(&job) != 0) {
-        puts("提醒未创建，保存失败或任务容量已满。");
+    struct zhaoxi_reminder_result result;
+    char *reply = NULL;
+    int rc = zhaoxi_reminder_create((unsigned)delay, text, channel, &result, &reply);
+    free(reply);
+    if (rc) {
+        puts("提醒尚未确认保存，请检查时钟和存储，先查询再决定是否重试。");
         return 1;
     }
     printf("提醒已保存 id=%s at_epoch=%lld channel=%s 内容：%s\n",
-           job.id, (long long)job.at_epoch, job.channel, job.message);
+           result.id, (long long)result.at_epoch, channel, text);
     return 0;
 }

@@ -76,6 +76,19 @@ class AutomaticStatusTests(unittest.TestCase):
         text=display.message(self.display_state('等待说话',accepting_speech=True))
         self.assertIn('可以直接',text)
 
+    def test_wake_mode_explains_when_a_command_can_be_given(self):
+        display=AutoVoiceDisplay()
+        waiting=self.display_state('等待说话',accepting_speech=True,wake_enabled=True,awake=False)
+        self.assertIn('请先说“朝夕”',display.message(waiting))
+        awake=self.display_state('等待说话',accepting_speech=True,wake_enabled=True,awake=True)
+        self.assertIn('已唤醒',display.message(awake))
+        self.assertIsNone(display.message(awake))
+
+    def test_wake_disabled_retains_direct_conversation_prompt(self):
+        display=AutoVoiceDisplay()
+        direct=self.display_state('等待说话',accepting_speech=True,wake_enabled=False,awake=True)
+        self.assertIn('可以直接',display.message(direct))
+
     def test_busy_progress_is_sparse_and_does_not_suggest_more_speech(self):
         now=[0.0];display=AutoVoiceDisplay(clock=lambda:now[0])
         value=self.display_state('正在合成语音，暂停聆听',utterances=1)

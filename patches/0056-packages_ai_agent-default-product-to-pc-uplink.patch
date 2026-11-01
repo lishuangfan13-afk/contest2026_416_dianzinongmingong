@@ -1,0 +1,50 @@
+--- a/src/agent_main.c
++++ b/src/agent_main.c
+@@ -164,6 +164,15 @@
+     while (seconds-- && !g_shutdown_requested) sleep(1);
+     return !g_shutdown_requested;
+ }
++
++/* Product defaults to a PC-provided uplink. Read once per Agent instance:
++ * only an exact explicit "wifi" opts into potentially blocking BSP RPCs. */
++static bool headless_auto_wifi_enabled(void)
++{
++    char mode[16] = {0};
++    return claw_config_get("uplink_mode", mode, sizeof(mode)) == OK &&
++           strcmp(mode, "wifi") == 0;
++}
+ #endif
+ 
+ static void* network_watch_task(void* arg)
+@@ -172,14 +181,17 @@
+     syslog(LOG_INFO, "[%s] Network watcher started\n", TAG);
+ 
+ #ifdef CONFIG_EXAMPLES_ZHAOXI
+-    /* The AP shell is ready before the APC1 Wi-Fi endpoint. A failed
+-     * early ifup must not permanently disable automatic connection. */
+-    unsigned delay = 3;
++    const bool auto_wifi = headless_auto_wifi_enabled();
++    syslog(LOG_INFO, "[%s] Automatic uplink: %s (reload on Agent restart)\n",
++           TAG, auto_wifi ? "wifi" : "pc");
++    /* PC mode waits cooperatively for PPP or an already configured link.
++     * Explicit Wi-Fi mode retains the AP/APC1 startup retry behaviour. */
++    unsigned delay = auto_wifi ? 3 : 1;
+     while (!network_is_connected()) {
+         if (!headless_network_pause(delay)) return NULL;
+-        if (!network_is_connected() && network_wifi_reconnect() != OK)
++        if (auto_wifi && !network_is_connected() && network_wifi_reconnect() != OK)
+             syslog(LOG_WARNING, "[%s] WiFi unavailable; retry in 15 seconds\n", TAG);
+-        delay = 15;
++        delay = auto_wifi ? 15 : 1;
+     }
+     if (g_shutdown_requested) return NULL;
+ #else
+@@ -244,7 +256,7 @@
+      * Core Agent, cron and outbound tasks are already running and must
+      * never be started a second time during a wireless recovery. */
+     while (headless_network_pause(15)) {
+-        if (!network_is_connected()) network_wifi_reconnect();
++        if (auto_wifi && !network_is_connected()) network_wifi_reconnect();
+     }
+ #endif
+ 

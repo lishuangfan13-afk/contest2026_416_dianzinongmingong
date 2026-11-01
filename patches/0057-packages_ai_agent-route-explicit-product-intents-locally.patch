@@ -1,0 +1,61 @@
+--- a/src/core/agent_loop.c
++++ b/src/core/agent_loop.c
+@@ -942,6 +942,41 @@
+         push_final_reply(msg, strdup(error));
+     }
+ }
++
++#ifdef CONFIG_EXAMPLES_ZHAOXI
++/* Optional product fast path. The matcher is side-effect free; the app owns
++ * parsing/storage. Weak references keep the generic SDK independently usable. */
++extern const char *agent_product_local_match(const agent_msg_t *) __attribute__((weak));
++extern int agent_product_local_execute(const agent_msg_t *, char **) __attribute__((weak));
++
++static bool try_product_local_reply(const agent_msg_t *msg, char **reply)
++{
++    if (!agent_product_local_match || !agent_product_local_execute) return false;
++    const char *operation = agent_product_local_match(msg);
++    if (!operation) return false;
++    *reply = NULL;
++    if (automatic_voice_cancelled(msg)) return true;
++
++    agent_trace_t trace;
++    agent_trace_begin(&trace, msg->chat_id, msg->channel);
++    trace.backend_idx = -1;
++    struct timeval started, ended;
++    gettimeofday(&started, NULL);
++    int rc = agent_product_local_execute(msg, reply);
++    gettimeofday(&ended, NULL);
++    if (!*reply) {
++        *reply = strdup("本机操作未取得完整结果，请查询后再决定是否重试。");
++        rc = ERROR;
++    }
++    /* Trace latency is reserved for model time: this path made no LLM call. */
++    syslog(LOG_INFO, "[%s] Local operation=%s duration_ms=%u rc=%d\n",
++           TAG, operation, (unsigned)calc_elapsed_ms(&started, &ended), rc);
++    agent_trace_step(&trace, 0, operation, 0, rc == OK);
++    agent_trace_end(&trace, rc == OK ? AGENT_TRACE_OK : AGENT_TRACE_FAIL);
++    s_fast_path_count++;
++    return true;
++}
++#endif
+ 
+ /* ── ReAct tool-calling loop ──────────────────────────────── */
+ 
+@@ -1810,6 +1845,16 @@
+             }
+         }
+ 
++#ifdef CONFIG_EXAMPLES_ZHAOXI
++        /* A recognized local command never falls through to an LLM retry,
++         * including storage failures. Reuse history/outbound/voice lifecycle. */
++        if (!reply && try_product_local_reply(&msg, &reply)) {
++            dispatch_response(&msg, reply);
++            free(msg.content); free(msg.image_b64);
++            continue;
++        }
++#endif
++
+         /* NL fast path — after injection check, before LLM */
+         if (!reply) {
+             reply = handle_nl_fast_path(msg.content, msg.channel);

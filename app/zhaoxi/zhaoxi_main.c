@@ -7,16 +7,22 @@
 #include "agent_compat.h"
 #include "agent_config.h"
 #include "todo_store.h"
+#include "journal.h"
+#include "local_intent.h"
 
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #ifdef CONFIG_NETUTILS_PPPD
 #include "pc_link.h"
 #endif
 #ifdef CONFIG_ZHAOXI_BES_AUDIO
 #include "reminder.h"
+#include "drink.h"
+#include "notifications/feishu_notify.h"
+#include "infra/config_store.h"
 #include "dns_diag.h"
 #include "voice/audio_playback.h"
 #include "tools/tool_registry.h"
@@ -50,6 +56,9 @@ static int usage(void)
     puts("  zhaoxi listen start|stop");
 #ifdef CONFIG_ZHAOXI_BES_AUDIO
     puts("  zhaoxi auto start|stop|status （启动一次，自动收音与回答）");
+    puts("  zhaoxi auto wake on|off|status （ASR唤醒短语开关）");
+    puts("  zhaoxi [--text] drink start [分钟] | stop | status （默认60分钟）");
+    puts("  zhaoxi notify status | test <事件编号> | send <事件编号> <内容>");
 #endif
 #ifdef CONFIG_ZHAOXI_BES_AUDIO
     puts("  zhaoxi test-speaker   （两秒本机提示音，不需要网络）");
@@ -131,8 +140,90 @@ static int todo_command(int argc, char **argv, int at, const char *channel)
     return 0;
 }
 
+static int note_command(int argc, char **argv, int at, const char *channel)
+{
+    int start = at + 1;
+    const char *operation = "add";
+    if (start < argc && !strcmp(argv[start], "list") && start + 1 == argc)
+        operation = "list";
+    else if (start < argc && !strcmp(argv[start], "add")) start++;
+    char content[REQUEST_CAPACITY] = "";
+    if (!strcmp(operation, "add") && append_arguments(content, sizeof(content), argc, argv, start)) return 1;
+    int voice = !strcmp(channel, "voice");
+    if (voice && !message_bus_is_ready()) {
+        puts("Agent 尚未启动，未执行语音记事操作；可用 --text 本地管理。");
+        return 1;
+    }
+    time_t now = time(NULL);
+    char path[256] = "";
+    zhaoxi_note_path(now, path, sizeof(path));
+    struct zhaoxi_note_result result;
+    char *reply = NULL;
+    int rc = zhaoxi_note_execute(now, operation, content, &result, &reply);
+    printf("NOTE_RESULT op=%s rc=%d verified=%d uncertain=%d bytes=%zu path=%s\n",
+           operation, rc, result.verified, result.storage_uncertain, result.bytes, path);
+    const char *error = !strcmp(operation, "list") ? "备忘读取失败，请检查时钟和存储状态。" :
+        "未确认保存备忘；请先查询今日备忘，避免重复添加，并检查时钟、容量和存储状态。";
+    if (rc) {
+        puts(error);
+        if (voice) reply = strdup(error);
+        else return 1;
+    } else puts(reply);
+    if (voice && reply) {
+        agent_msg_t message = {0};
+        strcpy(message.channel, "voice"); strcpy(message.chat_id, "zhaoxi");
+        message.content = reply;
+        if (message_bus_push_outbound(&message)) {
+            message_bus_msg_free(&message);
+            puts("记事结果已在串口输出，但语音回复未提交；请用 --text 查询。");
+            return 1;
+        }
+    } else free(reply);
+    return rc ? 1 : 0;
+}
+
+#ifdef CONFIG_ZHAOXI_BES_AUDIO
+static int notify_command(int argc, char **argv, int at)
+{
+    if (at + 1 >= argc) return 1;
+    const char *op = argv[at + 1];
+    if (!strcmp(op, "status") && argc == at + 2) {
+        char value[512];
+        const char *keys[] = {"feishu_notify_enabled", "feishu_app_id",
+                              "feishu_app_secret", "feishu_notify_receive_id"};
+        int present[4] = {0};
+        for (int i = 0; i < 4; i++) {
+            memset(value, 0, sizeof(value));
+            present[i] = claw_config_get(keys[i], value, sizeof(value)) == 0 && value[0];
+            if (i == 0) present[i] = present[i] && (!strcmp(value, "1") || !strcmp(value, "true"));
+        }
+        printf("NOTIFY_CONFIG enabled=%d app_id_set=%d app_secret_set=%d target_set=%d\n",
+               present[0], present[1], present[2], present[3]);
+        memset(value, 0, sizeof(value));
+        return 0;
+    }
+    struct zhaoxi_feishu_receipt receipt = {0};
+    int rc;
+    if (!strcmp(op, "test") && argc == at + 3)
+        rc = zhaoxi_feishu_notify_test(argv[at + 2], &receipt);
+    else if (!strcmp(op, "send") && argc > at + 3) {
+        char text[REQUEST_CAPACITY] = "";
+        if (append_arguments(text, sizeof(text), argc, argv, at + 3)) return 1;
+        rc = zhaoxi_feishu_notify(text, argv[at + 2], &receipt);
+    } else return 1;
+    printf("NOTIFY_RESULT rc=%d phase=%d http=%d api=%d attempted=%d accepted=%d unknown=%d\n",
+           rc, receipt.phase, receipt.http_status, receipt.api_code,
+           receipt.send_attempted, receipt.accepted, receipt.delivery_unknown);
+    if (!rc && receipt.accepted) puts("飞书通知已发送。");
+    else if (receipt.delivery_unknown) puts("通知状态待确认；检查飞书消息后再决定是否重试。");
+    else puts("飞书通知未发送，请检查通知开关、凭据和固定目标配置。");
+    return rc || !receipt.accepted ? 1 : 0;
+}
+#endif
+
 int main(int argc, char **argv)
 {
+    zhaoxi_local_intent_link();
     char request[REQUEST_CAPACITY] = "";
     const char *prefix = "";
     const char *channel = "voice";
@@ -152,6 +243,18 @@ int main(int argc, char **argv)
 #endif
 #ifdef CONFIG_ZHAOXI_BES_AUDIO
     if (!strcmp(argv[at], "auto")) {
+        if (argc == 4 && !strcmp(argv[2], "wake")) {
+            if (!strcmp(argv[3], "status")) {
+                bool enabled = false, awake = false;
+                int rc = voice_channel_auto_wake_get_state(&enabled, &awake);
+                printf("WAKE_RESULT rc=%d enabled=%d awake=%d\n", rc, enabled, awake);
+                return rc ? 1 : 0;
+            }
+            if (strcmp(argv[3], "on") && strcmp(argv[3], "off")) return 1;
+            int rc = voice_channel_auto_wake_set_enabled(!strcmp(argv[3], "on"));
+            printf("WAKE_RESULT rc=%d enabled=%d\n", rc, !strcmp(argv[3], "on"));
+            return rc ? 1 : 0;
+        }
         if (argc != 3) return 1;
         if (!strcmp(argv[2], "start")) {
             if (!message_bus_is_ready()) return 1;
@@ -288,7 +391,11 @@ int main(int argc, char **argv)
         if (++at >= argc) return 1;
     }
     if (!strcmp(argv[at], "todo")) return todo_command(argc, argv, at, channel);
+    if (!strcmp(argv[at], "note")) return note_command(argc, argv, at, channel);
 #ifdef CONFIG_ZHAOXI_BES_AUDIO
+    if (!strcmp(argv[at], "notify")) return notify_command(argc, argv, at);
+    if (!strcmp(argv[at], "drink"))
+        return zhaoxi_drink_command(argc, argv, at, channel);
     if (!strcmp(argv[at], "remind") && at + 1 < argc &&
         (!strcmp(argv[at + 1], "in") || !strcmp(argv[at + 1], "list") ||
          !strcmp(argv[at + 1], "cancel"))) {
@@ -297,16 +404,17 @@ int main(int argc, char **argv)
 #endif
     if (!strcmp(argv[at], "ask")) {
         first_text = at + 1;
-    } else if (!strcmp(argv[at], "note")) {
-        prefix = "请使用智能记事本记录这条备忘，并在工具写入成功后确认：";
-        first_text = at + 1;
-        if (first_text < argc && !strcmp(argv[first_text], "list") && first_text + 1 == argc) {
-            prefix = "请使用智能记事本读取今天的真实备忘，简短回答。";
-            needs_text = 0;
-        } else if (first_text < argc && !strcmp(argv[first_text], "add")) {
-            first_text++;
-        }
     } else if (!strcmp(argv[at], "remind")) {
+#ifdef CONFIG_ZHAOXI_BES_AUDIO
+        char original[REQUEST_CAPACITY] = "";
+        struct zhaoxi_local_intent local;
+        if (!append_arguments(original, sizeof(original), argc, argv, at + 1) &&
+            zhaoxi_local_parse(original, &local) && local.kind == ZHAOXI_LOCAL_REMIND_IN) {
+            /* Keep the exact natural request for the Agent's local hook. */
+            first_text = at + 1;
+        } else
+#endif
+        {
         prefix = "请使用智能提醒设置提醒，先核对当前时间，只在创建成功后确认：";
         first_text = at + 1;
         if (first_text < argc && !strcmp(argv[first_text], "list") && first_text + 1 == argc) {
@@ -318,6 +426,7 @@ int main(int argc, char **argv)
             if (!id[0] || strlen(id) > 8 || strspn(id, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-") != strlen(id)) return 1;
             prefix = "请使用智能提醒核对并取消这个任务编号，只在 cron_remove 成功后确认：";
             first_text++;
+        }
         }
     } else {
         usage();
