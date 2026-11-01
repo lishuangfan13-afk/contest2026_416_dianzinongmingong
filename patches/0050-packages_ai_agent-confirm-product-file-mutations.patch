@@ -1,0 +1,228 @@
+--- a/src/core/agent_loop.c
++++ b/src/core/agent_loop.c
+@@ -1082,6 +1082,120 @@
+     return result;
+ }
+ 
++
++#ifdef CONFIG_EXAMPLES_ZHAOXI
++/* Side-effect confirmation belongs to this turn's tool evidence, not model
++ * prose, prior conversation or a cached success response. Classification uses
++ * explicit command prefixes; ordinary how-to/list questions remain Q&A. */
++typedef enum { PRODUCT_MUTATION_NONE, PRODUCT_MUTATION_NOTE,
++               PRODUCT_MUTATION_TODO } product_mutation_t;
++
++static product_mutation_t product_mutation_intent(const char *request)
++{
++    if (!request) return PRODUCT_MUTATION_NONE;
++    while (*request == ' ' || *request == '\t' || *request == '\n') request++;
++    static const char *todo[] = {
++        "请使用智能记事本添加待办", "请使用智能记事本读取待办，只完成指定编号",
++        "添加待办", "新增待办", "完成待办", "标记待办", "取消待办", "删除待办",
++        "帮我添加待办", "帮我新增待办", "帮我完成待办", "帮我删除待办",
++        "帮我加个待办", "加个待办", "添加一条待办", "添加一个待办",
++        "请添加待办", "请完成待办", "请删除待办", "add todo ", "add a todo ",
++        "complete todo ", "delete todo ", NULL
++    };
++    static const char *note[] = {
++        "请使用智能记事本记录这条备忘", "记一下", "记下", "记住", "记录一下", "记个事",
++        "帮我记", "请帮我记", "请记下", "请记录", "添加备忘", "新增备忘",
++        "帮我添加备忘", "add note ", "add a note ", "remember ", NULL
++    };
++    /* Exact numbered-completion grammar, not a keyword found inside a
++     * question such as "把编号3是什么解释一下". */
++    const char *numbered = "把编号";
++    if (!strncmp(request, numbered, strlen(numbered))) {
++        const char *end = request + strlen(numbered);
++        if (*end >= '1' && *end <= '9') {
++            int digits = 0;
++            while (*end >= '0' && *end <= '9') { end++; digits++; }
++            const char *actions[] = {"标完成", "标为完成", "标记为完成", NULL};
++            for (int i = 0; digits <= 4 && actions[i]; i++) {
++                size_t n = strlen(actions[i]);
++                if (strncmp(end, actions[i], n)) continue;
++                const char *tail = end + n;
++                while (*tail == ' ' || *tail == '\t') tail++;
++                if (!*tail || !strcmp(tail,"。") || !strcmp(tail,"吧") ||
++                    !strcmp(tail,"！")) return PRODUCT_MUTATION_TODO;
++            }
++        }
++    }
++    for (int i = 0; todo[i]; i++)
++        if (!strncasecmp(request, todo[i], strlen(todo[i]))) return PRODUCT_MUTATION_TODO;
++    for (int i = 0; note[i]; i++)
++        if (!strncasecmp(request, note[i], strlen(note[i]))) return PRODUCT_MUTATION_NOTE;
++    return PRODUCT_MUTATION_NONE;
++}
++
++static bool product_mutation_path(product_mutation_t kind, const char *path)
++{
++    if (!path || strstr(path, "..")) return false;
++    if (kind == PRODUCT_MUTATION_TODO)
++        return !strcmp(path, AGENT_DATA_DIR "/TASKS.md");
++    const char *prefix = AGENT_DATA_DIR "/memory/daily/";
++    size_t n = strlen(prefix);
++    if (kind != PRODUCT_MUTATION_NOTE || strncmp(path, prefix, n)) return false;
++    const char *name = path + n;
++    if (strlen(name) != 13 || name[4] != '-' || name[7] != '-' || strcmp(name+10, ".md")) return false;
++    for (int i = 0; i < 10; i++)
++        if (i != 4 && i != 7 && (name[i] < '0' || name[i] > '9')) return false;
++    return true;
++}
++
++static bool product_mutation_committed(const cJSON *messages, int first,
++                                       product_mutation_t kind)
++{
++    int count = cJSON_GetArraySize(messages);
++    for (int i = first; i < count; i++) {
++        const cJSON *assistant = cJSON_GetArrayItem(messages, i);
++        const char *role = cJSON_GetStringValue(cJSON_GetObjectItem(assistant, "role"));
++        if (!role || strcmp(role, "assistant")) continue;
++        const cJSON *calls = cJSON_GetObjectItem(assistant, "tool_calls");
++        for (int j = 0; j < cJSON_GetArraySize(calls); j++) {
++            const cJSON *call = cJSON_GetArrayItem(calls, j);
++            const cJSON *fn = cJSON_GetObjectItem(call, "function");
++            const char *name = cJSON_GetStringValue(cJSON_GetObjectItem(fn, "name"));
++            const char *input = cJSON_GetStringValue(cJSON_GetObjectItem(fn, "arguments"));
++            const char *id = cJSON_GetStringValue(cJSON_GetObjectItem(call, "id"));
++            if (!name || !input || !id || (strcmp(name,"write_file") && strcmp(name,"edit_file"))) continue;
++            cJSON *args = cJSON_Parse(input);
++            const char *path = cJSON_GetStringValue(cJSON_GetObjectItem(args, "path"));
++            bool matching = product_mutation_path(kind, path);
++            cJSON_Delete(args);
++            if (!matching) continue;
++            const char *success = !strcmp(name, "write_file") ? "OK: wrote " : "OK: edited ";
++            for (int k = i+1; k < count; k++) {
++                const cJSON *result = cJSON_GetArrayItem(messages, k);
++                const char *result_role = cJSON_GetStringValue(cJSON_GetObjectItem(result, "role"));
++                if (!result_role || strcmp(result_role, "tool")) break;
++                const char *result_id = cJSON_GetStringValue(cJSON_GetObjectItem(result, "tool_call_id"));
++                const char *content = cJSON_GetStringValue(cJSON_GetObjectItem(result, "content"));
++                if (result_role && !strcmp(result_role,"tool") && result_id && !strcmp(result_id,id) && content && !strncmp(content,success,strlen(success))) return true;
++            }
++        }
++    }
++    return false;
++}
++
++static void product_mutation_repair(cJSON *messages)
++{
++    cJSON *repair = cJSON_CreateObject();
++    cJSON_AddStringToObject(repair, "role", "user");
++    cJSON_AddStringToObject(repair, "content",
++        "本轮没有对应业务文件的成功写入或编辑结果，刚才的完成确认无效。"
++        "请继续调用工具，保留其他记录，实际保存后再确认；"
++        "若目标不存在、信息不清或工具失败，请明确说明未保存，不要声称成功。");
++    cJSON_AddItemToArray(messages, repair);
++}
++#define PRODUCT_MUTATION_UNCONFIRMED "本次操作没有取得成功保存的工具结果，尚未确认完成，请重试。"
++#endif
++
+ /* Run the ReAct tool-calling loop. Returns final_text (caller owns). */
+ static char* run_react_loop(const char* sys_prompt, cJSON* messages,
+     const char* tools_json, char* tool_output, size_t tool_size,
+@@ -1100,6 +1214,13 @@
+     name_repeat = 0;
+     int last_total_tokens = 0;
+     bool watchdog_fired = false;
++    bool cacheable = true;
++#ifdef CONFIG_EXAMPLES_ZHAOXI
++    product_mutation_t mutation = product_mutation_intent(msg->content);
++    int mutation_first = cJSON_GetArraySize(messages);
++    bool mutation_repair_sent = false;
++    cacheable = mutation == PRODUCT_MUTATION_NONE;
++#endif
+ 
+     /* Router: select and apply best backend before first LLM call.
+      * Estimate complexity from the last user message. */
+@@ -1119,7 +1240,7 @@
+     trace.backend_idx = router_idx;
+ 
+     /* Cache check: for simple queries, try cache before LLM call */
+-    if (msg->content && complexity == LLM_COMPLEXITY_SIMPLE) {
++    if (cacheable && msg->content && complexity == LLM_COMPLEXITY_SIMPLE) {
+         char* cached = llm_cache_get(msg->content, strlen(msg->content));
+         if (cached) {
+             syslog(LOG_INFO, "[%s] Cache hit, skipping LLM call\n", TAG);
+@@ -1225,6 +1346,22 @@
+             TAG, resp.text_len, resp.tool_use, resp.call_count);
+ 
+         if (!resp.tool_use) {
++#ifdef CONFIG_EXAMPLES_ZHAOXI
++            if (mutation != PRODUCT_MUTATION_NONE &&
++                !product_mutation_committed(messages, mutation_first, mutation)) {
++                agent_trace_step(&trace, iteration, NULL, latency_ms, 0);
++                if (!mutation_repair_sent) {
++                    add_assistant_message(messages, &resp);
++                    product_mutation_repair(messages);
++                    mutation_repair_sent = true;
++                    llm_response_free(&resp);
++                    continue;
++                }
++                llm_response_free(&resp);
++                final_text = strdup(PRODUCT_MUTATION_UNCONFIRMED);
++                break;
++            }
++#endif
+             /* Cascade routing: if AUTO profile selected a cheap backend
+              * for a SIMPLE query but the response looks inadequate,
+              * retry once with PREMIUM tier. */
+@@ -1421,6 +1558,18 @@
+         llm_response_free(&resp);
+     }
+ 
++#ifdef CONFIG_EXAMPLES_ZHAOXI
++    /* Exhaustion, duplicate exits and task-complete summaries must not bypass
++     * the same persistence requirement as the normal final-answer path. */
++    if (mutation != PRODUCT_MUTATION_NONE &&
++        !product_mutation_committed(messages, mutation_first, mutation)) {
++        free(final_text);
++        final_text = strdup(PRODUCT_MUTATION_UNCONFIRMED);
++        agent_trace_end(&trace, AGENT_TRACE_FAIL);
++        goto send_reply;
++    }
++#endif
++
+     /* Iteration limit reached — force a summary reply */
+     if (!final_text && iteration >= AGENT_AI_AGENT_MAX_TOOL_ITER) {
+         final_text = force_finish_reply(sys_prompt, messages);
+@@ -1435,7 +1584,7 @@
+ 
+ send_reply:
+     /* Cache store: save simple query responses for future reuse */
+-    if (final_text && msg->content
++    if (cacheable && final_text && msg->content
+         && complexity == LLM_COMPLEXITY_SIMPLE) {
+         llm_cache_put(msg->content, strlen(msg->content), final_text);
+         if (last_total_tokens > 0) {
+--- a/src/tools/tool_files.c
++++ b/src/tools/tool_files.c
+@@ -32,6 +32,7 @@
+ #include <limits.h>
+ #include <dirent.h>
+ #include <sys/stat.h>
++#include <unistd.h>
+ #include "cJSON.h"
+ 
+ static const char *TAG = "tool_files";
+@@ -319,9 +320,18 @@
+         free(result); cJSON_Delete(root);
+         return ERROR;
+     }
+-    fwrite(result, 1, total, f);
+-    fclose(f);
++    size_t written = fwrite(result, 1, total, f);
++    int save_failed = written != total;
++    if (fflush(f) != 0) save_failed = 1;
++    if (fsync(fileno(f)) != 0) save_failed = 1;
++    if (fclose(f) != 0) save_failed = 1;
+     free(result);
++    if (save_failed) {
++        snprintf(output, output_size,
++                 "Error: edited data could not be saved to %s", path);
++        cJSON_Delete(root);
++        return ERROR;
++    }
+ 
+     snprintf(output, output_size,
+              "OK: edited %s (replaced %d bytes with %d bytes)", path, (int)old_len, (int)new_len);

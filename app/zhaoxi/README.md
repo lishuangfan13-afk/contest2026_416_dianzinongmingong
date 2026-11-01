@@ -1,68 +1,97 @@
-# zhaoxi 无屏入口
+# zhaoxi 产品应用
 
-该应用将问答、备忘、待办和提醒请求交给原 AI Agent。默认回复通道为 voice，--text 改用 cli。文件与调度复用 SDK；BES 直连 PCM 和 MiMo 语音后端分别由 bes_audio.c、mimo_voice.c 实现，bes_clock.c 绑定实际 RTC。
+`app/zhaoxi` 是朝夕在 openvela 上的产品入口，提供问答、记事与待办、定时提醒，以及麦克风、喇叭和电脑供网的接入。应用以 flat 模式与 `packages/ai_agent` 共用地址空间，后台 Agent 负责模型、工具、调度和语音服务。
 
-## 接入要求
+## 模块分工
 
-- flat 构建，与 packages/ai_agent 同一地址空间。
-- AI Agent 应用当前完整 SDK 补丁序列，头文件来自 src 和 include，顺序见 patches/README.md。
-- manifest 把 app/zhaoxi 链接到 packages/zhaoxi。
-- 合并 configs/bes_headless.fragment，保持原音频服务配置。
+| 文件 | 作用 |
+| --- | --- |
+| [zhaoxi_main.c](zhaoxi_main.c) | 命令解析、业务路由、语音启停与状态查询 |
+| [todo_store.c](todo_store.c) | 本地待办添加、查询、精确完成与持久保存 |
+| [reminder.c](reminder.c) | 本机相对时间提醒、查询、取消和到期播报／提示音 |
+| [bes_audio.c](bes_audio.c) | 实际 BES PCM／DMA／DAC 录音与播放 |
+| [mimo_voice.c](mimo_voice.c)、[mimo_sse.c](mimo_sse.c) | MiMo ASR、增量 TTS、SSE 与 base64 音频解析 |
+| [bes_clock.c](bes_clock.c) | 板端 RTC 与时间接口 |
+| [pc_link.c](pc_link.c)、[pc_control.c](pc_control.c) | PPP 网络、控制命令、路由和 DNS 生命周期 |
+| [dns_diag.c](dns_diag.c) | DNS 信息、本机解析对照和网络诊断 |
 
-Agent 以 ai_agent --headless 后台运行时不读取 NSH 的 stdin。zhaoxi stop 仅请求原优雅停止流程；看到 Shutdown complete 后才能替换资产或重新启动。status 只报告消息总线能否接收请求，不代表网络、模型或语音服务健康。
+## 集成到工作区
 
-输入最多 511 个 UTF-8 字节，包含内部意图前缀；过长、缺参、控制字符和无效编号明确拒绝。队列提交失败时调用者释放消息。入队成功只报告请求已提交，业务成功由原工具结果确认。
+1. 将本目录链接为 openvela 工作区中的 `packages/zhaoxi`。
+2. 按 [补丁说明](../../patches/README.md) 应用完整 SDK 与相关仓库补丁。
+3. 使用 [无屏 defconfig](../../configs/bes_headless.defconfig)，保留匹配的 BES 音频与 BSP 配置。
+4. 完成业务资产和服务配置后，使用 `ai_agent --headless &` 启动后台 Agent。
 
-## 主机检查
+后台模式保留 NSH 供维护。通过电脑供网启动时，主机入口会编排旧实例退出、UTC 授时、PPP 与业务启动。日常操作见 [作品首页](../../README.md)，完整重建见 [构建与验收](../../docs/BES固件构建与验收.md)。
 
-在 Linux/WSL 中，准备已经应用当前完整 SDK 补丁序列的 AI Agent 源码：
+## 命令接口
+
+下面是板端 NSH 中的命令。PPP 运行期间，通过 `python tools/pc_link/control.py --cmd ...` 发送同样的参数，例如 `--cmd --text todo list`。
+
+| 命令 | 行为 |
+| --- | --- |
+| `zhaoxi [--text] ask <问题>` | 向 Agent 提交问答 |
+| `zhaoxi [--text] note [add] <内容>` | 记录当天备忘 |
+| `zhaoxi [--text] note list` | 查询当天备忘 |
+| `zhaoxi [--text] todo add <内容>` | 本地添加待办并返回编号 |
+| `zhaoxi [--text] todo list` | 本地查询未完成待办 |
+| `zhaoxi [--text] todo done <编号>` | 本地完成指定待办 |
+| `zhaoxi [--text] remind <时间与事项>` | 通过 Agent 理解并创建提醒 |
+| `zhaoxi [--text] remind in <秒数> <事项>` | 本机直接创建相对时间提醒 |
+| `zhaoxi [--text] remind list` | 查询提醒 |
+| `zhaoxi [--text] remind cancel <八位编号>` | 取消指定提醒并保存 |
+| `zhaoxi say <文本>` | 直接合成并播放文本 |
+| `zhaoxi test-speaker` | 播放两秒本机提示音 |
+| `zhaoxi auto start\|stop\|status` | 管理自动语音循环 |
+| `zhaoxi listen start\|stop` | 手动分段录音诊断 |
+| `zhaoxi status`、`zhaoxi stop` | 查询消息总线或请求停止 Agent |
+
+默认回复通道是 `voice`，`--text` 改为串口文字。模型类命令先入队，再由 Agent 返回业务结果；本地待办直接执行存储操作。合并后的业务请求上限为 511 个 UTF-8 字节，包含应用增加的意图前缀。
+
+## 本地待办
+
+待办文件为 `AGENT_DATA_DIR/TASKS.md`，当前根目录为 `/emmc/zhaoxi`。格式示例：
+
+```markdown
+- [ ] [1] 带学生证
+- [x] [2] 交作业
+```
+
+新增使用现有最大编号加一，范围 1～9999；查询只列未完成项；完成只修改指定编号的复选框。重复文本可以有不同编号，已完成历史和其他原文继续保留。文件上限为 64 KiB，重复编号、无编号待办或格式错误会返回错误，保留原文件供整理。
+
+同进程操作用互斥锁串行执行，保存采用临时文件、完整写入检查、刷新、`fsync`、关闭及重命名。`--text todo` 可在 Agent 未启动时使用；voice 入口先检查消息总线。保存成功而语音提交失败时，应用提示查询本地结果。
+
+## Agent 的执行确认
+
+0050 为明确的记事／待办修改请求检查本轮目标业务路径、工具调用 ID 与成功的 `write_file`／`edit_file` 结果。0051 对提醒创建／取消检查对应的 `cron_add`／`cron_remove` 成功结果。缺少结果时，Agent 纠正一次工具调用流程；仍未完成则回复未确认。查看与普通问答继续使用原流程。
+
+修改请求跳过回答缓存，避免复用之前的完成确认。`edit_file` 对短写、刷新、同步和关闭失败返回错误。完成回复对应实际工具执行，内容可通过文件和提醒查询入口回读。
+
+## 提醒与语音
+
+本机相对时间提醒支持 1～31536000 秒的整数，先检查时钟和存储，再调用实际 cron 服务。到期时通过语音通道播报；网络或合成失败时输出提醒文字并尝试两秒本机提示音。周期恢复由 0049 实现：无外部 action 的固定间隔任务跳过错过的周期，继续安排未来一次；未授时则等待时间恢复。
+
+TTS 使用 24 kHz PCM16LE 单声道，HTTPS 增量读取 SSE 后写入固定 64 KiB 队列，播放线程由 DMA 完成中断唤醒。ASR 在封句后上传整段音频。自动语音采用约 1.2 秒静音封句，识别与播报时暂停采集；当前连续交互仍在联调，日常默认关闭监听。
+
+## 检查入口
+
+在 Linux／WSL 中运行，路径替换为实际工作区：
 
 ```bash
-python3 tools/check_headless.py --agent-root /path/to/packages/ai_agent   --arm-prefix /path/to/arm-none-eabi-
+python3 tools/check_headless.py \
+  --agent-root /path/to/openvela/packages/ai_agent \
+  --arm-prefix /path/to/arm-none-eabi-
+
+python3 tests/headless/pc_link/check_mutation_guard.py \
+  --sdk /path/to/openvela/packages/ai_agent \
+  --cjson /path/to/openvela/apps/netutils/cjson/cJSON
+
+python3 tests/headless/check_cron_edges.py \
+  --sdk /path/to/openvela/packages/ai_agent \
+  --cjson /path/to/openvela/apps/netutils/cjson/cJSON
+
+python3 tests/headless/voice/check_bes_dma_irq.py \
+  --sdk /path/to/openvela/packages/ai_agent
 ```
 
-arm-prefix 是工具路径加前缀，如 /opt/toolchain/bin/arm-none-eabi-。主机用 ASan/UBSan 编译真实 message_bus.c，测试命令路由、拒绝路径、队列满，以及生产者/消费者与停止流程并发。原生 Skill 加载器另外验证核心配置筛选、旧扩展文件排除、已有部署文件保留、普通配置和摘要边界。语音和 shutdown 调用有明确的测试替身，只验证 API 错误传播与调用关系。
-
-ARM 步骤生成 Cortex-M55 对象，不能作为可烧录固件。只运行配置和资产静态检查可以省略 --agent-root。
-
-完整实烧镜像、构建脚本、固定 BSP 库校验值，以及工具层与联网业务验收的区别，见 [构建与验收](../../docs/BES固件构建与验收.md)。当前产品只允许 --headless 模式，禁止重复 Agent；退出时等待真实后台任务结束再释放共享状态。
-
-Windows 资产渲染与脚本语法检查：
-
-```powershell
-powershell -File tests/headless/test_assets.ps1
-```
-
-[功能与板上验收](../../docs/无屏核心功能.md) · [检查记录](../../docs/bringup_logs/20261030_headless_checks.json)
-
-## 不依赖模型的本机提醒
-
-R10 的 BES 配置可以从串口直接创建、查询和取消提醒，不调用 ASR 或模型：
-
-```text
-zhaoxi remind in 60 喝水
-zhaoxi remind list
-zhaoxi remind cancel <返回的八位编号>
-```
-
-秒数为 1 至 31536000 的整数。时钟未校准、保存失败或容量已满时不确认创建。`--text remind in ...` 到期输出串口文字；默认提醒在网络与语音可用时播报，否则尝试两秒本机提示音，同时输出提醒文字。提示音不代表已播报事项内容，播放器错误也会报告。调度器按最近的到期时间唤醒；队列拥堵时尚未投递的一次性任务保留重试。
-
-实板已验证创建、查询、单项取消、三秒提醒在五秒观察窗口内投递并移除。音频后端此前已有用户听感确认；新到期提示音路径的主观听音以单独记录为准。
-
-R10还实测了断网提醒到期后的真实DMA/DAC输出：两秒提示音写入全部完成，一次性任务移除。该次用户主观听音尚未确认，不将其等同于云端播报事项内容。
-
-## 流式语音与连续播放
-
-MiMo 产品播放入口增量接收 SSE，`mimo_sse.c` 负责有界解析和 PCM 样本对齐，固定队列分离网络接收与 DMA 播放。BES 后端使用完成中断唤醒等待线程。原批量合成接口继续保留；ASR 仍在本机封句后上传。实现、实板计时口径和当前听感边界见 [语音响应优化](../../docs/语音响应优化.md)。
-
-以下检查使用真实源码，网络、时钟和 DMA 由明确替身控制，不打开麦克风或串口：
-
-```bash
-python3 tests/headless/pc_link/check_tls_stream.py --sdk /path/to/packages/ai_agent
-python3 tests/headless/pc_link/check_mimo_fast_response.py --sdk /path/to/packages/ai_agent
-python3 tests/headless/voice/check_mimo_sse.py --workspace /path/to/openvela
-python3 tests/headless/voice/check_tts_queue.py --sdk /path/to/packages/ai_agent
-python3 tests/headless/voice/check_bes_dma_irq.py --sdk /path/to/packages/ai_agent
-```
-
-TLS 检查覆盖分片、限长、错误、读取时间片恢复及总截止；SSE 检查覆盖事件拆分、base64、半个样本跨事件、结束验证和取消；播放检查覆盖有界背压、错误清理、初始缓冲和 DMA 完成唤醒。它们与完整 AP 编译、实板测量及真人试听分别记录。
+消息总线、本地待办、文件执行确认、提醒恢复、SSE、PCM 队列与 DMA 各有实际源码回归。其余检查和当前 AP 镜像信息汇总在 [构建与验收](../../docs/BES固件构建与验收.md)。

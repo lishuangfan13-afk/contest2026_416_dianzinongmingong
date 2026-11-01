@@ -1,9 +1,12 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 #include "core/message_bus.h"
+#include "agent_config.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 int zhaoxi_main(int argc, char **argv);
 /* Explicit hardware test doubles: these do not verify real audio. */
@@ -33,8 +36,20 @@ static void expect(int argc, char **argv, const char *channel, const char *text)
     no_message();
 }
 
+static void expect_local_voice(int argc, char **argv, const char *text)
+{
+    assert(zhaoxi_main(argc, argv) == 0);
+    no_message(); /* Explicit TODO operations must never call the model. */
+    agent_msg_t reply = {0};
+    assert(message_bus_pop_outbound(&reply, 0) == 0);
+    assert(!strcmp(reply.channel, "voice") && strstr(reply.content, text));
+    message_bus_msg_free(&reply);
+}
+
 int main(void)
 {
+    mkdir(AGENT_DATA_DIR, 0700);
+    unlink(AGENT_DATA_DIR "/TASKS.md"); /* This executable's isolated test fixture. */
     char *ask[] = {"zhaoxi", "ask", "hello", "world"};
     assert(!message_bus_is_ready());
     char *shutdown[] = {"zhaoxi", "stop"};
@@ -67,11 +82,16 @@ int main(void)
     char *notes[] = {"zhaoxi", "note", "list"};
     expect(3, notes, "voice", "读取今天的真实备忘");
     char *add[] = {"zhaoxi", "todo", "add", "交作业"};
-    expect(4, add, "voice", "交作业");
+    expect_local_voice(4, add, "已添加待办 [1]：交作业");
     char *list[] = {"zhaoxi", "todo", "list"};
-    expect(3, list, "voice", "未完成待办");
-    char *done[] = {"zhaoxi", "todo", "done", "2"};
-    expect(4, done, "voice", "编号：2");
+    expect_local_voice(3, list, "[1] 交作业");
+    char *done[] = {"zhaoxi", "todo", "done", "1"};
+    expect_local_voice(4, done, "待办 [1] 已完成并保存");
+    char *local_text[] = {"zhaoxi", "--text", "todo", "add", "带水杯"};
+    assert(zhaoxi_main(5, local_text) == 0);no_message();
+    agent_msg_t no_speech = {0};
+    assert(message_bus_pop_outbound(&no_speech, 0) != 0);
+    expect_local_voice(3, list, "[2] 带水杯");
     char *remind[] = {"zhaoxi", "remind", "十分钟后提醒我交作业"};
     expect(3, remind, "voice", "十分钟后提醒我交作业");
     char *reminders[] = {"zhaoxi", "remind", "list"};
@@ -114,6 +134,7 @@ int main(void)
     assert(!message_bus_is_ready());
     assert(zhaoxi_main(4, ask) != 0);
     message_bus_destroy();
+    unlink(AGENT_DATA_DIR "/TASKS.md");
     assert(!message_bus_is_ready());
     puts("PASS: routes, UTF-8, validation, full queue, pre-init, shutdown and audio API error propagation.");
     return 0;

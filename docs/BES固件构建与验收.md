@@ -1,136 +1,145 @@
-# BES 无屏固件构建与实板验收
+# BES 固件构建、安装与检查
 
-本记录对应 2026 年 10 月 30 日至 11 月 1 日的单板集成，目标为问答、记事与待办、定时提醒。电脑供网已取得板端问答、文件业务、提醒和云端播报证据；两分钟真人自动对话完成三次回答，响应速度仍需优化。
+本页面向接手朝夕的软件维护者，说明当前 AP 镜像、完整工作区要求、源码集成、烧录与资产安装。日常体验从 [作品首页](../README.md) 和 [核心功能说明](无屏核心功能.md) 开始。
 
-## 当前电脑供网与流式语音版
+## 当前 AP 构建
 
-当前烧入镜像见 [AP 固件](../firmware/headless_pc_link/nuttx_ap_headless.bin) 和 [来源清单](../firmware/headless_pc_link/nuttx_ap_headless.manifest.json)：
+| 项目 | 配置 |
+| --- | --- |
+| 开发板 | BES2800BP EVB，板级目录 `vendor/bes/boards/best1700_ep/aos_evb` |
+| 产品配置 | `apheadless`，匹配 `apaudio3` BSP 库 |
+| 镜像 | [nuttx_ap_headless.bin](../firmware/headless_pc_link/nuttx_ap_headless.bin) |
+| 镜像大小 | 1,337,384 字节 |
+| AP 烧录地址 | `0x30190000` |
+| 持久数据目录 | `/emmc/zhaoxi` |
+| 来源与校验 | [固件 manifest](../firmware/headless_pc_link/nuttx_ap_headless.manifest.json) |
 
-```text
-大小：1329688 字节
-SHA256：4e22a19662433dca3acc301e380a68187efd2bf73d1cd3fc492fd090620d06f2
-烧录地址：0x30190000
-```
-
-此镜像包含电脑 PPP、任务内独立 TLS、文件工作流、中文报时及自动语音，并加入 0036/0037 的交互边界修复：1.2 秒静音封句、初次校准复用、可说话与收句短提示、超长及被提醒打断的整句拒绝、停止和迟到回复隔离、连续问答保留上下文、语音默认简短中文，以及合成与播放状态区分。开机默认不监听。
-
-32 项 SDK 补丁从官方固定提交顺序应用，与实际构建涉及的 23 个文件逐字节比较通过。TLS/SSE、PCM 队列、DMA 完成中断、模型参数与 PPP 实际源码回归，以及 Windows 主机 55 项回归通过。完整 AP 已编译、链接并通过软件复位下载，仅更新 AP。
-
-先前 `5e1bee6c…` 镜像实测两分钟真人自动对话：4 段中 3 段完成回答，1 段失败恢复。识别完成至开始播放分别约 4.7、13.0、30.1 秒；不能据此宣称新修复版的听感、延迟和识别率已经复测。见 [测量记录](bringup_logs/20261031_auto_voice.json)。
-
-本轮延迟复测只使用固定公共文本与一条文字模型问答，保持麦克风关闭。当前固定短句/长句首段播放为 2.795s / 2.354s。短句、长句及文字问答播报的队列欠载次数分别为 6、0、4；最终听感仍待用户在场确认。前后自动语音状态均为 disabled/running=false，采集帧数与 ASR 次数均为 0；供网会话正常退出，返回码为 0。完整数据、各中间镜像和计时边界见 [语音响应优化](语音响应优化.md) 与 [本轮记录](bringup_logs/20261101_voice_latency.json)。
-
-当前 TTS 已通过 SSE 增量接收和有界队列播放，ASR 仍在封句后批量上传。旧镜像的真人结果不移算到新镜像；完整语音业务验收标志保持 false。板载 Wi-Fi、个别旧实例退出等待、断电授时和最新版真人复测仍需分别处理。日常交互见 [语音交互收尾](语音交互收尾.md)，入口见 [使用说明](../tools/pc_link/README_zh-cn.md)。
-
-## R10 历史证据
-
-| 项目 | 实际结果 | 范围 |
-| --- | --- | --- |
-| 完整 AP 编译、链接、烧录 | 通过 | 运行版本 headless_r10，AP 地址 `0x30190000`；不改 APC1 或引导固件 |
-| 自动启动 | 通过 | 实板 `/etc/init.d/rcS` 含后台 Agent；保持 NSH 可用 |
-| 本机音频播放 | 通过 | 真实 DMA、内部 DAC；用户明确听到两秒提示音；不是主机替身 |
-| MiMo 文本、ASR、TTS 接口 | PC 侧 HTTP 200 | 文本返回、ASR 转写、24 kHz PCM16 均实测；尚未证明板端请求成功 |
-| 备忘持久化 | 工具层通过 | 真实注册工具写入、回读；固件更新和 RESET 后仍保留 |
-| 待办修改 | 工具层通过 | 独立验收目录中两项待办，仅第一项变为完成；另一项保留 |
-| 提醒创建、查询、取消 | 工具层通过 | 同时创建两项，编号不同；仅取消指定项 |
-| 实时调度 | 串口投递通过 | 短时提醒到期投递；已取消任务未触发；已触发的一次性任务从列表移除 |
-| RTC | 重启保留通过 | 实际 UTC epoch 与电脑时间一致；本地业务时间为 UTC+8 |
-| 网络 | 尚未稳定通过 | 曾对近距离手机热点完成关联、四次握手和 DHCP；后续关联失败，DNS/互联网未通过 |
-| 自然语言业务和到期语音 | 待验收 | 不把工具诊断入口、排队提示或“正在分析”算作最终成功 |
-
-实板验收使用全新的 `/emmc/zhaoxi/validation-*` 目录。没有覆盖正式待办；测试提醒按其唯一 ID 清理。公开证据见 [本轮实板记录](bringup_logs/20261030_headless_board.json)。
-
-## 历史 R10 镜像
-
-仓库交付 [nuttx_ap_headless.bin](../firmware/headless/nuttx_ap_headless.bin) 及同目录 manifest。它与此前实际烧入的 `nuttx_ap_headless_r10.bin` 字节一致：
+本轮已编译并烧入的 AP SHA256：
 
 ```text
-大小：1305328 字节
-SHA256：0ebb41634cd6ba1796de5064990cba93a9b7bed6dfc52462654779a063598300
-烧录地址：0x30190000
+0c915c384692083bff6b78a0d18f73b9d462b3a649ca49908a05a45928119704
 ```
 
-`headless_r10` 是本轮集成版本名，与历史“V5”宣传演示固件无关。镜像不携带用户 API key、Wi-Fi 凭据或录音。这些配置位于设备的 `/emmc/zhaoxi/config/config.json`，不提交 Git。
+镜像包含电脑 PPP、BES 实际音频、MiMo ASR／增量 TTS、本地待办、提醒调度和 0050／0051 业务执行确认。最新镜像的统一实物流程正在复测；当前演示以电脑供网、文字业务与语音播报为主，连续自动语音和板载 Wi-Fi 独立联网继续联调。
 
-## 构建输入
+## 工作区与固定依赖
 
-[完整配置](../configs/bes_headless.defconfig) 保存了实际成功编译所用配置；[来源清单](../configs/bes_headless.sources.json) 记录 NuttX、apps、SDK、FatFs 等依赖提交和 BSP 库 SHA256。
+本仓库提供产品应用、业务资产、配置和集成补丁。完整编译还需要 openvela 工作区、相应子仓库，以及与板级 ABI 匹配的 BES 预编译库。
 
-实际环境是 Linux/WSL、ARM GCC 13.4.0、CMake 3.22.1、Ninja 1.10.1。使用 `apaudio3` 的三份已匹配 BSP 库，新增配置目录名为 `apheadless`。不要把配置目录名与底层库 ABI 名称混用。
+| 组件 | 固定版本或要求 |
+| --- | --- |
+| NuttX | `76354c637858ecb0aa4601629327acb6f44a26bb` |
+| apps | `550cd3ba60a03f8ebf9ac7b72f6eed6aea3bedbe` |
+| AI Agent | `e65550f18759f086d7f544edcf17d1e31223244f` |
+| BSP | `apaudio3` 三个静态库，按来源清单核对 SHA256 |
+| FatFs | `6e433f195f15e0f5d8a3b170f53694b9c4dc6f4b`，完整展开到 NuttX 的 FatFs 子目录 |
+| 已使用工具 | ARM GCC 13.4.0、CMake 3.22.1、Ninja 1.10.1，Linux／WSL |
 
-本地 vendor 工作区包含未公开的历史提交。清单中的该提交不被宣称为可从公共远端直接获取；复现需要取得 SHA256 匹配的 BSP 库，并核对本地 vendor 修改。仅同步公共 manifest 尚不能证明得到同一固件。
+[来源清单](../configs/bes_headless.sources.json) 记录每个 BSP 库、FatFs 及其他依赖的路径和校验值。`vendor_bes_local_commit` 来自本地工作区，复现时需要按清单准备对应库和 vendor 修改；公开 vendor 基线与所用补丁见 [补丁说明](../patches/README.md)。
 
-工作区必须有实际 FatFs 子仓库 `nuttx/fs/fatfs/fatfs/source/ff.c`，版本见清单。设备 eMMC 是 exFAT；不能用内置 FAT 驱动挂载失败后格式化的方法处理。产品启动脚本不包含 `autoformat`。
+## 集成与完整构建
 
-## 源码集成与构建
+以下命令在本仓库根目录运行，`/path/to/openvela` 替换为完整工作区。
 
-1. 准备所列依赖，将本仓库 `app/zhaoxi` 链接为 `packages/zhaoxi`，移除旧的显示应用构建链接。
-2. 按 [补丁说明](../patches/README.md) 分别应用 SDK、vendor 与 NuttX 补丁；不要对整个补丁目录无条件排序应用。
-3. 确认 packages 根目录的 CMake/Kconfig/Make 入口能发现 `ai_agent` 和 `zhaoxi`。本地使用 `nuttx_add_subdirectory()`、`nuttx_generate_kconfig()`，Kconfig 包含两项应用；已有 packages 入口应合并，不能覆盖其他工程。
-4. 执行下面的完整构建命令。脚本会检查 BSP 库校验值、安装已验证配置、重载配置、触发 ROMFS 重新生成并检查封装内容，再输出 AP 镜像。
+1. 将 `app/zhaoxi` 链接为工作区的 `packages/zhaoxi`，让 packages 的 CMake／Kconfig 发现 `ai_agent` 和 `zhaoxi`。原圆屏 `zhaoxi_ui` 保存在 [legacy](../legacy/README.md)，当前构建使用新的无屏入口。
+2. 按 [补丁顺序](../patches/README.md) 分别更新 SDK、apps、vendor 与 NuttX。SDK 当前 36 项，apps 顺序为 `0025 → 0042 → 0046 → 0047`。
+3. 核对实际源码与完整补丁序列：
+
+   ```bash
+   python3 tools/check_agent_patches.py \
+     --pristine-agent /path/to/pristine-e65550f \
+     --patched-agent /path/to/openvela/packages/ai_agent
+
+   python3 tools/check_ppp.py --apps /path/to/openvela/apps
+   ```
+
+4. 执行完整 AP 构建与封装：
+
+   ```bash
+   python3 tools/build_bes_headless.py \
+     --workspace /path/to/openvela \
+     --output firmware/headless_pc_link
+   ```
+
+脚本检查 BSP 库和 FatFs，安装 [完整 defconfig](../configs/bes_headless.defconfig)，完成 `resetconfig`、CMake、编译和链接。随后检查生成的 ROMFS，确认后台入口为 `ai_agent --headless &`，持久挂载配置保留现有数据。
+
+封装阶段依据 ELF 中的 `pmu_open` 定位已验证的 NTC 指令，检查原值后应用产品调整，并核对 BES 尾部 AP 地址，生成 BIN 与 manifest。维护已有构建、只需重新封装时使用：
 
 ```bash
-python3 contest2026_416_dianzinongmingong/tools/build_bes_headless.py \
-  --workspace /path/to/openvela
+python3 tools/build_bes_headless.py \
+  --workspace /path/to/openvela \
+  --output firmware/headless_pc_link \
+  --stage-only
 ```
 
-已有构建只重新检查和封装：
+`--stage-only` 使用已经完成的构建。修改代码或配置后，先完成完整构建；修改 `.ap` 启动包含文件后要更新顶层启动文件，脚本已处理这一关系。`firmware/headless` 保留历史 R10，当前电脑供网镜像写入 `firmware/headless_pc_link`。
 
-```bash
-python3 contest2026_416_dianzinongmingong/tools/build_bes_headless.py \
-  --workspace /path/to/openvela --stage-only
-```
+## 烧录与安装
 
-脚本只构建和封装，不下载依赖、不自动应用补丁、不格式化、不烧录。NTC 补丁根据 ELF 中 `pmu_open` 定位，先检查原指令 `0xb955`，再改为 `0xe011`；保留 BES 包装尾部和 AP 地址。不能用旧工具直接 `objcopy` 重造并丢失包装元数据。
+### 1. 写入 AP
 
-修改 `rcS.ap` 或 `rc.sysinit.ap` 后必须触碰其顶层包含文件，保证 CMake 重新生成 ROMFS。已有构建更改 defconfig 后应执行 `resetconfig`；仅重新 configure 不能证明新配置已生效。这两项已在构建脚本中处理。
+准备厂商 `dldtool.exe` 和 `programmer1700_dual.bin`，选择双芯片模式，将封装后的 `nuttx_ap_headless.bin` 写到 AP 地址 `0x30190000`。使用当前正常的 USB2UART 与供电接法，引导同步期间按下载工具提示操作；正常系统也可通过软件重启进入下载流程。
 
-## 配置和资产
+本镜像更新 AP，APC1 与引导固件沿用板上已有版本。烧录前用 manifest 核对镜像大小、SHA256 和地址。厂商板级资料见 [aos_evb 开发说明](https://github.com/open-vela/vendor_bes/blob/dev-ai-contest-2026/boards/best1700_ep/aos_evb/README_zh-cn.md)。
 
-当前数据根目录是持久存储 `/emmc/zhaoxi`。固件只有确认它挂载为 FatFs 后才启动 Agent，避免把备忘或提醒误存到 tmpfs。更新资产前先执行：
+### 2. 部署业务资产
 
-```text
-zhaoxi stop
-```
-
-等待 `Shutdown complete` 后部署：
+先用 `python tools/pc_link/launch.py --stop` 正常结束电脑供网。串口回到 NSH 后，若后台助手仍在运行，执行 `zhaoxi stop` 并等到 `Shutdown complete`。关闭占用串口的终端，再在 PowerShell 部署：
 
 ```powershell
-pwsh -File tools/deploy_assets.ps1 -Port COM3 -Baud 921600 -BaseDir /emmc/zhaoxi
+powershell -File tools/deploy_assets.ps1 -Port COM3 -Baud 921600 -BaseDir /emmc/zhaoxi
 ```
 
-资产更新默认保留已有 `MEMORY.md` 和 `cron.json`，不清空用户记录。私密服务配置单独部署。之后运行一次 `ai_agent --headless &`；开机已启动时不要再启动第二份。
+部署内容为 SOUL、USER、MEMORY、空白 cron 模板和两个业务 Skill。脚本替换数据根目录并回读检查，已有 MEMORY 和 cron 保留；TASKS 与每日备忘由业务操作维护。
 
-MiMo 文本模型使用 `mimo-v2.6-flash`；语音使用 `mimo-v2.5-asr`、`mimo-v2.5-tts`，接口为 `https://token-plan-cn.xiaomimimo.com/v1/chat/completions`。本轮依据比赛授权使用用户提供的 Token Plan 凭据，已完成 PC 协议对照。当前产品 TTS 使用 SSE 增量接收、24kHz PCM16 单声道和固定 64KiB 播放队列；原批量接口继续保留。
+### 3. 配置服务并启动
 
-## 独立联网审计与后续实测
+服务凭据保存在板端 `/emmc/zhaoxi/config/config.json`，沿用 AI Agent 的运行时配置。准备可用的文本、ASR 和 TTS 服务账号后，配置 MiMo 文本模型与语音服务端点；产品适配使用 `mimo-v2.6-flash`、`mimo-v2.5-asr` 和 `mimo-v2.5-tts`。
 
-0020 修复 station 判定、IPv4 DNS 查询及 TCP 超时，0021 修复重复启动和后台任务关闭竞争。R7 实板验证：拒绝第二实例；停止后 ps 中 Agent 线程归零；重新启动正常；Pro 取得地址。云问答随后在 DNS 阶段失败，并在约 15 秒给出最终错误，未算成功问答。
+API key、Wi-Fi 密码和设备上的真实记录保留在本机或板子中，公开仓库使用干净的资产模板。已配置板子按 [Windows 入口说明](../tools/pc_link/README_zh-cn.md) 启动电脑供网，主机在建立业务前完成 UTC 授时。
 
-R8 仅增只读 MAC 对照：radio getter 与内核 getter 均 rc=0，六字节地址完全一致。PS255 已追到本地 APC1 库，明确为“使用默认配置”的哨兵值。已检查的网络结构 ABI、MAC 复制及 WPA2 参数未发现错误；闭源无线固件与空口数据通信仍不能据此保证无误。
+## 源码检查
 
-USB 重新插拔后观察到整板重新启动、时钟回到 1970。当前 RTC 的暖重启保留不等于完整断电保留，断电后必须重新授时；当前新提醒创建有未授时保护。未实现板端自动联网授时验收。
+当前 SDK 的 36 个补丁已从固定提交回放，并与实际工作区涉及的 23 个文件比较。Windows 主机已有 63 项回归，apps 有 5 组源码回归及补丁回放。
 
-R8 阶段重新验证了 15 秒延迟软件引导复位，下载约 11 秒完成，未需人工 RESET。当时配置优先手机热点；后续电脑供网结果见本文当前候选章节。
+| 检查入口 | 覆盖内容 |
+| --- | --- |
+| `tools/check_headless.py` | 产品命令、真实消息总线、本地待办、生命周期、Skill、持久化和 ARM 对象 |
+| `tests/headless/pc_link/check_mutation_guard.py` | 0050／0051 的本轮文件／提醒工具执行确认 |
+| `tests/headless/check_cron_edges.py` | 提醒参数、UTC、周期恢复、未授时等待和保存错误回滚 |
+| `tests/headless/voice/check_bes_dma_irq.py` | DMA 完成唤醒、取消、超时与旧信号边界 |
+| `tests/headless/voice/check_mimo_sse.py` | 实际 SSE、base64、PCM 分段与结束边界 |
+| `tests/headless/voice/check_tts_queue.py` | 有界播放队列、背压、停止与预缓冲 |
+| `tests/headless/pc_link/check_tls_stream.py` | HTTPS 分片、接收恢复与绝对截止时间 |
+| `tests/headless/pc_link/check_tls_write_diagnostics.py` | 请求完整写入、socket 状态与失败反馈 |
+| `tools/check_ppp.py` | 生命周期、批量接收、转义协商和整帧发送 |
 
-## 检查命令和边界
+主要运行方式：
 
 ```bash
-python3 tools/check_agent_patches.py \
-  --pristine-agent /path/to/pristine-e65550f \
-  --patched-agent /path/to/openvela/packages/ai_agent
-
 python3 tools/check_headless.py \
   --agent-root /path/to/openvela/packages/ai_agent \
   --arm-prefix /path/to/arm-none-eabi-
+
+python3 tests/headless/pc_link/check_mutation_guard.py \
+  --sdk /path/to/openvela/packages/ai_agent \
+  --cjson /path/to/openvela/apps/netutils/cjson/cJSON
+
+python3 tests/headless/check_cron_edges.py \
+  --sdk /path/to/openvela/packages/ai_agent \
+  --cjson /path/to/openvela/apps/netutils/cjson/cJSON
 ```
 
-SDK 补丁逐个应用到原始源码副本，并与实际构建源码逐文件比较通过。主机测试覆盖真实消息总线、40 次并发关闭/重建、核心 Skill 筛选及真实 cron 持久化；后者包括写满失败回滚、恢复副本、损坏文件拒绝和 `rand()` 恒零时编号仍唯一。ASan/UBSan 检查通过。Windows 资产检查使用 `tests/headless/test_assets.ps1`。
+Windows 主机检查：
 
-工具诊断入口 `zhaoxi --tool <name> /tmp/args.json` 调用真实工具注册表，用于读写与调度验收。它不经过 ASR 或 LLM。后续电脑供网阶段已有板端文字问答、自然语言文件业务、到期播报及一次语音时间回答证据；最新镜像的三项自然语言语音业务仍须在场验收。
+```powershell
+python tools/pc_link/test_transport.py
+python tools/pc_link/test_launcher.py
+powershell -File tests/headless/test_assets.ps1
+```
 
-## R10 DNS 与提醒增量
+## 实物检查与版本记录
 
-R10 已完整烧录。实板真实 resolver 的本机 A、CNAME+A、NXDOMAIN 对照通过；配置恢复及 Agent 重启通过。当前外部原始 DNS 查询在无IP条件下返回 ENETUNREACH，尚未接收到可用于解析的公网应答。历史有IP后的超时仍需重捕获，不把天线或解析器直接认定为唯一根因。详见 [DNS 解析审计](DNS解析审计.md) 及 [本轮证据](bringup_logs/20261031_dns_board.json)。
+交接时按 [交付清单](交付核对清单.md) 依次检查时间、问答、记录回读、待办精确完成和提醒到期／取消。前一 `f006b24e…` 镜像已完成文字问答、备忘、本地待办和本机提醒操作；当前 `0c915c38…` 加入自然语言提醒的工具确认，统一流程复测仍在进行。
 
-0022 修复已复现的 procfs属性查询重启，R9/R10实板验证通过。0023 增加本机提醒、提示音回退、拥堵保留及最近到期时间唤醒；真实三秒CLI提醒在五秒窗口内投递。0024 修复两项已复现的DNS TCP路径缺陷；本次小米UDP回复约150字节、不带TC，不将它们当成本次已证根因。全部自动检查与主观听音边界分别记录。
+[历史语音优化记录](语音响应优化.md) 保存 `4e22a196…` 等镜像的首声与队列测量，便于后续调优。当前维护重点为连续自动语音的响应和恢复，以及板载 Wi-Fi 独立联网。日常演示继续采用电脑供网方案。
