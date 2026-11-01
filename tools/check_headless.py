@@ -57,9 +57,14 @@ def main():
         obj = output / "zhaoxi_main.o"
         run([options.cc, *flags, *sanitizers, *include, "-Dmain=zhaoxi_main", "-c", str(source), "-o", str(obj)])
         executable = output / "test_commands"
-        run([options.cc, *flags, *sanitizers, *include, str(obj), str(agent / "src/core/message_bus.c"),
+        run([options.cc, *flags, *sanitizers, *include, str(obj), str(ROOT / "app/zhaoxi/todo_store.c"), str(agent / "src/core/message_bus.c"),
              str(ROOT / "tests/headless/test_commands.c"), "-pthread", "-o", str(executable)])
         report["commands"] = run([str(executable)]).strip().splitlines()[-1]
+        todo_test = output / "test_todo_store"
+        run([options.cc, *flags, *sanitizers, "-I" + str(ROOT / "app/zhaoxi"),
+             str(ROOT / "app/zhaoxi/todo_store.c"), str(ROOT / "tests/headless/test_todo_store.c"),
+             "-Wl,--wrap=fsync", "-Wl,--wrap=rename", "-Wl,--wrap=fwrite", "-pthread", "-o", str(todo_test)])
+        report["local_todo"] = run([str(todo_test)]).strip()
         shutdown_test = output / "test_bus_shutdown"
         run([options.cc, *flags, *sanitizers, *include, str(agent / "src/core/message_bus.c"),
              str(ROOT / "tests/headless/test_bus_shutdown.c"), "-pthread", "-o", str(shutdown_test)])

@@ -1,10 +1,19 @@
-# 朝夕集成补丁
+# 朝夕源码集成补丁
 
-当前完整无屏固件包含 SDK、BES 启动/挂载、NuttX 与 apps PPP 补丁。它们针对不同仓库，不能把整个目录无条件按数字顺序应用。
+本目录把朝夕的无屏业务、实际 BES 音频和电脑供网接入 openvela。补丁按目标仓库分组：先准备匹配基线，再在各自仓库按下列顺序应用。产品应用源码位于 [app/zhaoxi](../app/zhaoxi/README.md)，构建入口见 [构建与安装](../docs/BES固件构建与验收.md)。
 
-## SDK 固定基线与顺序
+## 目标仓库与基线
 
-基线：`open-vela/packages_ai_agent`，`e65550f18759f086d7f544edcf17d1e31223244f`。以下序列已逐个应用到原始源码副本，并与实际编译源码逐文件比较。0008 的结尾已按真实归档修正。
+| 目标 | 基线 | 当前补丁 |
+| --- | --- | --- |
+| `packages/ai_agent` | `e65550f18759f086d7f544edcf17d1e31223244f` | 下表中的 36 项，依次应用 |
+| `apps` | `550cd3ba60a03f8ebf9ac7b72f6eed6aea3bedbe` | `0025 → 0042 → 0046 → 0047` |
+| `nuttx` | `76354c637858ecb0aa4601629327acb6f44a26bb` | `0022 → 0024` |
+| `vendor/bes` | 公共基线 `36465377d944a575ce8a0c7ba45259f5c6c61ea8` | `0009 → 0016`，再核对匹配 BSP 与本地 vendor 修改 |
+
+BSP 库、FatFs 和依赖的准确路径、提交及 SHA256 见 [来源清单](../configs/bes_headless.sources.json)。其中 vendor 本地提交与预编译库需要按清单单独准备。
+
+## AI Agent 顺序
 
 | 顺序 | 作用 |
 | --- | --- |
@@ -34,14 +43,20 @@
 | 0036 | 1.2 秒封句、提示音、校准复用、超长整句与残句拒绝、停止与轮次隔离、真实语音阶段 |
 | 0037 | 入站和出站失败收束、取消轮次检查、连续语音共享上下文、语音简短中文回答 |
 | 0038 | HTTPS 正文有界增量接收，支持 TTS SSE 分片与截止、错误传播 |
-| 0039 | 固定 64KiB PCM 队列分离网络接收与 DMA 播放，保留原任务的连接所有权 |
+| 0039 | 固定 64 KiB PCM 队列分离网络接收与 DMA 播放，保留原任务的连接所有权 |
 | 0040 | 本产品官方 MiMo v2.6-flash 请求显式关闭深度思考，覆盖普通与工具入口 |
 | 0041 | 播放短碎片合并、首播预算与 EOF 冲刷，增加队列欠载和 DMA 时间统计 |
 | 0043 | NuttX PCM 消费线程显式使用 RR 优先级 110，及时处理 DMA 完成，保留属性与线程创建失败检查 |
 | 0044 | 流式 TLS 的接收超时切片、暂时无数据和中断可重试，仍遵守绝对响应截止时间 |
 | 0045 | 首播改为 30,720 字节或最多 640ms 的抖动缓冲，EOF 仍即时冲刷短音频 |
+| 0048 | TLS 请求完整写入与 socket 队列、状态诊断；不记录请求内容或凭据，TLS 接受字节不等于对端已确认 |
+| 0049 | 拒绝小数及溢出的提醒参数；产品普通周期提醒重启后跳过错过次数并继续；未授时等待、恢复保存失败回滚 |
+| 0050 | 产品明确记事／待办修改必须有本轮对应文件的成功写入证据，避免口头虚报与缓存复用；edit_file 保存失败传播 |
+| 0051 | 明确的自然语言提醒创建／取消也要求本轮 cron_add／cron_remove 成功证据；一次纠正仍无证据则不确认完成 |
 
-后续补丁依赖前面的源码状态，逐个 `git apply --check /path/to/patch` 后再 `git apply /path/to/patch`。不要把历史 0001～0007 无条件叠加到此基线。
+在 `packages/ai_agent` 中逐个执行 `git apply --check /path/to/patch`，检查成功后再执行 `git apply /path/to/patch`。完整顺序以 [check_agent_patches.py](../tools/check_agent_patches.py) 的 `SERIES` 为准。
+
+应用后在本仓库根目录核对实际源码：
 
 ```bash
 python3 tools/check_agent_patches.py \
@@ -49,47 +64,65 @@ python3 tools/check_agent_patches.py \
   --patched-agent /path/to/openvela/packages/ai_agent
 ```
 
-此检查使用临时副本，不修改原始基线。完整构建与固件封装见 [构建脚本](../tools/build_bes_headless.py)。
+检查使用临时副本回放完整序列，再比较实际工作区。当前 36 项补丁涉及的 23 个源码文件已完成回放比较。
 
-独立原始副本来自官方固定提交归档。当前 SDK 顺序与构建源码逐文件比较使用上面的检查脚本，当前 32 个 SDK 补丁、23 个源码文件已回放并与构建源码比较，结果在交付记录中报告。无屏命令、消息总线重建、worker 生命周期、Skill、cron 持久化和本机提醒均有主机回归；这些代码检查不代替实板录音与播报验收。
+0050／0051 把业务完成确认与本轮工具执行连接起来：文件修改匹配目标业务路径、调用 ID 和成功保存结果；提醒创建／取消匹配成功的 `cron_add`／`cron_remove`。修改请求跳过回答缓存，缺少结果时纠正一次，再返回实际状态。产品的本地 `todo add/list/done` 由 `todo_store.c` 直接执行，独立于 SDK 模型循环。
 
 ## apps PPP
 
-apps 基线为 `550cd3ba60a03f8ebf9ac7b72f6eed6aea3bedbe`。按 `0025 → 0042 → 0046 → 0047` 应用到 apps。0025 支持当前产品的电脑直连 PPP 生命周期；普通 modem 脚本路径保留原行为。电脑直连模式按单调时钟判断连续 63 秒没有有效接收，而非以短时间连续发送的帧数判定掉线。0042 为电脑直连模式增加每实例 512 字节接收缓冲，缓存剩余数据立即消费，减少串口系统调用；暂时无数据、可重试错误与真正错误保留不同处理。0046 仅在电脑直连模式协商 asyncmap 0，减少二进制串口上的额外转义；电脑网关同步支持该协商，普通 modem 仍使用原转义映射。
+按 `0025 → 0042 → 0046 → 0047` 应用。
 
-0047 在每个 PPP 实例内收齐转义后的完整帧，等待串口可用空间后以一次 `write` 提交，避免普通任务的日志写入插进帧内。原子边界针对遵守串口 `write` 锁的普通任务，中断级直接输出不在这一边界内。正数短写表示帧前缀已发出，立即失败并退出会话，不重发前缀或续写为另一条“原子”帧；等待仍有停止检查和单调时钟截止时间。普通 modem 路径继续使用原发送方式。
+| 补丁 | 作用 |
+| --- | --- |
+| 0025 | 电脑直连 PPP 生命周期、资源清理与按有效接收时间判断链路存活 |
+| 0042 | 每实例 512 字节串口接收缓冲，立即消费剩余数据，区分可重试与真实读取错误 |
+| 0046 | 电脑直连模式协商 asyncmap 0，减少额外转义，主机网关同步支持 |
+| 0047 | 收齐转义帧，等待串口空间后一次提交，限制普通日志与 PPP 帧交叉 |
 
-电脑端 `start.py` 与网关 TCP 两端同时启用 `TCP_NODELAY`，让短 PPP 控制帧与 ACK 及时提交。这项修改与 0047 一起使用；它们修复发送边界和小包等待，连续播放效果另以实板记录为准。
+0047 的发送边界对应遵守串口 `write` 锁的普通任务；中断级直接输出仍由底层驱动处理。正数短写后结束会话，避免重发已输出的帧前缀。等待发送空间时保留停止检查与单调时钟截止时间。
+
+普通 modem 使用原接收和发送路径。电脑的 [start.py](../tools/pc_link/start.py) 与 [gateway.py](../tools/pc_link/gateway.py) 两端启用 `TCP_NODELAY`，及时提交控制帧和 ACK；开发板固件与主机工具一起更新。
 
 ```bash
 python3 tools/check_ppp.py --apps /path/to/openvela/apps
 ```
 
-检查编译实际上游代码，覆盖短突发流量、有效接收续期、错误 CRC、失联超时、接收缓冲保真、转义协商、整帧发送与资源清理。当前 5 组 apps 源码回归与补丁回放通过。它是主机代码回归；实际联网、模型、持久文件与音频结果另见 [电脑网络共享](../docs/电脑网络共享.md)。
+该入口覆盖 5 组实际源码回归和补丁回放，包括生命周期、突发帧、接收缓存、转义协商、整帧发送与清理。
 
-## BES 启动与挂载
+## BES 启动与 NuttX
 
-公共源码基线：`open-vela/vendor_bes`，`36465377d944a575ce8a0c7ba45259f5c6c61ea8`。0009 负责产品后台启动；0016 负责产品不自动格式化持久存储。已有显示启动修改应先按实际差异撤下。
+0009 在启动脚本中后台运行产品 Agent，0016 使用真实持久挂载并保留现有存储。修改 `.ap` 启动包含文件后需更新顶层 `rcS`／`rc.sysinit`，让 CMake 重新封装 ROMFS；[构建脚本](../tools/build_bes_headless.py) 已包含该步骤。
 
-实际 BSP 库来自本地已匹配配置，SHA256 和本地非公开提交边界见 [来源清单](../configs/bes_headless.sources.json)。不能仅凭公共 manifest 宣称得到相同完整工作区。
-
-修改嵌套 `.ap` 启动文件后须触碰顶层 `rcS`/`rc.sysinit` 并检查封装 ROMFS；新构建脚本包含此操作。更改已有构建的 defconfig 后须 resetconfig。
-
-## 历史与验收
-
-0001～0003、0005、0007 保留历史时间、存储、DNS、daily 调度和模型适配的追溯用途，按各自基线核对。纯显示的 0004/0006 已转入 legacy，不属于当前序列。
-
-本轮 TTS 首声与连续性记录见 [语音响应优化](../docs/语音响应优化.md)。当前交付选择 `4e22a196…`，三个文字请求完成，但短句与模型回答仍有欠载，最终现场听感尚待确认。0041 的队列统计与代码回归不代替最终听感验收。BES 产品后端另将 DMA 完成轮询改为中断信号量唤醒，与 0043 一起显著减少播放等待的调度开销；这不表示网络抖动也已消除。开发板和 `tools/pc_link` 应一起更新；主机端移除了固定串口发送暂停，并及时转发小 ACK。
-
-API key、Wi-Fi 凭据及录音不进入补丁。当前电脑转发方案已有板端真实问答、备忘与待办文件回读和用户听清 TTS 的证据；完整真人录音、识别与业务链路仍在验证。各镜像结果见 [构建与验收](../docs/BES固件构建与验收.md) 和 [Wi-Fi 审计](../docs/WiFi固件审计.md)。
-
-## NuttX 修复
-
-基线为 `76354c637858ecb0aa4601629327acb6f44a26bb`。0022 补齐 rpmsg procfs 文件权限，避免属性查询调用空 stat 指针而重启。0024 修复 DNS TCP 分段收发指针推进和 UDP 截断回退时的 socket 泄漏。两项解析缺陷已复现，但不被认定为当前普通 UDP 查询失败的根因。
+NuttX 的 0022 补全 rpmsg procfs 的属性查询，0024 修复 DNS TCP 分段收发与截断回退的 socket 清理。
 
 ```bash
 python3 tools/check_nuttx_patches.py --nuttx-root /path/to/openvela/nuttx
 python3 tools/check_dns.py --nuttx-root /path/to/openvela/nuttx
 ```
 
-补丁使用 Git 原始 LF 格式；工作区若自动转换了源码换行，先在干净 checkout 核对。实板对照见 [DNS 解析审计](../docs/DNS解析审计.md)。
+## 产品检查入口
+
+```bash
+python3 tools/check_headless.py \
+  --agent-root /path/to/openvela/packages/ai_agent \
+  --arm-prefix /path/to/arm-none-eabi-
+
+python3 tests/headless/pc_link/check_tls_write_diagnostics.py \
+  --sdk /path/to/openvela/packages/ai_agent
+
+python3 tests/headless/check_cron_edges.py \
+  --sdk /path/to/openvela/packages/ai_agent \
+  --cjson /path/to/openvela/apps/netutils/cjson/cJSON
+
+python3 tests/headless/pc_link/check_mutation_guard.py \
+  --sdk /path/to/openvela/packages/ai_agent \
+  --cjson /path/to/openvela/apps/netutils/cjson/cJSON
+```
+
+这些入口分别检查产品命令与本地存储、TLS 写入诊断、提醒恢复和业务执行确认。当前镜像、实际安装和演示流程见 [构建与验收](../docs/BES固件构建与验收.md)。
+
+## 历史补丁
+
+0001～0003、0005、0007 留作早期模型、时间与存储实现的参考；0004、0006 的显示相关内容位于 [legacy](../legacy/README.md)。当前无屏构建使用上表中的完整序列。
+
+补丁采用 Git 原始 LF 格式。密钥和设备数据由运行时配置提供，源代码与资产模板保持可公开复用。

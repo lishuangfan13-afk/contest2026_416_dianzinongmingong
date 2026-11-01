@@ -245,6 +245,26 @@ def wait_for_agent_stop(port,initial,timeout=90,clock=time.monotonic,emit=print)
             next_progress=now+10
     return reply
 
+
+def synchronize_board_clock(command,wall_clock=None):
+    """Set the stopped board's UTC clock and require its explicit readback."""
+    # time.time is a UTC Unix epoch; a local timezone offset must not be added.
+    epoch=int((time.time if wall_clock is None else wall_clock)())
+    if not 1735689600<=epoch<=4102444800:
+        raise RuntimeError('电脑系统时间不在支持范围内，请先校准电脑时间。')
+    reply=command('zhaoxi --set-time '+str(epoch))
+    matches=re.findall(rb'(?:^|[\r\n])UTC clock set rc=(-?\d+) epoch=(\d+)(?=[\r\n]|$)',reply)
+    if len(matches)!=1:
+        raise RuntimeError('未收到开发板完整的授时回执，本次没有启动供网或自动语音。')
+    rc,actual=map(int,matches[0])
+    if rc!=0:
+        raise RuntimeError('开发板授时失败，返回码 '+str(rc)+'；本次没有启动供网或自动语音。')
+    if not epoch<=actual<=epoch+5:
+        raise RuntimeError('开发板授时回读与电脑 UTC 时间不符，本次没有启动供网或自动语音。')
+    return {'clock_sync_state':'confirmed','pc_utc_epoch':epoch,'board_utc_epoch':actual,
+            'clock_sync_error':None}
+
+
 def read_board_exit(port,initial,timeout=2,clock=time.monotonic):
     """Drain a split printf line without forwarding anything to the console."""
     data=bytearray(initial);before=len(data);end=clock()+timeout
@@ -318,7 +338,9 @@ def main():
              'last_gateway_data':None,'last_uart_data':None,'uart_write_pending':False}
     status={'phase':'starting','port':args.port,'ready':False,'forwarder_pid':os.getpid(),
             'auto_voice_requested':args.auto_voice,'board_finished_marker_seen':False,
-            'board_exit_rc':None,'board_exit_line_complete':False}
+            'board_exit_rc':None,'board_exit_line_complete':False,
+            'clock_sync_state':'not-started','pc_utc_epoch':None,'board_utc_epoch':None,
+            'clock_sync_error':None}
     status.update(automatic.result)
     def update():
         status['traffic']=traffic_snapshot(metrics)
@@ -356,7 +378,14 @@ def main():
             else:print('旧助手已确认完整停止。',flush=True)
         elif re.search(rb'\bai_agent(?:\s|$)',command('ps')):
             raise RuntimeError('旧助手总线未就绪，但主任务仍未退出；本次没有继续启动新会话。')
-        print('旧助手已退出，正在建立电脑供网，然后启动板上业务服务。',flush=True)
+        print('旧助手已退出，正在校准开发板时间；本次尚未启动供网或自动语音。',flush=True)
+        status.update(phase='synchronizing-time',clock_sync_state='syncing');update()
+        try:status.update(synchronize_board_clock(command))
+        except Exception as error:
+            status.update(clock_sync_state='failed',clock_sync_error=str(error));update()
+            raise
+        update()
+        print('开发板 UTC 时间校准已确认，正在建立电脑供网，然后启动板上业务服务。',flush=True)
         port.write(b'zhaoxi pc-link serve\n')
         receiver=threading.Thread(target=relay_inbound,args=(link,port,stop,errors,metrics,closing,console_done),daemon=True);receiver.start()
         print('PPP session starting; waiting for board readiness',flush=True)

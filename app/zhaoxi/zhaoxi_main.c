@@ -5,6 +5,8 @@
 #include "core/message_bus.h"
 #include "voice/voice_channel.h"
 #include "agent_compat.h"
+#include "agent_config.h"
+#include "todo_store.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -74,6 +76,58 @@ static int append_arguments(char *buffer, size_t capacity,
         memcpy(buffer + used, argv[i], length + 1);
         used += length;
     }
+    return 0;
+}
+
+static int todo_command(int argc, char **argv, int at, const char *channel)
+{
+    if (at + 1 >= argc) return 1;
+    const char *operation = argv[at + 1];
+    char content[REQUEST_CAPACITY] = "";
+    const char *argument = NULL;
+    if (!strcmp(operation, "add")) {
+        if (append_arguments(content, sizeof(content), argc, argv, at + 2)) return 1;
+        argument = content;
+    } else if (!strcmp(operation, "done") && at + 3 == argc) argument = argv[at + 2];
+    else if (strcmp(operation, "list") || at + 2 != argc) return 1;
+    if (!strcmp(channel, "voice") && !message_bus_is_ready()) {
+        puts("Agent 尚未启动，未执行语音待办操作；可用 --text 本地管理。");
+        return 1;
+    }
+    struct zhaoxi_todo_result result;
+    char *reply = NULL;
+    const char *path = AGENT_DATA_DIR "/TASKS.md";
+    int rc = zhaoxi_todo_execute(path, operation, argument, &result, &reply);
+    printf("TODO_RESULT op=%s rc=%d", operation, rc);
+    if (!rc && !strcmp(operation, "add")) printf(" id=%u", result.id);
+    if (!rc && !strcmp(operation, "done")) printf(" id=%u changed=%d", result.id, result.changed);
+    if (!rc && !strcmp(operation, "list")) printf(" count=%u", result.count);
+    printf(" path=%s\n", path);
+    if (rc) {
+        const char *error = !strcmp(operation, "list") ? "待办读取失败，未返回猜测内容。" :
+                            "待办操作未保存：请检查编号、文件格式、容量与存储状态。";
+        puts(error);
+        if (!strcmp(channel, "voice")) {
+            agent_msg_t message = {0};
+            strcpy(message.channel, "voice");
+            strcpy(message.chat_id, "zhaoxi");
+            message.content = strdup(error);
+            if (message.content && message_bus_push_outbound(&message)) message_bus_msg_free(&message);
+        }
+        return 1;
+    }
+    puts(reply);
+    if (!strcmp(channel, "voice")) {
+        agent_msg_t message = {0};
+        strcpy(message.channel, "voice");
+        strcpy(message.chat_id, "zhaoxi");
+        message.content = reply;
+        if (message_bus_push_outbound(&message)) {
+            message_bus_msg_free(&message);
+            puts("待办操作已完成，但语音回复未提交；请用 --text 查询结果。");
+            return 1;
+        }
+    } else free(reply);
     return 0;
 }
 
@@ -233,6 +287,7 @@ int main(int argc, char **argv)
         channel = "cli";
         if (++at >= argc) return 1;
     }
+    if (!strcmp(argv[at], "todo")) return todo_command(argc, argv, at, channel);
 #ifdef CONFIG_ZHAOXI_BES_AUDIO
     if (!strcmp(argv[at], "remind") && at + 1 < argc &&
         (!strcmp(argv[at + 1], "in") || !strcmp(argv[at + 1], "list") ||
@@ -263,25 +318,6 @@ int main(int argc, char **argv)
             if (!id[0] || strlen(id) > 8 || strspn(id, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-") != strlen(id)) return 1;
             prefix = "请使用智能提醒核对并取消这个任务编号，只在 cron_remove 成功后确认：";
             first_text++;
-        }
-    } else if (!strcmp(argv[at], "todo")) {
-        if (++at >= argc) return 1;
-        if (!strcmp(argv[at], "add")) {
-            prefix = "请使用智能记事本添加待办，保留其他记录：";
-            first_text = at + 1;
-        } else if (!strcmp(argv[at], "list") && at + 1 == argc) {
-            prefix = "请使用智能记事本读取并列出当前未完成待办，按编号简短回答。";
-            first_text = argc;
-            needs_text = 0;
-        } else if (!strcmp(argv[at], "done") && at + 2 == argc) {
-            char *end = NULL;
-            errno = 0;
-            unsigned long number = strtoul(argv[at + 1], &end, 10);
-            if (errno || !number || !end || *end || number > 9999 || argv[at + 1][0] == '-') return 1;
-            prefix = "请使用智能记事本读取待办，只完成指定编号并保留其他记录。编号：";
-            first_text = at + 1;
-        } else {
-            return 1;
         }
     } else {
         usage();

@@ -13,7 +13,7 @@ from pathlib import Path
 from unittest.mock import patch
 from types import SimpleNamespace
 
-from start import ControlHealth, UART_WRITE_CHUNK, drain_board_quit, main as start_main, open_gateway, read_available, relay_inbound, read_board_exit, traffic_snapshot, validate_board_exit, write_status
+from start import ControlHealth, UART_WRITE_CHUNK, drain_board_quit, main as start_main, open_gateway, read_available, relay_inbound, read_board_exit, synchronize_board_clock, traffic_snapshot, validate_board_exit, write_status
 from control import process_error, request
 from launch import read_status
 
@@ -288,6 +288,49 @@ class ControlTests(unittest.TestCase):
                 request({'action':'ping'})
 
 
+class ClockSyncTests(unittest.TestCase):
+    EPOCH=1793538000
+
+    def test_utc_epoch_is_sent_without_local_timezone_offset(self):
+        calls=[]
+        def command(text):
+            calls.append(text)
+            return ('UTC clock set rc=0 epoch='+str(self.EPOCH)+'\r\nap> \x1b[K').encode()
+        with patch.dict(os.environ,{'TZ':'Pacific/Honolulu'}),patch('start.time.time',return_value=self.EPOCH+.9):
+            result=synchronize_board_clock(command)
+        self.assertEqual(calls,['zhaoxi --set-time '+str(self.EPOCH)])
+        self.assertEqual(result['pc_utc_epoch'],self.EPOCH)
+        self.assertEqual(result['board_utc_epoch'],self.EPOCH)
+        self.assertEqual(result['clock_sync_state'],'confirmed')
+
+    def test_short_readback_delay_is_accepted(self):
+        result=synchronize_board_clock(lambda _:('UTC clock set rc=0 epoch='+str(self.EPOCH+2)+'\n').encode(),lambda:self.EPOCH)
+        self.assertEqual(result['board_utc_epoch'],self.EPOCH+2)
+
+    def test_echo_or_old_firmware_prompt_is_not_success(self):
+        for reply in [b'zhaoxi --set-time 1793538000\r\nap> \x1b[K',
+                      b'nsh: zhaoxi: command not found\n',
+                      b'echo UTC clock set rc=0 epoch=1793538000\n']:
+            with self.subTest(reply=reply),self.assertRaisesRegex(RuntimeError,'授时回执'):
+                synchronize_board_clock(lambda _:reply,lambda:self.EPOCH)
+
+    def test_failure_or_inconsistent_clock_is_rejected(self):
+        for rc,actual in [(-5,self.EPOCH),(0,self.EPOCH-1),(0,self.EPOCH+20)]:
+            with self.subTest(rc=rc,actual=actual),self.assertRaises(RuntimeError):
+                synchronize_board_clock(lambda _:f'UTC clock set rc={rc} epoch={actual}\n'.encode(),lambda:self.EPOCH)
+
+    def test_invalid_computer_clock_sends_no_board_command(self):
+        calls=[]
+        for epoch in [0,1735689599,4102444801]:
+            with self.subTest(epoch=epoch),self.assertRaisesRegex(RuntimeError,'电脑系统时间'):
+                synchronize_board_clock(lambda s:calls.append(s),lambda:epoch)
+        self.assertEqual(calls,[])
+
+    def test_timeout_is_not_treated_as_clock_confirmation(self):
+        def command(_):raise TimeoutError('NSH timeout')
+        with self.assertRaises(TimeoutError):synchronize_board_clock(command,lambda:self.EPOCH)
+
+
 class BoardExitTests(unittest.TestCase):
     def test_quit_keeps_relay_alive_until_board_exit_and_does_not_forward_to_console(self):
         requested=threading.Event();forwarded=threading.Event();calls=[];captured=[];errors=[]
@@ -417,11 +460,14 @@ class StartupCleanupTests(unittest.TestCase):
             def __init__(self):self.command=None;self.ppp=False;self.reads=0
             def open(self):pass
             def write(self,data):
-                if data==b'zhaoxi pc-link serve\n':self.ppp=True
+                if data==b'zhaoxi pc-link serve\n':self.ppp=True;operations.append('serve')
                 elif data.strip():self.command=data.strip()
                 return len(data)
             def read(self,_):
                 if self.command:
+                    if self.command.startswith(b'zhaoxi --set-time '):
+                        epoch=self.command.split()[-1];self.command=None;operations.append('clock-confirmed')
+                        return b'UTC clock set rc=0 epoch='+epoch+b'\nap> \x1b[K'
                     self.command=None;return b'not started\nap> \x1b[K'
                 if not self.ppp:return b''
                 self.reads+=1
@@ -455,7 +501,91 @@ class StartupCleanupTests(unittest.TestCase):
             self.assertEqual(status['board_exit_rc'],0)
             self.assertTrue(status['gateway_cleanup_confirmed'])
             self.assertLess(operations.index('board-quit'),operations.index('transport-close'))
+            self.assertLess(operations.index('clock-confirmed'),operations.index('serve'))
+            self.assertEqual(status['clock_sync_state'],'confirmed')
             self.assertFalse(status['accepting_speech'])
+
+    def test_clock_failure_closes_transport_and_never_starts_ppp_or_voice(self):
+        for mode in ['failed','echo','mismatch','timeout']:
+            with self.subTest(mode=mode):
+                operations=[]
+                class Port:
+                    def __init__(self):self.command=None
+                    def open(self):pass
+                    def write(self,data):
+                        operations.append(data)
+                        if data.strip():self.command=data.strip()
+                        return len(data)
+                    def read(self,_):
+                        if not self.command:return b''
+                        command=self.command;self.command=None
+                        if command.startswith(b'zhaoxi --set-time '):
+                            epoch=int(command.split()[-1])
+                            if mode=='timeout':raise TimeoutError('NSH timeout')
+                            if mode=='echo':return command+b'\nap> \x1b[K'
+                            if mode=='failed':return f'UTC clock set rc=-5 epoch={epoch}\nap> \x1b[K'.encode()
+                            return f'UTC clock set rc=0 epoch={epoch+30}\nap> \x1b[K'.encode()
+                        return b'not started\nap> \x1b[K'
+                    def close(self):operations.append('serial-close')
+                class Link:
+                    def shutdown(self,_):operations.append('transport-close')
+                    def close(self):operations.append('link-close')
+                class Gateway:
+                    def __init__(self):self.stdout=io.BytesIO(b'PPP_SERVER_READY\nPPP_SERVER_CLEANED\n')
+                    def wait(self,*args):return 0
+                with tempfile.TemporaryDirectory() as temp:
+                    with patch('sys.argv',['start.py','--auto-voice','--duration','60','--state-dir',temp]), \
+                         patch('start.serial.Serial',Port),patch('start.open_gateway',return_value=Link()), \
+                         patch('start.request') as request_mock,patch('start.subprocess.Popen',return_value=Gateway()), \
+                         patch('start.time.sleep'),contextlib.redirect_stdout(io.StringIO()):
+                        with self.assertRaises((RuntimeError,TimeoutError)):start_main()
+                    request_mock.assert_not_called()
+                    status=json.loads(next(Path(temp).glob('*/status.json')).read_text())
+                    self.assertEqual(status['phase'],'failed');self.assertFalse(status['ready'])
+                    self.assertEqual(status['clock_sync_state'],'failed')
+                    self.assertNotEqual(status['auto_voice_state'],'started')
+                    self.assertTrue(status['gateway_cleanup_confirmed'])
+                    self.assertFalse(next(Path(temp).glob('*')).joinpath('private.json').exists())
+                self.assertNotIn(b'zhaoxi pc-link serve\n',operations)
+                self.assertIn('serial-close',operations);self.assertIn('transport-close',operations)
+
+    def test_clock_sync_follows_confirmed_agent_shutdown(self):
+        operations=[]
+        class Port:
+            def __init__(self):self.command=None;self.stopped=False
+            def open(self):pass
+            def write(self,data):
+                if data.strip():self.command=data.strip()
+                return len(data)
+            def read(self,_):
+                if not self.command:return b''
+                command=self.command;self.command=None
+                if command==b'zhaoxi status':return 'Agent 消息总线已启动\nap> \x1b[K'.encode()
+                if command==b'zhaoxi stop':operations.append('stop-request');return b'Stopping\nap> \x1b[K'
+                if command.startswith(b'zhaoxi --set-time '):
+                    self.assert_stopped();operations.append('clock-request')
+                    return b'UTC clock set rc=-5 epoch='+command.split()[-1]+b'\nap> \x1b[K'
+                raise AssertionError('unexpected command')
+            def assert_stopped(self):
+                if not self.stopped:raise AssertionError('clock set before Agent exit')
+            def close(self):pass
+        port=Port()
+        def completed_shutdown(actual,reply):
+            self.assertIs(actual,port);port.stopped=True;operations.append('stop-confirmed')
+            return reply+b'\n[agent] Shutdown complete.\n'
+        class Link:
+            def shutdown(self,_):pass
+            def close(self):pass
+        class Gateway:
+            def __init__(self):self.stdout=io.BytesIO(b'PPP_SERVER_READY\nPPP_SERVER_CLEANED\n')
+            def wait(self,*args):return 0
+        with tempfile.TemporaryDirectory() as temp:
+            with patch('sys.argv',['start.py','--duration','60','--state-dir',temp]), \
+                 patch('start.serial.Serial',return_value=port),patch('start.wait_for_agent_stop',side_effect=completed_shutdown), \
+                 patch('start.open_gateway',return_value=Link()),patch('start.subprocess.Popen',return_value=Gateway()), \
+                 patch('start.time.sleep'),contextlib.redirect_stdout(io.StringIO()):
+                with self.assertRaisesRegex(RuntimeError,'授时失败'):start_main()
+        self.assertEqual(operations,['stop-request','stop-confirmed','clock-request'])
 
     def test_wsl_launch_failure_removes_private_token(self):
         with tempfile.TemporaryDirectory() as temp:

@@ -4,6 +4,7 @@ PROGNAME = zhaoxi
 PRIORITY = 100
 STACKSIZE = 32768
 MAINSRC = zhaoxi_main.c
+CSRCS += todo_store.c
 ifeq ($(CONFIG_ZHAOXI_BES_AUDIO),y)
 CSRCS += bes_audio.c bes_clock.c reminder.c dns_diag.c
 endif

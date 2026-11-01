@@ -1,0 +1,109 @@
+--- a/src/core/agent_loop.c
++++ b/src/core/agent_loop.c
+@@ -1088,12 +1088,38 @@
+  * prose, prior conversation or a cached success response. Classification uses
+  * explicit command prefixes; ordinary how-to/list questions remain Q&A. */
+ typedef enum { PRODUCT_MUTATION_NONE, PRODUCT_MUTATION_NOTE,
+-               PRODUCT_MUTATION_TODO } product_mutation_t;
++               PRODUCT_MUTATION_TODO, PRODUCT_MUTATION_CRON_ADD,
++               PRODUCT_MUTATION_CRON_REMOVE } product_mutation_t;
+ 
+ static product_mutation_t product_mutation_intent(const char *request)
+ {
+     if (!request) return PRODUCT_MUTATION_NONE;
+     while (*request == ' ' || *request == '\t' || *request == '\n') request++;
++    static const char *cancel_reminder[] = {
++        "请使用智能提醒核对并取消这个任务编号", "取消提醒", "删除提醒", "移除提醒",
++        "取消这个提醒", "取消那个提醒", "取消刚才的提醒", "取消刚才那个提醒",
++        "帮我取消提醒", "帮我取消这个提醒", "请取消提醒", "cancel reminder ", NULL
++    };
++    static const char *create_reminder[] = {
++        "请使用智能提醒设置提醒", "设置提醒", "创建提醒", "添加提醒", "新增提醒",
++        "帮我设置提醒", "帮我创建提醒", "请设置提醒", "提醒我", "请提醒我",
++        "帮我提醒", "remind me ", "set reminder ", "create reminder ", NULL
++    };
++    for (int i = 0; cancel_reminder[i]; i++)
++        if (!strncasecmp(request,cancel_reminder[i],strlen(cancel_reminder[i]))) return PRODUCT_MUTATION_CRON_REMOVE;
++    for (int i = 0; create_reminder[i]; i++)
++        if (!strncasecmp(request,create_reminder[i],strlen(create_reminder[i]))) return PRODUCT_MUTATION_CRON_ADD;
++    /* Scheduled imperatives start with a time expression. A generic question
++     * mentioning reminders, including "什么时候提醒我", is not a mutation. */
++    const char *when = request;
++    if (!strncmp(when,"请在",strlen("请在"))) when += strlen("请在");
++    else if (!strncmp(when,"在",strlen("在"))) when += strlen("在");
++    bool time_start = *when >= '0' && *when <= '9';
++    const char *time_words[] = {"一", "二", "三", "四", "五", "六", "七", "八", "九", "十", "半",
++        "今天", "明天", "后天", "今晚", "下周", NULL};
++    for (int i = 0; time_words[i] && !time_start; i++)
++        time_start = !strncmp(when,time_words[i],strlen(time_words[i]));
++    if (time_start && strstr(when,"提醒我")) return PRODUCT_MUTATION_CRON_ADD;
+     static const char *todo[] = {
+         "请使用智能记事本添加待办", "请使用智能记事本读取待办，只完成指定编号",
+         "添加待办", "新增待办", "完成待办", "标记待办", "取消待办", "删除待办",
+@@ -1163,13 +1189,23 @@
+             const char *name = cJSON_GetStringValue(cJSON_GetObjectItem(fn, "name"));
+             const char *input = cJSON_GetStringValue(cJSON_GetObjectItem(fn, "arguments"));
+             const char *id = cJSON_GetStringValue(cJSON_GetObjectItem(call, "id"));
+-            if (!name || !input || !id || (strcmp(name,"write_file") && strcmp(name,"edit_file"))) continue;
+-            cJSON *args = cJSON_Parse(input);
+-            const char *path = cJSON_GetStringValue(cJSON_GetObjectItem(args, "path"));
+-            bool matching = product_mutation_path(kind, path);
+-            cJSON_Delete(args);
+-            if (!matching) continue;
+-            const char *success = !strcmp(name, "write_file") ? "OK: wrote " : "OK: edited ";
++            if (!name || !input || !id) continue;
++            const char *success = NULL;
++            if (kind == PRODUCT_MUTATION_CRON_ADD) {
++                if (strcmp(name,"cron_add")) continue;
++                success = "OK: Added ";
++            } else if (kind == PRODUCT_MUTATION_CRON_REMOVE) {
++                if (strcmp(name,"cron_remove")) continue;
++                success = "OK: Removed cron job ";
++            } else {
++                if (strcmp(name,"write_file") && strcmp(name,"edit_file")) continue;
++                cJSON *args = cJSON_Parse(input);
++                const char *path = cJSON_GetStringValue(cJSON_GetObjectItem(args, "path"));
++                bool matching = product_mutation_path(kind, path);
++                cJSON_Delete(args);
++                if (!matching) continue;
++                success = !strcmp(name,"write_file") ? "OK: wrote " : "OK: edited ";
++            }
+             for (int k = i+1; k < count; k++) {
+                 const cJSON *result = cJSON_GetArrayItem(messages, k);
+                 const char *result_role = cJSON_GetStringValue(cJSON_GetObjectItem(result, "role"));
+@@ -1183,14 +1219,23 @@
+     return false;
+ }
+ 
+-static void product_mutation_repair(cJSON *messages)
++static void product_mutation_repair(cJSON *messages, product_mutation_t kind)
+ {
+     cJSON *repair = cJSON_CreateObject();
+     cJSON_AddStringToObject(repair, "role", "user");
+-    cJSON_AddStringToObject(repair, "content",
++    const char *instruction;
++    if (kind == PRODUCT_MUTATION_CRON_ADD) instruction =
++        "本轮没有cron_add成功结果，刚才的提醒设置确认无效。请先核对当前时间，"
++        "实际调用cron_add创建用户要求的提醒，只有成功后才确认。"
++        "若信息不清或工具失败，请明确说明未设置，不要声称成功。";
++    else if (kind == PRODUCT_MUTATION_CRON_REMOVE) instruction =
++        "本轮没有cron_remove成功结果，刚才的取消确认无效。请用cron_list核对目标，"
++        "调用cron_remove，仅在实际成功后确认。不要任意取消其他任务；失败时明确说明未取消。";
++    else instruction =
+         "本轮没有对应业务文件的成功写入或编辑结果，刚才的完成确认无效。"
+         "请继续调用工具，保留其他记录，实际保存后再确认；"
+-        "若目标不存在、信息不清或工具失败，请明确说明未保存，不要声称成功。");
++        "若目标不存在、信息不清或工具失败，请明确说明未保存，不要声称成功。";
++    cJSON_AddStringToObject(repair, "content", instruction);
+     cJSON_AddItemToArray(messages, repair);
+ }
+ #define PRODUCT_MUTATION_UNCONFIRMED "本次操作没有取得成功保存的工具结果，尚未确认完成，请重试。"
+@@ -1352,7 +1397,7 @@
+                 agent_trace_step(&trace, iteration, NULL, latency_ms, 0);
+                 if (!mutation_repair_sent) {
+                     add_assistant_message(messages, &resp);
+-                    product_mutation_repair(messages);
++                    product_mutation_repair(messages, mutation);
+                     mutation_repair_sent = true;
+                     llm_response_free(&resp);
+                     continue;

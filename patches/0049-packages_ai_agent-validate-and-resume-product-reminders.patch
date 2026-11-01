@@ -1,0 +1,236 @@
+--- a/src/infra/cron_service.c
++++ b/src/infra/cron_service.c
+@@ -46,6 +46,7 @@
+ static bool cron_fire_job(cron_job_t* job, time_t now);
+ static void cron_process_due_jobs(void);
+ static void compute_initial_next_run(cron_job_t* job);
++static int cron_prepare_start_locked(time_t now);
+ static void* cron_task_main(void* arg);
+ 
+ /* -- Private Data ------------------------------------------------ */
+@@ -53,6 +54,11 @@
+ static cron_job_t s_jobs[MAX_CRON_JOBS];
+ static int s_job_count;
+ static volatile bool s_cron_running;
++#ifdef CONFIG_EXAMPLES_ZHAOXI
++/* A cold boot may start at 1970. Keep persisted jobs untouched until the
++ * normal host/RTC time-setting path has established a usable wall clock. */
++static bool s_waiting_for_clock;
++#endif
+ static pthread_mutex_t s_cron_lock = PTHREAD_MUTEX_INITIALIZER;
+ static pthread_cond_t s_cron_wake = PTHREAD_COND_INITIALIZER;
+ 
+@@ -423,6 +429,20 @@
+         return;
+     }
+ #endif
++#ifdef CONFIG_EXAMPLES_ZHAOXI
++    if (now < 1735689600LL) {
++        s_waiting_for_clock = true;
++        pthread_mutex_unlock(&s_cron_lock);
++        return;
++    }
++    if (s_waiting_for_clock) {
++        if (cron_prepare_start_locked(now) != OK) {
++            pthread_mutex_unlock(&s_cron_lock);
++            return;
++        }
++        s_waiting_for_clock = false;
++    }
++#endif
+ 
+     for (int i = 0; i < s_job_count; i++) {
+         cron_job_t* job = &s_jobs[i];
+@@ -518,6 +538,84 @@
+     }
+ }
+ 
++/* Caller holds s_cron_lock. Only schedule fields change here, so a small
++ * snapshot can roll them back if the new persistent schedule cannot be saved. */
++static int cron_prepare_start_locked(time_t now)
++{
++    struct { bool enabled; int64_t next_run; } previous[MAX_CRON_JOBS];
++    bool changed = false;
++    for (int i = 0; i < s_job_count; i++) {
++        previous[i].enabled = s_jobs[i].enabled;
++        previous[i].next_run = s_jobs[i].next_run;
++    }
++
++    for (int i = 0; i < s_job_count; i++) {
++        cron_job_t *job = &s_jobs[i];
++        if (!job->enabled) continue;
++#ifdef CONFIG_EXAMPLES_ZHAOXI
++        if (job->kind == CRON_KIND_EVERY && !job->action[0]) {
++            /* A plain recurring reminder remains recurring after downtime.
++             * Skip missed ticks while preserving its original phase, without
++             * replaying a backlog or overflowing signed epoch arithmetic. */
++            uint64_t interval = job->interval_s;
++            if (!interval) {
++                job->enabled = false;
++                job->next_run = 0;
++            } else if (job->next_run <= 0) {
++                if ((int64_t)now > INT64_MAX - (int64_t)interval) {
++                    job->enabled = false;
++                    job->next_run = 0;
++                } else {
++                    job->next_run = (int64_t)now + (int64_t)interval;
++                }
++            } else if (job->next_run <= (int64_t)now) {
++                uint64_t ticks = ((uint64_t)now - (uint64_t)job->next_run) /
++                                     interval + 1;
++                uint64_t room = (uint64_t)(INT64_MAX - job->next_run) / interval;
++                if (ticks > room) {
++                    job->enabled = false;
++                    job->next_run = 0;
++                } else {
++                    job->next_run += (int64_t)(ticks * interval);
++                }
++            }
++            continue;
++        }
++#endif
++        /* Preserve the pre-existing policy for overdue one-shots and action
++         * jobs; restarting must not rerun an already missed external action. */
++        if (job->next_run > 0 && job->next_run <= (int64_t)now) {
++            job->enabled = false;
++            job->next_run = 0;
++            continue;
++        }
++        if (job->next_run <= 0) {
++            if (job->kind == CRON_KIND_EVERY) {
++                if ((int64_t)now > INT64_MAX - (int64_t)job->interval_s) {
++                    job->enabled = false;
++                } else {
++                    job->next_run = (int64_t)now + job->interval_s;
++                }
++            } else if (job->kind == CRON_KIND_AT && job->at_epoch > now) {
++                job->next_run = job->at_epoch;
++            }
++        }
++    }
++    for (int i = 0; i < s_job_count; i++) {
++        if (s_jobs[i].enabled != previous[i].enabled ||
++            s_jobs[i].next_run != previous[i].next_run) changed = true;
++    }
++    if (changed && cron_save_jobs() != OK) {
++        for (int i = 0; i < s_job_count; i++) {
++            s_jobs[i].enabled = previous[i].enabled;
++            s_jobs[i].next_run = previous[i].next_run;
++        }
++        syslog(LOG_ERR, "[%s] Cannot persist resumed schedule; start deferred\n", TAG);
++        return ERROR;
++    }
++    return OK;
++}
++
+ /* -- Public Functions -------------------------------------------- */
+ 
+ int cron_service_init(void) { return cron_load_jobs(); }
+@@ -533,40 +631,15 @@
+     }
+ 
+     time_t now = time(NULL);
+-    bool changed = false;
+-
+-    for (int i = 0; i < s_job_count; i++) {
+-        cron_job_t* job = &s_jobs[i];
+-
+-        if (!job->enabled) {
+-            continue;
+-        }
+-
+-        /* Stale job: next_run already set but in the past.
+-         * interval_s is relative to the previous action completion
+-         * (e.g. music playback end), so rescheduling to now+interval
+-         * would produce wrong timing.  Disable instead. */
+-        if (job->next_run > 0 && job->next_run <= now) {
+-            syslog(LOG_WARNING,
+-                "[%s] disabling stale job: %s (next_run %lld <= now %lld)\n",
+-                TAG, job->name, (long long)job->next_run, (long long)now);
+-            job->enabled = false;
+-            job->next_run = 0;
+-            changed = true;
+-            continue;
+-        }
+-
+-        if (job->next_run <= 0) {
+-            if (job->kind == CRON_KIND_EVERY) {
+-                job->next_run = now + job->interval_s;
+-            } else if (job->kind == CRON_KIND_AT && job->at_epoch > now) {
+-                job->next_run = job->at_epoch;
+-            }
+-        }
+-    }
+-
+-    if (changed) {
+-        cron_save_jobs();
++#ifdef CONFIG_EXAMPLES_ZHAOXI
++    s_waiting_for_clock = now < 1735689600LL;
++    if (!s_waiting_for_clock)
++#endif
++    {
++        if (cron_prepare_start_locked(now) != OK) {
++            pthread_mutex_unlock(&s_cron_lock);
++            return ERROR;
++        }
+     }
+ 
+     s_cron_running = true;
+@@ -599,6 +672,14 @@
+ 
+ int cron_add_job(cron_job_t* job)
+ {
++    if (!job) return ERROR;
++#ifdef CONFIG_EXAMPLES_ZHAOXI
++    if (job->kind == CRON_KIND_EVERY && !job->action[0] &&
++        (!job->interval_s || (int64_t)time(NULL) > INT64_MAX - (int64_t)job->interval_s)) {
++        job->id[0] = '\0';
++        return ERROR;
++    }
++#endif
+     pthread_mutex_lock(&s_cron_lock);
+ 
+     if (s_job_count >= MAX_CRON_JOBS) {
+--- a/src/tools/tool_cron.c
++++ b/src/tools/tool_cron.c
+@@ -27,6 +27,9 @@
+ 
+ #include "cJSON.h"
+ #include <errno.h>
++#include <math.h>
++#include <stdint.h>
++#include <stdlib.h>
+ #include <string.h>
+ #include <time.h>
+ 
+@@ -76,9 +79,10 @@
+     double val = get_numeric_value(
+         cJSON_GetObjectItem(root, "interval_s"), &ok);
+ 
+-    if (!ok || val <= 0) {
+-        snprintf(output, output_size,
+-            "Error: 'every' requires positive 'interval_s'");
++    if (!ok || !isfinite(val) || val < 1 || val > (double)UINT32_MAX ||
++        (double)(uint32_t)val != val) {
++        snprintf(output, output_size,
++            "Error: 'every' requires integer 'interval_s' in 1..4294967295");
+         return ERROR;
+     }
+ 
+@@ -95,10 +99,12 @@
+     double val = get_numeric_value(
+         cJSON_GetObjectItem(root, "at_epoch"), &ok);
+ 
+-    if (!ok || val <= 0) {
+-        snprintf(output, output_size,
+-            "Error: 'at' requires 'at_epoch' "
+-            "(unix timestamp as a number)");
++    /* Check before casting: non-finite and out-of-range doubles cannot be
++     * converted to int64_t safely. Unix seconds are integral. */
++    if (!ok || !isfinite(val) || val < 1 || val >= 0x1p63 ||
++        (double)(int64_t)val != val) {
++        snprintf(output, output_size,
++            "Error: 'at' requires a finite integer 'at_epoch' in int64 range");
+         return ERROR;
+     }
+ 

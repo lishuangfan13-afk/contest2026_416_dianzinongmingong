@@ -1,0 +1,188 @@
+--- a/src/infra/vela_tls.c
++++ b/src/infra/vela_tls.c
+@@ -49,6 +49,10 @@
+ #include <fcntl.h>
+ #include <pthread.h>
+ #include <time.h>
++#ifdef CONFIG_ZHAOXI_BES_AUDIO
++#include <limits.h>
++#include <sys/ioctl.h>
++#endif
+ 
+ static int simple_entropy_func(void* data, unsigned char* output, size_t len)
+ {
+@@ -539,6 +543,77 @@
+ 
+ /* ── HTTP/1.1 framing ────────────────────────────────────────── */
+ 
++#ifdef CONFIG_ZHAOXI_BES_AUDIO
++/* Counters describe plaintext accepted by TLS, not bytes acknowledged by the
++ * peer. No request headers, body, credentials or addresses are logged. */
++static int64_t tls_diag_now_ms(void)
++{
++    struct timespec now;
++    clock_gettime(CLOCK_MONOTONIC, &now);
++    return (int64_t)now.tv_sec * 1000 + now.tv_nsec / 1000000;
++}
++
++static void tls_diag_socket(tls_ctx_t *ctx, const char *stage,
++                            size_t plain_rx, int ssl_result, int bio_errno)
++{
++    int saved_errno = errno;
++    int fd = ctx->net.fd;
++    int rx_head = -1, tx_space = -1;
++    int rx_rc = -1, tx_rc = -1, path_rc = -1, path_errno = 0;
++    char path[PATH_MAX];
++    const char *metadata = "unsupported";
++    const char *protocol = "unknown";
++    path[0] = '\0';
++#ifdef FIONREAD
++    rx_rc = ioctl(fd, FIONREAD, (unsigned long)(uintptr_t)&rx_head);
++#endif
++#ifdef FIONSPACE
++    tx_rc = ioctl(fd, FIONSPACE, (unsigned long)(uintptr_t)&tx_space);
++#endif
++#if defined(__NuttX__) && defined(FIOC_FILEPATH)
++    /* This NuttX tree has no TCP_INFO. FIOC_FILEPATH provides queue/state
++     * metadata without clearing pending socket errors. Its prefix contains
++     * addresses: retain only the suffix starting at the first comma. */
++    path_rc = ioctl(fd, FIOC_FILEPATH, (unsigned long)(uintptr_t)path);
++    path_errno = path_rc < 0 ? errno : 0;
++    if (!path_rc) {
++        /* Only known socket formats may expose their non-address suffix. */
++        if (strncmp(path, "tcp:[", 5) == 0) protocol = "tcp";
++        else if (strncmp(path, "udp:[", 5) == 0) protocol = "udp";
++        else protocol = "other";
++        const char *suffix = strchr(path, ',');
++        metadata = suffix && strcmp(protocol, "other") != 0
++                 ? suffix + 1 : "unavailable";
++    }
++#endif
++    syslog(LOG_INFO,
++        "[%s] TLS_SOCKET stage=%s fd=%d plain_rx=%lu ssl_ret=%d bio_errno=%d "
++        "rx_head=%d rx_rc=%d tx_space=%d tx_rc=%d path_rc=%d path_errno=%d protocol=%s meta=%s\n",
++        TAG, stage, fd, (unsigned long)plain_rx, ssl_result, bio_errno,
++        rx_head, rx_rc, tx_space, tx_rc, path_rc, path_errno, protocol, metadata);
++    errno = saved_errno;
++}
++
++static void tls_diag_write(tls_ctx_t *ctx, size_t header_expected,
++                           size_t header_accepted, size_t body_expected,
++                           size_t body_accepted, unsigned calls,
++                           unsigned retries, int64_t started,
++                           int last_ssl_result, int last_errno, int result)
++{
++    int saved_errno = errno;
++    syslog(LOG_INFO,
++        "[%s] TLS_TX phase=request header=%lu/%lu body=%lu/%lu calls=%u "
++        "want_write=%u elapsed_ms=%lld last_ssl_ret=%d last_errno=%d rc=%d\n",
++        TAG, (unsigned long)header_accepted, (unsigned long)header_expected,
++        (unsigned long)body_accepted, (unsigned long)body_expected, calls,
++        retries, (long long)(tls_diag_now_ms() - started), last_ssl_result,
++        last_errno, result);
++    tls_diag_socket(ctx, result ? "write-error" : "post-tx", 0,
++                    last_ssl_result, last_errno);
++    errno = saved_errno;
++}
++#endif
++
+ static int tls_write_request(tls_ctx_t* ctx,
+     const char* method, const char* host,
+     const char* path,
+@@ -581,43 +656,64 @@
+     HDR_APPEND("\r\n");
+ #undef HDR_APPEND
+ 
+-    /* Write headers */
++    /* Preserve the existing send/error behavior, with product-only
++     * accounting. Positive short writes advance exactly once; WANT_WRITE
++     * retries the same pointer/length as required by mbedTLS. */
+     int written = 0;
++    size_t bw = 0;
++#ifdef CONFIG_ZHAOXI_BES_AUDIO
++    int64_t tx_started = tls_diag_now_ms();
++    unsigned calls = 0, retries = 0;
++    int last_ssl_result = 0, last_errno = 0;
++#endif
+     while (written < pos) {
+         ret = mbedtls_ssl_write(&ctx->ssl,
+             (const unsigned char*)(hdr + written),
+             (size_t)(pos - written));
++#ifdef CONFIG_ZHAOXI_BES_AUDIO
++        calls++;
++        last_ssl_result = ret;
++        last_errno = ret < 0 ? errno : 0;
++        if (ret == MBEDTLS_ERR_SSL_WANT_WRITE) retries++;
++#endif
+         if (ret > 0) {
+             written += ret;
+-        } else if (ret == 0) {
+-            free(hdr);
+-            return VELA_TLS_ERR_WRITE;
+         } else if (ret != MBEDTLS_ERR_SSL_WANT_WRITE) {
+-            free(hdr);
+-            return VELA_TLS_ERR_WRITE;
++            ret = VELA_TLS_ERR_WRITE;
++            goto write_done;
+         }
+     }
+ 
+     free(hdr);
+-
+-    /* Write body */
++    hdr = NULL;
++
+     if (body && body_len > 0) {
+-        size_t bw = 0;
+         while (bw < body_len) {
+             ret = mbedtls_ssl_write(&ctx->ssl,
+-                (const unsigned char*)(body + bw),
+-                body_len - bw);
++                (const unsigned char*)(body + bw), body_len - bw);
++#ifdef CONFIG_ZHAOXI_BES_AUDIO
++            calls++;
++            last_ssl_result = ret;
++            last_errno = ret < 0 ? errno : 0;
++            if (ret == MBEDTLS_ERR_SSL_WANT_WRITE) retries++;
++#endif
+             if (ret > 0) {
+                 bw += (size_t)ret;
+-            } else if (ret == 0) {
+-                return VELA_TLS_ERR_WRITE;
+             } else if (ret != MBEDTLS_ERR_SSL_WANT_WRITE) {
+-                return VELA_TLS_ERR_WRITE;
++                ret = VELA_TLS_ERR_WRITE;
++                goto write_done;
+             }
+         }
+     }
+-
+-    return 0;
++    ret = 0;
++write_done:
++#ifdef CONFIG_ZHAOXI_BES_AUDIO
++    tls_diag_write(ctx, (size_t)pos, (size_t)written,
++                   body ? body_len : 0, bw, calls, retries, tx_started,
++                   last_ssl_result, last_errno, ret);
++#endif
++    free(hdr);
++    return ret;
+ }
+ 
+ /**
+@@ -684,9 +780,15 @@
+             if (memmem(raw, raw_len, "\r\n\r\n", 4))
+                 break;
+         } else if (ret == 0 || ret == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY) {
++#ifdef CONFIG_ZHAOXI_BES_AUDIO
++            tls_diag_socket(ctx, "header-eof", raw_len, ret, 0);
++#endif
+             eof = 1;
+             break;
+         } else if (ret != MBEDTLS_ERR_SSL_WANT_READ) {
++#ifdef CONFIG_ZHAOXI_BES_AUDIO
++            tls_diag_socket(ctx, "header-read-fail", raw_len, ret, errno);
++#endif
+             syslog(LOG_ERR, "[%s] ssl_read (header) ret=0x%x\n", TAG, -ret);
+             tls_raw_release(raw);
+             return VELA_TLS_ERR_READ;
