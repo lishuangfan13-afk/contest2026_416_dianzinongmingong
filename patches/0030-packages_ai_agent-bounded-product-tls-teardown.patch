@@ -1,0 +1,77 @@
+--- a/src/infra/vela_tls.c
++++ b/src/infra/vela_tls.c
+@@ -145,7 +145,15 @@
+ 
+ static void tls_ctx_free(tls_ctx_t* ctx)
+ {
++#ifdef CONFIG_EXAMPLES_ZHAOXI
++    /* Shutdown can follow removal of the PPP uplink. Never wait for a dead
++     * peer while releasing a cached connection; notify only if nonblocking
++     * mode was established, then free even if notify needs another write. */
++    if (ctx->net.fd >= 0 && mbedtls_net_set_nonblock(&ctx->net) == 0)
++        mbedtls_ssl_close_notify(&ctx->ssl);
++#else
+     mbedtls_ssl_close_notify(&ctx->ssl);
++#endif
+     mbedtls_net_free(&ctx->net);
+     mbedtls_ssl_free(&ctx->ssl);
+     mbedtls_ssl_config_free(&ctx->cfg);
+--- a/src/agent_main.c
++++ b/src/agent_main.c
+@@ -811,6 +811,7 @@
+     /* The watcher must not start services after their stop calls. */
+     syslog(LOG_INFO, "[%s] Waiting for network watcher to exit\n", TAG);
+     agent_tasks_wait(true);
++    syslog(LOG_INFO, "[%s] Shutdown: network workers exited\n", TAG);
+ #endif
+ 
+     /* ── Graceful teardown (reverse of startup order) ──────── */
+@@ -839,9 +840,12 @@
+     if (!headless) heartbeat_stop();
+ 
+ #ifdef CONFIG_EXAMPLES_ZHAOXI
++    syslog(LOG_INFO, "[%s] Shutdown: before voice stop\n", TAG);
+     voice_channel_stop();
++    syslog(LOG_INFO, "[%s] Shutdown: after voice stop\n", TAG);
+     syslog(LOG_INFO, "[%s] Waiting for Agent workers to exit\n", TAG);
+     agent_tasks_wait(false);
++    syslog(LOG_INFO, "[%s] Shutdown: all workers exited\n", TAG);
+ #else
+     /* Existing profiles retain their original teardown. */
+     usleep(500 * 1000);
+@@ -855,7 +859,13 @@
+     tool_guard_cleanup();
+     tool_registry_cleanup();
+     llm_cache_cleanup();
++#ifdef CONFIG_EXAMPLES_ZHAOXI
++    syslog(LOG_INFO, "[%s] Shutdown: before TLS pool cleanup\n", TAG);
++#endif
+     vela_tls_pool_cleanup();
++#ifdef CONFIG_EXAMPLES_ZHAOXI
++    syslog(LOG_INFO, "[%s] Shutdown: after TLS pool cleanup\n", TAG);
++#endif
+     message_bus_destroy();
+ 
+     syslog(LOG_INFO, "[%s] Shutdown complete.\n", TAG);
+--- a/src/infra/task_lifecycle.c
++++ b/src/infra/task_lifecycle.c
+@@ -3,6 +3,7 @@
+ #include <errno.h>
+ #include <stdlib.h>
+ #include <string.h>
++#include <syslog.h>
+ 
+ extern bool agent_shutdown_requested(void);
+ static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+@@ -78,7 +79,11 @@
+ void agent_tasks_wait(bool network_only)
+ {
+     pthread_mutex_lock(&lock);
++    syslog(LOG_INFO, "[agent] Worker wait begin: network_only=%d total=%u network=%u\n",
++        network_only, workers, network_workers);
+     while (network_only ? network_workers != 0 : workers != 0)
+         pthread_cond_wait(&changed, &lock);
++    syslog(LOG_INFO, "[agent] Worker wait done: network_only=%d total=%u network=%u\n",
++        network_only, workers, network_workers);
+     pthread_mutex_unlock(&lock);
+ }

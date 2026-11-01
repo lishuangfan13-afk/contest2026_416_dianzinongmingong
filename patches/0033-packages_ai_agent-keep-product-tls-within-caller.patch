@@ -1,0 +1,69 @@
+--- a/src/infra/vela_tls.c
++++ b/src/infra/vela_tls.c
+@@ -188,6 +188,14 @@
+ /* Acquire a slot for host:port.  Returns a locked, connected ctx or NULL. */
+ static conn_slot_t* pool_acquire(const char* host, const char* port)
+ {
++#ifdef CONFIG_EXAMPLES_ZHAOXI
++    /* ASR capture and Agent/outbound run in different NuttX task groups.
++     * Their descriptor numbers are not interchangeable despite shared static
++     * memory. Keep every product TLS descriptor inside its requesting call. */
++    (void)host;
++    (void)port;
++    return NULL;
++#else
+     pthread_mutex_lock(&s_pool_lock);
+ 
+     /* 1. Find an existing valid slot for this host:port */
+@@ -222,6 +230,8 @@
+ 
+     pthread_mutex_unlock(&s_pool_lock);
+     return NULL; /* all slots busy — caller falls back to ephemeral */
++#endif
++
+ }
+ 
+ /* Return a slot to the pool.  keep=true means the connection is still alive. */
+@@ -840,21 +850,28 @@
+ 
+     /* New connection */
+     if (!slot) {
+-        /* Pool full — use a temporary ephemeral context */
+-        tls_ctx_t tmp_ctx;
+-        if ((ret = tls_ctx_connect(&tmp_ctx, host, port)) != 0) {
+-            tls_ctx_free(&tmp_ctx);
+-            return ret;
+-        }
+-        if ((ret = tls_write_request(&tmp_ctx, method, host, path,
+-                 headers, body, body_len))
+-            != 0) {
++        /* Product calls are always ephemeral; other profiles reach this path
++         * only when the connection pool is busy. */
++#ifdef CONFIG_EXAMPLES_ZHAOXI
++        tls_ctx_t *tmp_ctx = calloc(1, sizeof(*tmp_ctx));
++        if (!tmp_ctx) return VELA_TLS_ERR_OVERFLOW;
++#else
++        tls_ctx_t local_ctx;
++        tls_ctx_t *tmp_ctx = &local_ctx;
++#endif
++        if ((ret = tls_ctx_connect(tmp_ctx, host, port)) != 0)
++            goto ephemeral_done;
++        if ((ret = tls_write_request(tmp_ctx, method, host, path,
++                 headers, body, body_len)) != 0) {
+             syslog(LOG_ERR, "[%s] Write request failed: %d\n", TAG, ret);
+-            tls_ctx_free(&tmp_ctx);
+-            return ret;
+-        }
+-        ret = tls_read_response(&tmp_ctx, resp_buf, resp_cap, out_body_len, NULL);
+-        tls_ctx_free(&tmp_ctx);
++            goto ephemeral_done;
++        }
++        ret = tls_read_response(tmp_ctx, resp_buf, resp_cap, out_body_len, NULL);
++    ephemeral_done:
++        tls_ctx_free(tmp_ctx);
++#ifdef CONFIG_EXAMPLES_ZHAOXI
++        free(tmp_ctx);
++#endif
+         return ret;
+     }
+ 

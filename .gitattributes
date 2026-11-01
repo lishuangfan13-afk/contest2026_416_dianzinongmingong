@@ -9,7 +9,7 @@
 /README.md text eol=lf
 /docs/*.md text eol=lf
 # Unified-diff blank context lines carry a required space marker.
-/patches/*.patch text eol=lf whitespace=-blank-at-eol
+/patches/*.patch text eol=lf whitespace=-blank-at-eol,-blank-at-eof
 /patches/README.md text eol=lf
 /tools/*.py text eol=lf
 /tools/*.ps1 text eol=lf

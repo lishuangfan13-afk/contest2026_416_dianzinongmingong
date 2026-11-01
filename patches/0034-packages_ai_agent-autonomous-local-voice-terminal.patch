@@ -1,0 +1,399 @@
+--- a/src/voice/voice_channel.c
++++ b/src/voice/voice_channel.c
+@@ -37,6 +37,7 @@
+ #include <pthread.h>
+ #include <semaphore.h>
+ #include <stdio.h>
++#include <stdint.h>
+ #include <stdlib.h>
+ #include <string.h>
+ #include <time.h>
+@@ -224,6 +225,317 @@
+     .speak_lock = PTHREAD_MUTEX_INITIALIZER,
+ };
+ 
++/* Autonomous local endpointing. No network work occurs before a completed
++ * utterance. Playback owns the audio path while synthesis or draining runs. */
++#ifdef CONFIG_ZHAOXI_BES_AUDIO
++#define AUTO_FRAME_SAMPLES (AGENT_VOICE_SAMPLE_RATE / 50)
++#define AUTO_FRAME_BYTES (AUTO_FRAME_SAMPLES * 2)
++#define AUTO_PRE_FRAMES 15
++#define AUTO_CALIBRATE_FRAMES 50
++#define AUTO_MIN_VOICE_FRAMES 12
++#define AUTO_START_FRAMES 3
++#define AUTO_SILENCE_FRAMES 45
++#define AUTO_MAX_MS 12000
++#define AUTO_REPLY_TIMEOUT_MS 180000
++
++enum auto_state { AUTO_OFF, AUTO_CALIBRATING, AUTO_LISTENING, AUTO_RECORDING,
++                  AUTO_ASR, AUTO_REPLY, AUTO_PAUSED, AUTO_ERROR };
++static struct {
++    pthread_mutex_t lock;
++    pthread_cond_t changed;
++    bool enabled, running, awaiting;
++    unsigned speakers;
++    audio_capture_t *capture;
++    enum auto_state state;
++    int noise, threshold, last_error;
++    unsigned frames_seen, utterances, asr_calls, rejected;
++    size_t last_pcm_bytes;
++    int64_t reply_started, cooldown_until;
++} s_auto = {.lock=PTHREAD_MUTEX_INITIALIZER, .changed=PTHREAD_COND_INITIALIZER};
++
++struct local_vad {
++    unsigned calibrated, consecutive, voiced, silent, frames;
++    int noise, threshold;
++    bool active;
++};
++
++extern void voice_channel_auto_feedback(int event) __attribute__((weak));
++static void auto_feedback(int event)
++{
++    if(voice_channel_auto_feedback)voice_channel_auto_feedback(event);
++}
++
++static int64_t auto_now_ms(void)
++{
++    struct timespec now;
++    clock_gettime(CLOCK_MONOTONIC, &now);
++    return (int64_t)now.tv_sec*1000+now.tv_nsec/1000000;
++}
++
++static int vad_level(const int16_t *samples, size_t count)
++{
++    uint64_t sum=0;
++    for (size_t i=0;i<count;i++) {
++        int value=samples[i]; sum+=(unsigned)(value<0 ? -value : value);
++    }
++    return count ? (int)(sum/count) : 0;
++}
++
++/* Returns 1 when speech starts, 2 at an eligible endpoint, -1 for a short
++ * transient, 0 otherwise. Duration is counted from actual 20-ms PCM frames. */
++static int local_vad_frame(struct local_vad *v, int level, unsigned max_frames)
++{
++    if (v->calibrated<AUTO_CALIBRATE_FRAMES) {
++        v->noise=(v->noise*(int)v->calibrated+level)/(int)(v->calibrated+1);
++        v->calibrated++;
++        v->threshold=v->noise*3+100;
++        if(v->threshold<180)v->threshold=180;
++        return 0;
++    }
++    bool loud=level>v->threshold;
++    if(!v->active) {
++        if(loud) v->consecutive++; else {
++            v->consecutive=0;
++            v->noise=(v->noise*31+level)/32;
++            v->threshold=v->noise*3+100;
++            if(v->threshold<180)v->threshold=180;
++        }
++        if(v->consecutive<AUTO_START_FRAMES)return 0;
++        v->active=true;v->voiced=v->consecutive;v->silent=0;v->frames=0;
++        return 1;
++    }
++    v->frames++;
++    if(loud){v->voiced++;v->silent=0;}else v->silent++;
++    if(v->silent>=AUTO_SILENCE_FRAMES || v->frames>=max_frames)
++        return v->voiced>=AUTO_MIN_VOICE_FRAMES ? 2 : -1;
++    return 0;
++}
++
++static const char *auto_state_name(enum auto_state state)
++{
++    static const char *names[]={"已停止","校准环境噪声","等待说话","正在聆听",
++        "正在识别","等待助手回答","播报中，暂停聆听","语音异常，正在恢复"};
++    return state>=AUTO_OFF && state<=AUTO_ERROR ? names[state] : "未知";
++}
++
++static void auto_set_state(enum auto_state state, int error)
++{
++    pthread_mutex_lock(&s_auto.lock);
++    bool changed=s_auto.state!=state;
++    s_auto.state=state;s_auto.last_error=error;
++    pthread_cond_broadcast(&s_auto.changed);
++    pthread_mutex_unlock(&s_auto.lock);
++    if(changed)syslog(LOG_INFO,"[voice_auto] %s rc=%d\n",auto_state_name(state),error);
++}
++
++static bool voice_auto_enabled(void)
++{
++    pthread_mutex_lock(&s_auto.lock);bool enabled=s_auto.enabled;
++    pthread_mutex_unlock(&s_auto.lock);return enabled;
++}
++
++static bool auto_can_capture(void)
++{
++    bool timed_out=false;
++    pthread_mutex_lock(&s_auto.lock);
++    if(s_auto.awaiting && auto_now_ms()-s_auto.reply_started>=AUTO_REPLY_TIMEOUT_MS) {
++        timed_out=true;
++        s_auto.awaiting=false;s_auto.last_error=-ETIMEDOUT;
++        syslog(LOG_WARNING,"[voice_auto] 等待回答超时，恢复聆听\n");
++    }
++    bool yes=s_auto.enabled && !s_auto.speakers && !s_auto.awaiting &&
++             auto_now_ms()>=s_auto.cooldown_until;
++    pthread_mutex_unlock(&s_auto.lock);
++    if(timed_out)auto_feedback(VOICE_AUTO_FEEDBACK_TURN_TIMEOUT);
++    return yes;
++}
++
++static void auto_capture_close(void)
++{
++    pthread_mutex_lock(&s_auto.lock);
++    if(s_auto.capture){audio_capture_close(s_auto.capture);s_auto.capture=NULL;}
++    pthread_cond_broadcast(&s_auto.changed);
++    pthread_mutex_unlock(&s_auto.lock);
++}
++
++static void voice_auto_pause_for_tts(void)
++{
++    pthread_mutex_lock(&s_auto.lock);
++    s_auto.speakers++;
++    if(s_auto.capture)audio_capture_abort(s_auto.capture);
++    while(s_auto.capture)pthread_cond_wait(&s_auto.changed,&s_auto.lock);
++    pthread_mutex_unlock(&s_auto.lock);
++}
++
++static void voice_auto_resume_after_tts(void)
++{
++    pthread_mutex_lock(&s_auto.lock);
++    if(s_auto.speakers)s_auto.speakers--;
++    s_auto.cooldown_until=auto_now_ms()+600;
++    pthread_cond_broadcast(&s_auto.changed);
++    pthread_mutex_unlock(&s_auto.lock);
++}
++
++void voice_channel_auto_reply_done(void)
++{
++    pthread_mutex_lock(&s_auto.lock);
++    s_auto.awaiting=false;
++    s_auto.cooldown_until=auto_now_ms()+600;
++    pthread_cond_broadcast(&s_auto.changed);
++    pthread_mutex_unlock(&s_auto.lock);
++}
++
++static void *auto_voice_worker(void *unused)
++{
++    (void)unused;
++    unsigned char *pcm=malloc(AGENT_VOICE_PCM_BUF_SIZE);
++    unsigned char *pre=malloc(AUTO_PRE_FRAMES*AUTO_FRAME_BYTES);
++    if(!pcm || !pre){free(pcm);free(pre);auto_set_state(AUTO_ERROR,-ENOMEM);goto finished;}
++    while(voice_auto_enabled() && !agent_shutdown_requested()) {
++        if(!auto_can_capture()){usleep(50000);continue;}
++        pthread_mutex_lock(&s_voice.lock);
++        bool idle=s_voice.state==VOICE_IDLE && !s_voice.tts_pb;
++        pthread_mutex_unlock(&s_voice.lock);
++        if(!idle){usleep(50000);continue;}
++        pthread_mutex_lock(&s_auto.lock);
++        if(!s_auto.enabled || s_auto.speakers || s_auto.awaiting) {
++            pthread_mutex_unlock(&s_auto.lock);continue;
++        }
++        s_auto.capture=audio_capture_open(AGENT_AUDIO_CAPTURE_DEV,
++            AGENT_VOICE_SAMPLE_RATE,AGENT_VOICE_CHANNELS,AGENT_VOICE_BITS);
++        audio_capture_t *cap=s_auto.capture;
++        int result=cap ? audio_capture_start(cap) : -EIO;
++        pthread_mutex_unlock(&s_auto.lock);
++        if(result<0){auto_capture_close();auto_set_state(AUTO_ERROR,result);
++            auto_feedback(VOICE_AUTO_FEEDBACK_CAPTURE_ERROR);usleep(500000);continue;}
++        auto_set_state(AUTO_CALIBRATING,0);
++        struct local_vad vad={0};size_t used=0,frame_used=0;
++        unsigned pre_write=0,pre_count=0;
++        int16_t frame[AUTO_FRAME_SAMPLES];
++        size_t max_bytes=AGENT_VOICE_PCM_BUF_SIZE;
++        if(max_bytes>(size_t)AGENT_VOICE_SAMPLE_RATE*2*AUTO_MAX_MS/1000)
++            max_bytes=(size_t)AGENT_VOICE_SAMPLE_RATE*2*AUTO_MAX_MS/1000;
++        unsigned max_frames=(unsigned)(max_bytes/AUTO_FRAME_BYTES);
++        bool completed=false;
++        while(auto_can_capture() && !agent_shutdown_requested()) {
++            int n=audio_capture_read(cap,(unsigned char *)frame+frame_used,AUTO_FRAME_BYTES-frame_used);
++            if(n==-EAGAIN || n==-EWOULDBLOCK){usleep(5000);continue;}
++            if(n<=0){result=n ? n : -EIO;break;}
++            frame_used+=(size_t)n;
++            if(frame_used<AUTO_FRAME_BYTES)continue;
++            frame_used=0;
++            int level=vad_level(frame,AUTO_FRAME_SAMPLES);
++            bool was_active=vad.active;
++            int event=local_vad_frame(&vad,level,max_frames>AUTO_PRE_FRAMES?max_frames-AUTO_PRE_FRAMES:1);
++            pthread_mutex_lock(&s_auto.lock);s_auto.frames_seen++;
++            s_auto.noise=vad.noise;s_auto.threshold=vad.threshold;
++            pthread_mutex_unlock(&s_auto.lock);
++            if(!was_active) {
++                memcpy(pre+pre_write*AUTO_FRAME_BYTES,frame,AUTO_FRAME_BYTES);
++                pre_write=(pre_write+1)%AUTO_PRE_FRAMES;
++                if(pre_count<AUTO_PRE_FRAMES)pre_count++;
++            }
++            if(event==1) {
++                used=0;unsigned first=(pre_write+AUTO_PRE_FRAMES-pre_count)%AUTO_PRE_FRAMES;
++                for(unsigned i=0;i<pre_count;i++) {
++                    memcpy(pcm+used,pre+((first+i)%AUTO_PRE_FRAMES)*AUTO_FRAME_BYTES,AUTO_FRAME_BYTES);
++                    used+=AUTO_FRAME_BYTES;
++                }
++                auto_set_state(AUTO_RECORDING,0);
++            } else if(was_active && used+AUTO_FRAME_BYTES<=max_bytes) {
++                memcpy(pcm+used,frame,AUTO_FRAME_BYTES);used+=AUTO_FRAME_BYTES;
++            }
++            if(event==2){completed=true;break;}
++            if(event==-1){vad.active=false;vad.consecutive=0;used=0;
++                pthread_mutex_lock(&s_auto.lock);s_auto.rejected++;pthread_mutex_unlock(&s_auto.lock);
++                auto_set_state(AUTO_LISTENING,0);}
++            if(vad.calibrated==AUTO_CALIBRATE_FRAMES && !vad.active)
++                auto_set_state(AUTO_LISTENING,0);
++        }
++        auto_capture_close();
++        if(!voice_auto_enabled() || agent_shutdown_requested())break;
++        if(!completed || !used) {
++            if(result<0 && auto_can_capture()){auto_set_state(AUTO_ERROR,result);
++                auto_feedback(VOICE_AUTO_FEEDBACK_CAPTURE_ERROR);usleep(500000);}
++            else auto_set_state(AUTO_PAUSED,0);
++            continue;
++        }
++        auto_set_state(AUTO_ASR,0);
++        pthread_mutex_lock(&s_auto.lock);s_auto.utterances++;s_auto.asr_calls++;
++        s_auto.last_pcm_bytes=used;pthread_mutex_unlock(&s_auto.lock);
++        char text[512]={0};
++        result=voice_asr_recognize(pcm,used,text,sizeof(text));
++        if(result || !text[0]){auto_set_state(AUTO_ERROR,result?result:-ENODATA);
++            auto_feedback(VOICE_AUTO_FEEDBACK_ASR_ERROR);usleep(500000);continue;}
++        if(!voice_auto_enabled() || agent_shutdown_requested())break;
++        agent_msg_t message={0};
++        strcpy(message.channel,AGENT_CHAN_VOICE);strcpy(message.chat_id,"voice_auto");
++        message.content=strdup(text);
++        pthread_mutex_lock(&s_auto.lock);
++        s_auto.awaiting=true;s_auto.reply_started=auto_now_ms();
++        pthread_mutex_unlock(&s_auto.lock);
++        if(!message.content || message_bus_push_inbound(&message)!=0) {
++            free(message.content);voice_channel_auto_reply_done();auto_set_state(AUTO_ERROR,-EIO);
++            auto_feedback(VOICE_AUTO_FEEDBACK_DISPATCH_ERROR);
++            usleep(500000);continue;
++        }
++        auto_set_state(AUTO_REPLY,0);
++    }
++    free(pcm);free(pre);
++finished:
++    auto_capture_close();
++    pthread_mutex_lock(&s_auto.lock);
++    s_auto.running=false;s_auto.enabled=false;s_auto.awaiting=false;
++    pthread_cond_broadcast(&s_auto.changed);
++    pthread_mutex_unlock(&s_auto.lock);
++    auto_set_state(AUTO_OFF,0);return NULL;
++}
++
++int voice_channel_auto_start(void)
++{
++    pthread_mutex_lock(&s_voice.lock);
++    if(s_voice.state!=VOICE_IDLE){pthread_mutex_unlock(&s_voice.lock);return -EBUSY;}
++    pthread_mutex_lock(&s_auto.lock);
++    if(s_auto.running) {
++        int result=s_auto.enabled ? 0 : -EBUSY;
++        pthread_mutex_unlock(&s_auto.lock);pthread_mutex_unlock(&s_voice.lock);return result;
++    }
++    s_auto.enabled=true;s_auto.running=true;s_auto.awaiting=false;s_auto.last_error=0;
++    pthread_mutex_unlock(&s_auto.lock);pthread_mutex_unlock(&s_voice.lock);
++    int result=agent_task_create(auto_voice_worker,"voice_auto",AGENT_VOICE_STACK,NULL,AGENT_VOICE_PRIO);
++    if(result) {
++        pthread_mutex_lock(&s_auto.lock);s_auto.enabled=false;s_auto.running=false;
++        pthread_mutex_unlock(&s_auto.lock);return -EIO;
++    }
++    return 0;
++}
++
++int voice_channel_auto_stop(void)
++{
++    pthread_mutex_lock(&s_auto.lock);s_auto.enabled=false;s_auto.awaiting=false;
++    if(s_auto.capture)audio_capture_abort(s_auto.capture);
++    pthread_cond_broadcast(&s_auto.changed);pthread_mutex_unlock(&s_auto.lock);return 0;
++}
++
++int voice_channel_auto_status(char *output,size_t capacity)
++{
++    if(!output || !capacity)return -EINVAL;
++    pthread_mutex_lock(&s_auto.lock);
++    snprintf(output,capacity,"{\"enabled\":%s,\"running\":%s,\"state\":\"%s\",\"noise\":%d,\"threshold\":%d,\"last_error\":%d,\"frames\":%u,\"utterances\":%u,\"asr_calls\":%u,\"rejected\":%u,\"last_pcm_bytes\":%zu}",
++        s_auto.enabled?"true":"false",s_auto.running?"true":"false",
++        auto_state_name(s_auto.speakers?AUTO_PAUSED:s_auto.state),
++        s_auto.noise,s_auto.threshold,s_auto.last_error,s_auto.frames_seen,
++        s_auto.utterances,s_auto.asr_calls,s_auto.rejected,s_auto.last_pcm_bytes);
++    pthread_mutex_unlock(&s_auto.lock);return 0;
++}
++#else
++int voice_channel_auto_start(void){return -ENOSYS;}
++int voice_channel_auto_stop(void){return -ENOSYS;}
++int voice_channel_auto_status(char *output,size_t capacity)
++{if(output && capacity)snprintf(output,capacity,"{\"enabled\":false}");return -ENOSYS;}
++void voice_channel_auto_reply_done(void){}
++#endif
++
+ /* ── File-based helpers (kept for QEMU test commands) ──── */
+ 
+ static int read_pcm_file(const char* path,
+@@ -639,6 +951,12 @@
+ int voice_channel_start(void)
+ {
+     pthread_mutex_lock(&s_voice.lock);
++#ifdef CONFIG_ZHAOXI_BES_AUDIO
++    if (voice_auto_enabled()) {
++        pthread_mutex_unlock(&s_voice.lock);
++        return -EBUSY;
++    }
++#endif
+     if (s_voice.state != VOICE_IDLE) {
+         pthread_mutex_unlock(&s_voice.lock);
+         syslog(LOG_WARNING, "[%s] already recording\n", TAG);
+@@ -1018,7 +1336,7 @@
+     *w = '\0';
+ }
+ 
+-int voice_channel_speak(const char* text)
++static int voice_channel_speak_impl(const char* text)
+ {
+     if (!text || text[0] == '\0') {
+         return -EINVAL;
+@@ -1138,6 +1456,18 @@
+     return 0;
+ }
+ 
++int voice_channel_speak(const char *text)
++{
++#ifdef CONFIG_ZHAOXI_BES_AUDIO
++    voice_auto_pause_for_tts();
++#endif
++    int result = voice_channel_speak_impl(text);
++#ifdef CONFIG_ZHAOXI_BES_AUDIO
++    voice_auto_resume_after_tts();
++#endif
++    return result;
++}
++
+ /* ── Test commands (file-based, for QEMU) ───────────────── */
+ 
+ int voice_channel_test_tts(const char* text, const char* out_path)
+--- a/src/voice/voice_channel.h
++++ b/src/voice/voice_channel.h
+@@ -37,6 +37,27 @@
+  * If ASR returns empty text, text_out[0] is set to '\0' (not an error). */
+ int voice_channel_stop_with_text(char *text_out, size_t text_cap);
+ 
++/* Autonomous local VAD terminal. Start once; silence never calls ASR.
++ * Only the product BES backend currently provides this mode. Stop requests
++ * cancellation; status reports when any in-flight network work has drained. */
++enum voice_auto_feedback_event {
++    VOICE_AUTO_FEEDBACK_CAPTURE_ERROR=1,
++    VOICE_AUTO_FEEDBACK_ASR_ERROR=2,
++    VOICE_AUTO_FEEDBACK_TURN_TIMEOUT=3,
++    VOICE_AUTO_FEEDBACK_DISPATCH_ERROR=4
++};
++/* Optional weak product hook. Called with capture closed; may play a local
++ * bounded alert. It must not call cloud TTS or reenter automatic startup. */
++void voice_channel_auto_feedback(int event);
++
++int voice_channel_auto_start(void);
++int voice_channel_auto_stop(void);
++int voice_channel_auto_status(char *output, size_t capacity);
++
++/* Call after dispatching the final voice_auto reply, including TTS failure.
++ * Unrelated reminders must not complete the pending conversational turn. */
++void voice_channel_auto_reply_done(void);
++
+ /* Synthesize text and play back (called from outbound dispatcher). */
+ int voice_channel_speak(const char *text);
+ 

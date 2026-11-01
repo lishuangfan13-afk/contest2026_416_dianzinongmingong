@@ -1,0 +1,28 @@
+--- a/src/infra/network_manager.c
++++ b/src/infra/network_manager.c
+@@ -45,8 +45,12 @@
+ 
+ #ifdef CONFIG_EXAMPLES_ZHAOXI
+             /* A SoftAP address or an IP left on a down interface cannot
+-             * satisfy the product's station-link readiness check. */
+-            if (!ifa->ifa_name || strcmp(ifa->ifa_name, "wlan0") != 0 ||
++             * satisfy product readiness. Optional ppp0 is the wired PC uplink. */
++            bool uplink = ifa->ifa_name && !strcmp(ifa->ifa_name, "wlan0");
++#ifdef CONFIG_NETUTILS_PPPD
++            uplink = uplink || (ifa->ifa_name && !strcmp(ifa->ifa_name, "ppp0"));
++#endif
++            if (!uplink ||
+                 (ifa->ifa_flags & (IFF_UP | IFF_RUNNING)) != (IFF_UP | IFF_RUNNING))
+                 continue;
+ #endif
+--- a/src/infra/vela_tls.c
++++ b/src/infra/vela_tls.c
+@@ -322,7 +322,7 @@
+ 
+ #ifdef CONFIG_ZHAOXI_BES_AUDIO
+     if (!network_is_connected()) {
+-        syslog(LOG_WARNING, "[%s] WiFi station is not ready\n", TAG);
++        syslog(LOG_WARNING, "[%s] No active WiFi or wired PPP uplink\n", TAG);
+         return VELA_TLS_ERR_CONNECT;
+     }
+ #endif

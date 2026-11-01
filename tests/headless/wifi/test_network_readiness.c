@@ -43,6 +43,15 @@ int main(void) {
   test("lo","127.0.0.1",IFF_UP|IFF_RUNNING,false);
   test("wlan0","127.0.0.1",IFF_UP|IFF_RUNNING,false);
   test("wlan0","10.1.2.3",IFF_UP|IFF_RUNNING,true);
+  test("ppp0","0.0.0.0",IFF_UP|IFF_RUNNING,false);
+  test("ppp0","10.254.42.2",0,false);
+  test("ppp0","10.254.42.2",IFF_UP,false);
+  test("ppp1","10.254.42.2",IFF_UP|IFF_RUNNING,false);
+#ifdef CONFIG_NETUTILS_PPPD
+  test("ppp0","10.254.42.2",IFF_UP|IFF_RUNNING,true);
+#else
+  test("ppp0","10.254.42.2",IFF_UP|IFF_RUNNING,false);
+#endif
   fail=1; assert(!network_is_connected());
-  puts("PASS: station-only readiness, stale/down IP rejection, SoftAP exclusion, loopback/zero IP rejection and getifaddrs failure. Fixture only.");
+  puts("PASS: WiFi/optional PPP readiness, stale/down IP rejection, SoftAP exclusion, loopback/zero IP rejection and getifaddrs failure. Fixture only.");
 }

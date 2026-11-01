@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-31",
+  "firmware": {
+    "sha256": "5e1bee6c30b37fb696f6e8df7f49a2f146e1fa45678e5af7591df079954e438e",
+    "size_bytes": 1319432,
+    "actually_flashed": true,
+    "packaged_directory": "firmware/headless_pc_link"
+  },
+  "network_validation": {
+    "board_native_model_requests": true,
+    "true_bidirectional_ipcp_ready_fix_included": true,
+    "network_only_validation_passed": true
+  },
+  "consecutive_text_question_answer": {
+    "controlled_reply_markers": [
+      "QA_FINAL_1_1031",
+      "QA_FINAL_2_1031"
+    ],
+    "actual_agent_replies_verified": true,
+    "successful_traces_verified": true,
+    "both_passed": true
+  },
+  "persistent_records_after_update": {
+    "notes_verified": true,
+    "tasks_verified": true,
+    "new_todo_mutation_or_reminder_retest_claimed": false
+  },
+  "microphone_requested": false,
+  "automatic_voice_before": {
+    "enabled": false,
+    "running": false,
+    "frames": 0,
+    "asr_calls": 0
+  },
+  "automatic_voice_after": {
+    "enabled": false,
+    "running": false,
+    "frames": 0,
+    "asr_calls": 0
+  },
+  "quit_rc": 0,
+  "forwarder_exit_code": 0,
+  "automatic_multi_turn_human_voice_acceptance": "paused_at_user_request_not_passed",
+  "chinese_time_voice_acceptance": false,
+  "full_pcm_volume_satisfaction_independently_confirmed": false,
+  "older_r10_directory_preserved": "firmware/headless",
+  "evidence_scope": "Controlled reply markers and outcomes only; no private note or task contents, credentials, audio, or local runtime paths"
+}

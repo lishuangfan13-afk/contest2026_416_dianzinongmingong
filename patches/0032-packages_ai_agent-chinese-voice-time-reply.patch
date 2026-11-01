@@ -1,0 +1,82 @@
+--- a/src/core/agent_loop.c
++++ b/src/core/agent_loop.c
+@@ -354,16 +354,43 @@
+     { NULL,         NULL,               NULL,  0    },
+ };
+ 
+-static char* handle_nl_fast_path(const char* text)
+-{
++#ifdef CONFIG_EXAMPLES_ZHAOXI
++/* User-facing speech follows the configured local timezone. Internal tools
++ * retain their diagnostic date, zone and epoch format for model scheduling. */
++static char* zhaoxi_voice_time_reply(void)
++{
++    time_t now = time(NULL);
++    struct tm local;
++    if (now < 1735689600 || !localtime_r(&now, &local))
++        return strdup("当前时间还没有校准，请先校准时间。");
++    char reply[96];
++    snprintf(reply, sizeof(reply), "现在是%d点%02d分。", local.tm_hour, local.tm_min);
++    return strdup(reply);
++}
++#endif
++
++static char* handle_nl_fast_path(const char* text, const char* channel)
++{
++#ifndef CONFIG_EXAMPLES_ZHAOXI
++    (void)channel;
++#endif
+     /* Table-driven: scan intents, first match wins */
+     for (int i = 0; s_intents[i].keywords; i++) {
+         if (contains_any(text, s_intents[i].keywords)) {
+-            char* reply = calloc(1, s_intents[i].output_size);
+-            if (reply) {
+-                tool_registry_execute(s_intents[i].tool_name,
+-                    s_intents[i].tool_args, reply,
+-                    s_intents[i].output_size);
++            char* reply = NULL;
++#ifdef CONFIG_EXAMPLES_ZHAOXI
++            if (channel && !strcmp(channel, AGENT_CHAN_VOICE) &&
++                !strcmp(s_intents[i].tool_name, "get_current_time")) {
++                reply = zhaoxi_voice_time_reply();
++            } else
++#endif
++            {
++                reply = calloc(1, s_intents[i].output_size);
++                if (reply) {
++                    tool_registry_execute(s_intents[i].tool_name,
++                        s_intents[i].tool_args, reply,
++                        s_intents[i].output_size);
++                }
+             }
+             if (reply) {
+                 s_fast_path_count++;
+@@ -521,9 +548,16 @@
+             "/daily          每日简报\n\n"
+             "也可以直接用自然语言对话，我会自动调用工具。");
+     } else if (strncmp(msg->content, "/time", 5) == 0) {
+-        reply = calloc(1, 256);
+-        if (reply) {
+-            tool_registry_execute("get_current_time", "{}", reply, 256);
++#ifdef CONFIG_EXAMPLES_ZHAOXI
++        if (!strcmp(msg->channel, AGENT_CHAN_VOICE)) {
++            reply = zhaoxi_voice_time_reply();
++        } else
++#endif
++        {
++            reply = calloc(1, 256);
++            if (reply) {
++                tool_registry_execute("get_current_time", "{}", reply, 256);
++            }
+         }
+     } else if (strncmp(msg->content, "/weather", 8) == 0) {
+         const char* arg = msg->content + 8;
+@@ -1514,7 +1548,7 @@
+ 
+         /* NL fast path — after injection check, before LLM */
+         if (!reply) {
+-            reply = handle_nl_fast_path(msg.content);
++            reply = handle_nl_fast_path(msg.content, msg.channel);
+         }
+ 
+         if (reply) {

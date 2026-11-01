@@ -6,6 +6,9 @@ if(CONFIG_EXAMPLES_ZHAOXI)
   if(CONFIG_ZHAOXI_MIMO_VOICE)
     list(APPEND ZHAOXI_SRCS mimo_voice.c)
   endif()
+  if(CONFIG_NETUTILS_PPPD)
+    list(APPEND ZHAOXI_SRCS pc_link.c pc_control.c)
+  endif()
   nuttx_add_application(
     NAME zhaoxi
     PRIORITY 100

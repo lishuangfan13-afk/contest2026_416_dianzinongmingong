@@ -1,0 +1,458 @@
+#!/usr/bin/env python3
+"""Keep the board's PPP uplink running through USB2UART and this PC's WSL network.
+
+Requires Windows Python with pyserial, Ubuntu-22.04 WSL and its ppp package.
+No cloud API credentials are stored or used by this forwarder.
+"""
+import argparse,json,os,re,secrets,socket,subprocess,threading,time
+from datetime import datetime
+from pathlib import Path
+import serial
+from control import request,wsl_path
+
+class ControlHealth:
+    """A marker starts probing; only a recent actual reply confirms control."""
+    def __init__(self,probe=request,clock=time.monotonic):
+        self.probe=probe;self.clock=clock;self.thread=None;self.next_check=0
+        self.result=(None,False,None);self.ever_confirmed=False
+        self.voice_enabled=False;self.next_voice_check=0
+        self.voice_result=(None,None,None)
+
+    def enable_voice_status(self):
+        self.voice_enabled=True
+
+    def tick(self):
+        if self.thread and self.thread.is_alive():return
+        ping_due=self.clock()>=self.next_check
+        voice_due=self.voice_enabled and self.clock()>=self.next_voice_check
+        if not ping_due and not voice_due:return
+        if ping_due:self.next_check=self.clock()+30
+        if voice_due:self.next_voice_check=self.clock()+4
+        def run():
+            if ping_due:
+                try:
+                    reply=self.probe({'action':'ping'},timeout=4)
+                    ok=reply.get('rc')==0
+                    error=None if ok else 'Board ping returned rc='+str(reply.get('rc'))
+                except Exception as exc:ok=False;error=str(exc)
+                if ok:self.ever_confirmed=True
+                self.result=(self.clock(),ok,error)
+            if voice_due:
+                try:
+                    reply=self.probe({'action':'auto-status'},timeout=4)
+                    voice=reply.get('auto_voice')
+                    if reply.get('rc')!=0 or not isinstance(voice,dict):
+                        raise RuntimeError('Board auto-status failed (rc='+str(reply.get('rc'))+')')
+                    self.voice_result=(self.clock(),voice,None)
+                except Exception as exc:self.voice_result=(self.clock(),None,str(exc))
+        self.thread=threading.Thread(target=run,daemon=True);self.thread.start()
+
+    def snapshot(self):
+        checked,ok,error=self.result
+        age=self.clock()-checked if checked is not None else None
+        return {'ready':bool(ok and age is not None and age<=45),
+                'control_check_age_seconds':round(age,1) if age is not None else None,
+                'control_check_error':error}
+
+    def voice_snapshot(self):
+        checked,voice,error=self.voice_result
+        age=self.clock()-checked if checked is not None else None
+        fresh=age is not None and age<=12
+        if voice is not None and not fresh:error='Board automatic voice status confirmation expired'
+        return {'auto_voice_board_status':voice,
+                'auto_status_check_age_seconds':round(age,1) if age is not None else None,
+                'auto_status_check_error':error,
+                'auto_status_confirmed':bool(fresh and voice is not None and not error)}
+
+    def wait(self):
+        if self.thread:self.thread.join(25)
+
+class AutoVoiceDisplay:
+    """Only report semantic state changes, never dump speech or frame counts."""
+    def __init__(self,clock=time.monotonic):
+        self.clock=clock;self.previous=None;self.entered=clock();self.next_wait=15
+
+    def message(self,snapshot):
+        error=snapshot.get('auto_status_check_error')
+        voice=snapshot.get('auto_voice_board_status')
+        if error:
+            key=('status-read-error',error)
+            text='自动语音状态读取未确认：'+str(error)+'。这表示状态查询失败，不是识别结果。'
+        elif not snapshot.get('auto_status_confirmed') or not isinstance(voice,dict):return None
+        else:
+            state=voice.get('state','未知');code=voice.get('last_error',0)
+            enabled=voice.get('enabled') is True;running=voice.get('running') is True
+            accepting=voice.get('accepting_speech')
+            key=('board-state',enabled,running,state,code,voice.get('utterances'),accepting)
+            if not enabled and running:
+                text='已请求停止收音，正在等待当前处理退出；尚未确认自动语音完全停止。'
+            elif not running:
+                text='板端自动语音已停止。'
+                if state=='回答超时，自动监听已停止':text='本轮回答超时，自动监听已停止；请检查后主动重新启动。'
+            else:
+                messages={
+                    '校准环境噪声':'正在校准环境噪声，请稍等。',
+                    '等待说话':'正在等待你说话，可以直接对板子提问。',
+                    '正在聆听':'正在收音；说完后自然停顿，板子会自动处理。',
+                    '正在识别':'正在识别本轮语音，当前暂停收音；请等回答结束后再说下一句。',
+                    '等待助手回答':'本轮语音已交给助手，正在等待回答；当前暂停收音。',
+                    '正在合成语音，暂停聆听':'正在生成和接收回答语音，尚未开始播放；当前暂停收音。',
+                    '正在播放回答，暂停聆听':'正在播放回答，当前暂停收音；播完会继续等待说话。',
+                    '播报中，暂停聆听':'正在准备或播放回答语音，当前暂停收音；播完会继续等待说话。',
+                    '收音被打断，等待停顿':'本句收音被打断，正在等待停顿；听到就绪提示后请重新说完整的一句。',
+                    '语句过长，等待停顿':'本句过长，已停止提交；请先停顿，听到就绪提示后分成较短的句子重新说。',
+                    '语音异常，正在恢复':'本次语音处理失败，板子正在恢复。两短音表示本次失败，随后重新等待说话。'
+                }
+                text=messages.get(state,'板端语音状态：'+str(state))
+                if state in ['等待说话','正在聆听'] and accepting is not True:
+                    text=('板端正在恢复收音，尚未确认可以接收下一句话，请稍等。' if accepting is False else
+                          '板端报告正在等待你说话；当前固件尚未提供实际收音确认。')
+                if code:text+=' 错误码：'+str(code)+'。'
+        if key!=self.previous:
+            self.previous=key;self.entered=self.clock();self.next_wait=15
+            return text
+        if not error and enabled and running and state in ['正在识别','等待助手回答','正在合成语音，暂停聆听']:
+            elapsed=self.clock()-self.entered
+            if elapsed>=self.next_wait:
+                self.next_wait=elapsed+30
+                return '当前'+{'正在识别':'语音识别','等待助手回答':'助手回答','正在合成语音，暂停聆听':'语音合成'}[state]+ \
+                    '阶段已等待约 '+str(int(elapsed))+' 秒，仍在处理；当前暂停收音。'
+        return None
+
+
+def write_status(path,value):
+    """The stop launcher must never see a half-written state document."""
+    temporary=path.with_suffix('.tmp')
+    temporary.write_text(json.dumps(value,indent=2),encoding='utf-8')
+    for attempt in range(6):
+        try:temporary.replace(path);break
+        except PermissionError:
+            if attempt==5:raise
+            time.sleep(.01)
+
+class AutomaticVoice:
+    """Request the board's own automatic loop once; never record on the PC."""
+    def __init__(self,enabled,send=request):
+        self.enabled=enabled;self.send=send;self.thread=None
+        self.result={'auto_voice_state':'waiting-network' if enabled else 'disabled',
+                     'auto_voice_rc':None,'auto_voice_error':None}
+
+    def start_once(self):
+        if not self.enabled or self.thread is not None:return
+        self.result={'auto_voice_state':'starting','auto_voice_rc':None,'auto_voice_error':None}
+        def run():
+            try:
+                reply=self.send({'action':'command','args':['auto','start']},timeout=8)
+                rc=reply.get('rc')
+                self.result={'auto_voice_state':'started' if rc==0 else 'failed',
+                             'auto_voice_rc':rc,
+                             'auto_voice_error':None if rc==0 else 'Board auto start returned rc='+str(rc)}
+            except Exception as error:
+                self.result={'auto_voice_state':'failed','auto_voice_rc':None,'auto_voice_error':str(error)}
+        self.thread=threading.Thread(target=run,daemon=True);self.thread.start()
+
+    def wait(self):
+        if self.thread:self.thread.join(25)
+
+def open_gateway(settings):
+    link=socket.create_connection(('127.0.0.1',settings['port']),10)
+    try:
+        link.sendall((settings['token']+'\n').encode())
+        # The ten-second limit is only for connecting. An idle PPP link must
+        # continue receiving the peer's next packet, including LCP keepalives.
+        link.settimeout(None)
+        return link
+    except BaseException:
+        link.close()
+        raise
+
+def relay_inbound(link,port,stop,errors,metrics=None,expected_close=None,console_done=None):
+    try:
+        while not stop.is_set() and not (console_done and console_done.is_set()):
+            data=link.recv(8192)
+            if not data:
+                if not stop.is_set() and not (expected_close and expected_close.is_set()):
+                    errors.append('Gateway closed the PPP transport')
+                break
+            if metrics is not None:metrics['last_gateway_data']=time.monotonic()
+            for at in range(0,len(data),128):
+                if stop.is_set() or console_done and console_done.is_set():break
+                piece=data[at:at+128]
+                if metrics is not None:metrics['uart_write_pending']=True
+                try:
+                    if port.write(piece)!=len(piece):raise RuntimeError('Short UART write')
+                finally:
+                    if metrics is not None:metrics['uart_write_pending']=False
+                if metrics is not None:metrics['gateway_to_uart_bytes']+=len(piece)
+                time.sleep(.001)
+    except Exception as error:
+        if not stop.is_set():errors.append(repr(error))
+    finally:
+        stop.set()
+
+def wait_for_agent_stop(port,initial,timeout=90,clock=time.monotonic,emit=print):
+    reply=bytearray(initial);started=clock();next_progress=started+10
+    while b'[agent] Shutdown complete.' not in reply and clock()-started<timeout:
+        reply.extend(port.read(8192))
+        now=clock()
+        if now>=next_progress and b'[agent] Shutdown complete.' not in reply:
+            emit('仍在等待旧助手完全停止（已等待 '+str(int(now-started))+' 秒）；确认退出后才建立供网。',flush=True)
+            next_progress=now+10
+    return reply
+
+def read_board_exit(port,initial,timeout=2,clock=time.monotonic):
+    """Drain a split printf line without forwarding anything to the console."""
+    data=bytearray(initial);before=len(data);end=clock()+timeout
+    while True:
+        at=data.find(b'PC_LINK finished')
+        newline=data.find(b'\n',at) if at>=0 else -1
+        if newline>=0:
+            line=bytes(data[at:newline]).rstrip(b'\r')
+            match=re.search(rb'^PC_LINK finished rc=(-?\d+)(?:;|\s|$)',line)
+            return {'seen':True,'rc':int(match.group(1)) if match else None,
+                    'line':line.decode('utf-8',errors='replace'),'extra':bytes(data[before:])}
+        if clock()>=end:
+            return {'seen':at>=0,'rc':None,'line':None,'extra':bytes(data[before:])}
+        data.extend(port.read(8192))
+
+def validate_board_exit(seen,rc,control_verified):
+    if not seen or rc is None:
+        raise RuntimeError('未收到开发板完整的退出结果，不能确认本次会话正常结束。')
+    if rc!=0:
+        raise RuntimeError(('开发板联网启动失败' if not control_verified else '开发板供网会话异常结束')+
+                           '，返回码 '+str(rc)+'。')
+    if not control_verified:
+        raise RuntimeError('开发板在控制通信验证通过前结束，本次启动失败。')
+
+def drain_board_quit(port,link,tail,serial_log,send,capture_exit,errors,
+                     metrics=None,timeout=45,clock=time.monotonic):
+    """Keep forwarding while the board closes capture and restores its console."""
+    def request_quit():
+        try:send({'action':'quit'},timeout=8)
+        except Exception as error:errors.append('Quit command: '+repr(error))
+    closer=threading.Thread(target=request_quit,daemon=True);closer.start()
+    until=clock()+timeout
+    while clock()<until:
+        data=port.read(8192)
+        if data:
+            if metrics is not None:metrics['last_uart_data']=clock()
+            serial_log.write(data);serial_log.flush();tail.extend(data)
+            if b'PC_LINK finished' not in tail:
+                link.sendall(data)
+                if metrics is not None:metrics['uart_to_gateway_bytes']+=len(data)
+        if b'PC_LINK finished' in tail:
+            capture_exit();break
+    closer.join(.2)
+    return closer
+
+
+def main():
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--port',default='COM3')
+    parser.add_argument('--duration',type=int,default=3600,help='Session limit, 60..3600 seconds')
+    parser.add_argument('--state-dir',type=Path,default=Path(__file__).resolve().parents[2]/'out/pc_link')
+    parser.add_argument('--auto-voice',action='store_true',help='Enable the board automatic voice loop once after control is verified')
+    args=parser.parse_args()
+    if os.name!='nt' or not 60<=args.duration<=3600:parser.error('Use Windows and a duration of 60..3600 seconds')
+    root=args.state_dir.resolve()/datetime.now().strftime('%Y%m%d_%H%M%S')
+    root.mkdir(parents=True,exist_ok=False)
+    config=root/'private.json';config.write_text(json.dumps({'port':19654,'token':secrets.token_hex(24),'seconds':args.duration}))
+    settings=json.loads(config.read_text())
+    errors=[];stop=threading.Event();closing=threading.Event();console_done=threading.Event()
+    port=None;link=None;receiver=None;ready=False;failed=False
+    rpc_lock=threading.Lock()
+    def serialized_request(value,timeout=90):
+        with rpc_lock:
+            if (closing.is_set() or stop.is_set()) and value.get('action')!='quit':
+                raise RuntimeError('Session is stopping')
+            return request(value,timeout=timeout)
+    worker=None;stderr=None;serial_log=None;closer=None
+    health=ControlHealth(probe=serialized_request)
+    automatic=AutomaticVoice(args.auto_voice,send=serialized_request);voice_display=AutoVoiceDisplay()
+    metrics={'gateway_to_uart_bytes':0,'uart_to_gateway_bytes':0,
+             'last_gateway_data':None,'last_uart_data':None,'uart_write_pending':False}
+    status={'phase':'starting','port':args.port,'ready':False,'forwarder_pid':os.getpid(),
+            'auto_voice_requested':args.auto_voice,'board_finished_marker_seen':False,
+            'board_exit_rc':None,'board_exit_line_complete':False}
+    status.update(automatic.result)
+    def update():
+        now=time.monotonic()
+        status['traffic']={
+            'gateway_to_uart_bytes':metrics['gateway_to_uart_bytes'],
+            'uart_to_gateway_bytes':metrics['uart_to_gateway_bytes'],
+            'gateway_rx_age_seconds':round(now-metrics['last_gateway_data'],1) if metrics['last_gateway_data'] else None,
+            'uart_rx_age_seconds':round(now-metrics['last_uart_data'],1) if metrics['last_uart_data'] else None,
+            'uart_write_pending':metrics['uart_write_pending']}
+        write_status(root/'status.json',status)
+    update()
+    try:
+        stderr=(root/'gateway_stderr.log').open('wb')
+        worker=subprocess.Popen(['wsl','-d','Ubuntu-22.04','--','python3','-u',
+            wsl_path(Path(__file__).with_name('gateway.py')),'--config',wsl_path(config)],
+            stdout=subprocess.PIPE,stderr=stderr,creationflags=subprocess.CREATE_NO_WINDOW)
+        serial_log=(root/'serial_private.bin').open('wb')
+        marker=worker.stdout.readline().decode(errors='replace').strip()
+        if marker!='PPP_SERVER_READY':raise RuntimeError('Gateway not ready: '+marker)
+        link=open_gateway(settings)
+        port=serial.Serial();port.port=args.port;port.baudrate=921600;port.timeout=.05;port.write_timeout=2
+        port.dtr=False;port.rts=False;port.open()
+        port.write(b'\n');time.sleep(.2);port.read(32768)
+        def command(text,timeout=6):
+            port.read(8192)  # discard a previous prompt before sending this command
+            port.write(text.encode()+b'\n');end=time.monotonic()+timeout;out=bytearray()
+            while time.monotonic()<end:
+                out.extend(port.read(8192))
+                if re.search(rb'(?:ap|nsh)>[ \t]*\x1b\[K',out):return bytes(out)
+            raise TimeoutError('Board console did not respond')
+        reply=command('zhaoxi status')
+        if 'Agent 消息总线已启动'.encode() in reply:
+            print('正在停止旧助手并等待完整退出确认；本次尚未启动新供网或自动语音。',flush=True)
+            reply=wait_for_agent_stop(port,command('zhaoxi stop'))
+            if b'[agent] Shutdown complete.' not in reply:
+                print('未收到完整停止日志，正在核对实际任务与消息总线状态……',flush=True)
+                tasks=command('ps');state=command('zhaoxi status')
+                if re.search(rb'\bai_agent(?:\s|$)',tasks) or 'Agent 消息总线已启动'.encode() in state:
+                    raise TimeoutError('旧助手仍未完整退出，本次没有继续启动新助手或自动语音。')
+                print('已核对：旧助手任务退出，消息总线停止。',flush=True)
+            else:print('旧助手已确认完整停止。',flush=True)
+        elif re.search(rb'\bai_agent(?:\s|$)',command('ps')):
+            raise RuntimeError('旧助手总线未就绪，但主任务仍未退出；本次没有继续启动新会话。')
+        print('旧助手已退出，正在建立电脑供网，然后启动板上业务服务。',flush=True)
+        port.write(b'zhaoxi pc-link serve\n')
+        receiver=threading.Thread(target=relay_inbound,args=(link,port,stop,errors,metrics,closing,console_done),daemon=True);receiver.start()
+        print('PPP session starting; waiting for board readiness',flush=True)
+        tail=bytearray();started=time.monotonic();last=-10;announced=False
+        last_voice_state=automatic.result['auto_voice_state'];previous_network_ready=None
+        def capture_board_exit():
+            closing.set();console_done.set()
+            exit_result=read_board_exit(port,tail)
+            if exit_result['extra']:
+                serial_log.write(exit_result['extra']);serial_log.flush();tail.extend(exit_result['extra'])
+            status.update(board_finished_marker_seen=exit_result['seen'],board_exit_rc=exit_result['rc'],
+                          board_exit_line_complete=exit_result['line'] is not None,
+                          board_exit_line=exit_result['line'])
+            update()
+        while time.monotonic()-started<args.duration and not stop.is_set():
+            if (root/'stop.request').exists():
+                print('Stop requested; returning the board to its console',flush=True)
+                break
+            data=port.read(8192)
+            if data:
+                metrics['last_uart_data']=time.monotonic()
+                serial_log.write(data);serial_log.flush()
+                tail.extend(data)
+                if len(tail)>16384:del tail[:-16384]
+                if b'PC_LINK finished' not in tail:
+                    link.sendall(data);metrics['uart_to_gateway_bytes']+=len(data)
+            if b'PC_LINK finished' in tail:
+                capture_board_exit();break
+            if not ready and b'PC_LINK ready' in tail:
+                ready=True;status.update(phase='checking-control',link_marker_seen=True);update()
+                print('PPP link marker received; verifying the board command channel',flush=True)
+            if ready:
+                health.tick();status.update(health.snapshot())
+                status['phase']='connected' if status['ready'] else 'control-unconfirmed'
+            if status['ready'] and not announced:
+                announced=True;previous_network_ready=None;update()
+                print('PPP_UPLINK_READY: board command channel available',flush=True)
+                print('Control with: python tools/pc_link/control.py --cmd ...',flush=True)
+            if status['ready']:automatic.start_once()
+            status.update(automatic.result)
+            if status['auto_voice_state']=='started':health.enable_voice_status()
+            status.update(health.voice_snapshot())
+            voice=status.get('auto_voice_board_status') or {}
+            status['usable_for_automatic_voice']=bool(status['ready'] and status['auto_status_confirmed'] and
+                voice.get('enabled') is True and voice.get('running') is True and not voice.get('last_error'))
+            status['accepting_speech']=bool(status['usable_for_automatic_voice'] and voice.get('accepting_speech') is True)
+            if status['auto_voice_state']!=last_voice_state:
+                last_voice_state=status['auto_voice_state'];update()
+                if last_voice_state=='starting':
+                    print('网络控制已确认，正在请求开发板启动自动语音循环……',flush=True)
+                elif last_voice_state=='started':
+                    print('板端已接受自动语音启动，正在确认实时状态。两短音表示本次失败后重新等待。',flush=True)
+                elif last_voice_state=='failed':
+                    print('自动语音未能启动：'+str(status['auto_voice_error'])+'。供网仍保留用于排查。',flush=True)
+            message=voice_display.message(status) if args.auto_voice else None
+            if message:
+                print(message,flush=True);update()
+            if previous_network_ready is True and not status['ready']:
+                update()
+                print('电脑到板子的控制通信未确认，当前不能视为自动语音可用；供网诊断继续运行。',flush=True)
+            elif previous_network_ready is False and status['ready'] and announced:
+                update()
+                print('电脑到板子的控制通信已恢复。',flush=True)
+            previous_network_ready=status['ready']
+            elapsed=int(time.monotonic()-started)
+            if not health.ever_confirmed and elapsed>150:raise TimeoutError('Wired board control channel not verified after 150 seconds')
+            if elapsed-last>=30:
+                status['session_seconds']=elapsed;update()
+                print('session_seconds',elapsed,'ready',status['ready'],flush=True);last=elapsed
+        if stop.is_set() and not status['board_finished_marker_seen']:
+            capture_board_exit()
+        if status['board_finished_marker_seen']:
+            validate_board_exit(True,status['board_exit_rc'],health.ever_confirmed)
+            errors[:]=[e for e in errors if e!='Gateway closed the PPP transport']
+        if errors:raise RuntimeError(errors[-1])
+        if (root/'stop.request').exists() and not ready:
+            raise RuntimeError('Stopped during link setup; board console restoration has not been confirmed')
+        if ready and b'PC_LINK finished' not in tail and not stop.is_set():
+            closing.set()
+            closer=drain_board_quit(port,link,tail,serial_log,serialized_request,
+                                    capture_board_exit,errors,metrics)
+        validate_board_exit(status['board_finished_marker_seen'],status['board_exit_rc'],health.ever_confirmed)
+        print('开发板已正常结束供网并返回控制台。',flush=True)
+    except KeyboardInterrupt:
+        print('收到停止请求，正在关闭板端自动语音并等待返回控制台……',flush=True)
+        closing.set()
+        try:
+            if ready and not status['board_finished_marker_seen'] and not stop.is_set():
+                closer=drain_board_quit(port,link,tail,serial_log,serialized_request,
+                                        capture_board_exit,errors,metrics)
+            validate_board_exit(status['board_finished_marker_seen'],status['board_exit_rc'],health.ever_confirmed)
+            print('开发板已确认结束供网并返回控制台。',flush=True)
+        except (Exception,KeyboardInterrupt) as error:
+            failed=True;errors.append('Interrupted before board shutdown confirmation: '+repr(error))
+            print('尚未确认板端停止，请检查开发板和本机状态记录。',flush=True)
+    except Exception as error:
+        failed=True
+        if not errors or errors[-1]!=str(error):errors.append(str(error))
+        print('供网未能正常完成：'+str(error),flush=True)
+        raise
+    finally:
+        stop.set();closing.set()
+        def cleanup(label,operation):
+            try:operation()
+            except Exception as error:errors.append(label+': '+str(error))
+        if link:
+            try:link.shutdown(socket.SHUT_RDWR)
+            except OSError:pass
+            cleanup('Close gateway socket',link.close)
+        if receiver:cleanup('Stop receive thread',lambda:receiver.join(3))
+        if port:cleanup('Close serial port',port.close)
+        if serial_log:cleanup('Close serial log',serial_log.close)
+        cleanup('Wait for control probe',health.wait)
+        cleanup('Wait for automatic voice start request',automatic.wait)
+        if closer:cleanup('Wait for quit request',lambda:closer.join(25))
+        if worker:
+            def stop_gateway():
+                try:worker.wait(10)
+                except subprocess.TimeoutExpired:
+                    linux_pid=wsl_path(root/'pc_ppp_server.pid')
+                    script="from pathlib import Path; import os,signal; p=Path("+repr(linux_pid)+"); pid=int(p.read_text()) if p.exists() else 0; cmd=Path('/proc/'+str(pid)+'/cmdline').read_bytes() if pid else b''; os.kill(pid,signal.SIGTERM) if pid and b'gateway.py' in cmd else None"
+                    subprocess.run(['wsl','-d','Ubuntu-22.04','--','python3','-c',script],capture_output=True,timeout=15,creationflags=subprocess.CREATE_NO_WINDOW,check=True)
+                    worker.wait(10)
+                summary=worker.stdout.read().decode('utf-8',errors='replace') if worker.stdout else ''
+                if worker.stdout:worker.stdout.close()
+                (root/'gateway_summary.log').write_text(summary,encoding='utf-8')
+                status['gateway_cleanup_confirmed']='PPP_SERVER_CLEANED' in summary and 'CLEANUP_FAILED' not in summary
+                if not status['gateway_cleanup_confirmed']:
+                    raise RuntimeError('Gateway cleanup was not confirmed; inspect gateway logs')
+            cleanup('Stop Linux gateway and restore forwarding rules',stop_gateway)
+        if stderr:cleanup('Close gateway log',stderr.close)
+        cleanup('Remove private channel token',lambda:config.unlink(missing_ok=True))
+        status.update(phase='failed' if failed or errors else 'stopped',ready=False,
+                      usable_for_automatic_voice=False,accepting_speech=False,errors=errors);update()
+        print('PPP session stopped; logs:',root,flush=True)
+    return 1 if failed or errors else 0
+
+if __name__=='__main__':raise SystemExit(main())

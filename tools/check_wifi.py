@@ -24,10 +24,12 @@ def main():
     tcp=tls[at:tls.index('\n#endif',at)]
     (out/'tcp_connect_helper.c').write_text(tcp)
     report={'board_operations':False,'tests':{}}
-    for name in ('test_network_readiness','test_tcp_connect'):
-        source=ROOT/'tests/headless/wifi'/(name+'.c')
+    for name in ('test_network_readiness','test_network_readiness_ppp','test_tcp_connect'):
+        source_name='test_network_readiness' if name.endswith('_ppp') else name
+        source=ROOT/'tests/headless/wifi'/(source_name+'.c')
         executable=out/name
-        subprocess.run([args.cc,'-std=c11','-Wall','-Wextra','-Werror',
+        flags=['-DCONFIG_NETUTILS_PPPD=1'] if name.endswith('_ppp') else []
+        subprocess.run([args.cc,*flags,'-std=c11','-Wall','-Wextra','-Werror',
                         '-fsanitize=address,undefined','-fno-omit-frame-pointer','-I'+str(out),
                         str(source),'-o',str(executable)],check=True)
         result=subprocess.run([str(executable)],check=True,capture_output=True,text=True)

@@ -1,0 +1,45 @@
+{
+  "session": "20261031_233801",
+  "microphone_enabled": false,
+  "microphone_running": false,
+  "test_limit_seconds": 120,
+  "captured_segments": 4,
+  "successful_replies": 3,
+  "failed_segments": 1,
+  "measurement": "识别结果进入助手至首段音频进入播放器；不含之前的收音、停顿判断和ASR。",
+  "replies": [
+    {
+      "kind": "本机时间",
+      "model_seconds": 0,
+      "tts_fetch_before_first_audio_seconds": 4.684,
+      "recognized_to_first_audio_seconds": 4.6901,
+      "speech_pipeline_total_seconds": 6.971
+    },
+    {
+      "kind": "模型问答1",
+      "model_seconds": 3.395,
+      "tts_fetch_before_first_audio_seconds": 9.438,
+      "recognized_to_first_audio_seconds": 12.9961,
+      "speech_pipeline_total_seconds": 14.132
+    },
+    {
+      "kind": "模型问答2",
+      "model_seconds": 10.445,
+      "tts_fetch_before_first_audio_seconds": 19.485,
+      "recognized_to_first_audio_seconds": 30.0847,
+      "speech_pipeline_total_seconds": 31.717
+    }
+  ],
+  "observations": [
+    "当前MiMo TTS适配先获取完整JSON并解码完整PCM，再分块送播放器，不是真正的网络流式播放。",
+    "本地语音结束判定需要900ms连续静音。",
+    "ASR未记录独立精确耗时，仅有约3至4秒间隔的状态采样；不能把表内耗时当作用户说完至听到回答的完整耗时。",
+    "当前TTS等待包含云端生成、网络和串口传输、JSON/base64处理，现有日志不能分别定量归因。",
+    "自动监听停止后已再次核对enabled=false、running=false。"
+  ],
+  "firmware_sha256": "5e1bee6c30b37fb696f6e8df7f49a2f146e1fa45678e5af7591df079954e438e",
+  "recorded_date": "2026-10-31",
+  "raw_audio_published": false,
+  "raw_transport_published": false,
+  "scope": "先前镜像的两分钟真人自动问答；后续0036/0037修复版需分开记录。"
+}
