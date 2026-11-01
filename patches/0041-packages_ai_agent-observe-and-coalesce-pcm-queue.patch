@@ -1,0 +1,194 @@
+--- a/src/voice/voice_channel.c
++++ b/src/voice/voice_channel.c
+@@ -1054,7 +1054,12 @@
+     pthread_mutex_t lock;
+     pthread_cond_t changed;
+     unsigned char *data;
+-    size_t read, write, used, peak;
++    size_t read, write, used, peak, low;
++    size_t received_bytes, played_bytes, min_chunk, max_chunk;
++    unsigned chunks, underflows;
++    int64_t first_rx_ms, last_rx_ms, first_play_ms, last_play_ms;
++    uint64_t dma_ms, empty_ms, max_empty_ms, gap_ms, max_gap_ms;
++    uint64_t fragment_wait_ms, full_wait_ms;
+     bool eof;
+     int error;
+     audio_playback_t *pb;
+@@ -1067,13 +1072,18 @@
+     return (int64_t)t.tv_sec * 1000 + t.tv_nsec / 1000000;
+ }
+ 
+-static void tts_queue_wait(struct tts_pcm_queue *q)
++static void tts_queue_wait_ms(struct tts_pcm_queue *q, unsigned milliseconds)
+ {
+     struct timespec until;
+     clock_gettime(CLOCK_REALTIME, &until);
+-    until.tv_nsec += 100000000;
++    until.tv_nsec += (long)milliseconds*1000000;
+     if (until.tv_nsec >= 1000000000) { until.tv_sec++; until.tv_nsec -= 1000000000; }
+     pthread_cond_timedwait(&q->changed, &q->lock, &until);
++}
++
++static void tts_queue_wait(struct tts_pcm_queue *q)
++{
++    tts_queue_wait_ms(q,100);
+ }
+ 
+ /* q->lock is held; existing callers never hold s_voice.lock while waiting
+@@ -1093,41 +1103,75 @@
+     struct tts_pcm_queue *q = argument;
+     unsigned char block[TTS_QUEUE_BLOCK];
+     bool started = false;
+-    int64_t first_data = 0;
++    int64_t first_data = 0, fragment_since = 0, empty_since = 0;
+     for (;;) {
+         pthread_mutex_lock(&q->lock);
+         while (!q->error) {
+             int cancelled = voice_channel_tts_stream_error();
+             if (cancelled) { q->error = cancelled; break; }
+-            if (q->used && !first_data) first_data = tts_queue_now();
+-            if (q->used && (started || q->eof || q->used >= TTS_QUEUE_PREFILL ||
+-                            tts_queue_now()-first_data >= 200)) break;
+-            if (q->eof) break;
+-            tts_queue_wait(q);
++            int64_t now=tts_queue_now();
++            unsigned wait_ms=100;
++            if (!started) {
++                if (q->used && !first_data) first_data=now;
++                if (q->used && (q->eof || q->used>=TTS_QUEUE_PREFILL ||
++                                now-first_data>=200)) break;
++                if (q->used && first_data) wait_ms=(unsigned)(200-(now-first_data));
++            } else if (q->used) {
++                /* Count actual starvation only if more PCM arrives. Waiting
++                 * for the final SSE/DONE after all audio is not an underrun. */
++                if (empty_since) {
++                    uint64_t elapsed=(uint64_t)(now-empty_since);
++                    q->underflows++;q->empty_ms+=elapsed;
++                    if(elapsed>q->max_empty_ms)q->max_empty_ms=elapsed;
++                    empty_since=0;
++                }
++                if (q->eof || q->used>=TTS_QUEUE_BLOCK) break;
++                if(!fragment_since)fragment_since=now;
++                if(now-fragment_since>=80)break;
++                wait_ms=(unsigned)(80-(now-fragment_since));
++            } else {
++                if(!empty_since)empty_since=now;
++                fragment_since=0;
++            }
++            if(q->eof)break;
++            if(wait_ms>100)wait_ms=100;
++            bool fragment_wait=started && q->used>0;
++            int64_t before=tts_queue_now();
++            tts_queue_wait_ms(q,wait_ms?wait_ms:1);
++            if(fragment_wait)q->fragment_wait_ms+=(uint64_t)(tts_queue_now()-before);
+         }
+         if (q->error || (!q->used && q->eof)) {
+             pthread_cond_broadcast(&q->changed);
+             pthread_mutex_unlock(&q->lock);
+             return NULL;
+         }
+-        started = true;
+-        size_t count = q->used < sizeof(block) ? q->used : sizeof(block);
+-        size_t first = TTS_QUEUE_BYTES-q->read;
+-        if (first > count) first = count;
+-        memcpy(block, q->data+q->read, first);
+-        memcpy(block+first, q->data, count-first);
+-        q->read=(q->read+count)%TTS_QUEUE_BYTES;
+-        q->used-=count;
++        int64_t now=tts_queue_now();
++        if(!started)q->first_play_ms=now;
++        else if(q->last_play_ms) {
++            uint64_t gap=(uint64_t)(now-q->last_play_ms);
++            q->gap_ms+=gap;
++            if(gap>q->max_gap_ms)q->max_gap_ms=gap;
++        }
++        started=true;fragment_since=0;
++        size_t count=q->used<sizeof(block)?q->used:sizeof(block);
++        size_t first=TTS_QUEUE_BYTES-q->read;
++        if(first>count)first=count;
++        memcpy(block,q->data+q->read,first);
++        memcpy(block+first,q->data,count-first);
++        q->read=(q->read+count)%TTS_QUEUE_BYTES;q->used-=count;
++        if(!q->eof && q->used<q->low)q->low=q->used;
+         pthread_cond_broadcast(&q->changed);
+         pthread_mutex_unlock(&q->lock);
++        int64_t play_begin=tts_queue_now();
+         tts_stream_cb(block,count,0,q->pb);
++        int64_t play_end=tts_queue_now();
+         int error=voice_channel_tts_stream_error();
+-        if (error) {
+-            pthread_mutex_lock(&q->lock);
+-            tts_queue_fail(q,error);
+-            pthread_mutex_unlock(&q->lock);
+-            return NULL;
+-        }
++        pthread_mutex_lock(&q->lock);
++        q->dma_ms+=(uint64_t)(play_end-play_begin);q->last_play_ms=play_end;
++        if(error)tts_queue_fail(q,error);
++        else q->played_bytes+=count;
++        pthread_mutex_unlock(&q->lock);
++        if(error)return NULL;
+     }
+ }
+ 
+@@ -1143,6 +1187,11 @@
+         pthread_mutex_unlock(&q->lock);
+         return;
+     }
++    int64_t received=tts_queue_now();
++    if(!q->first_rx_ms)q->first_rx_ms=received;
++    q->last_rx_ms=received;q->chunks++;
++    if(!q->min_chunk || length<q->min_chunk)q->min_chunk=length;
++    if(length>q->max_chunk)q->max_chunk=length;
+     size_t offset=0;
+     while (offset<length && !q->error) {
+         int cancelled=voice_channel_tts_stream_error();
+@@ -1153,7 +1202,9 @@
+             if (cancelled || tts_queue_now()>=deadline) {
+                 tts_queue_fail(q,cancelled?cancelled:-ETIMEDOUT); break;
+             }
++            int64_t before=tts_queue_now();
+             tts_queue_wait(q);
++            q->full_wait_ms+=(uint64_t)(tts_queue_now()-before);
+         }
+         if (q->error) break;
+         size_t count=TTS_QUEUE_BYTES-q->used;
+@@ -1163,7 +1214,7 @@
+         memcpy(q->data+q->write,pcm+offset,first);
+         memcpy(q->data,pcm+offset+first,count-first);
+         q->write=(q->write+count)%TTS_QUEUE_BYTES;
+-        q->used+=count; offset+=count;
++        q->used+=count; offset+=count;q->received_bytes+=count;
+         if (q->used>q->peak) q->peak=q->used;
+         pthread_cond_broadcast(&q->changed);
+     }
+@@ -1173,7 +1224,7 @@
+ static int tts_queue_start(struct tts_pcm_queue *q, audio_playback_t *pb,
+                            pthread_t *thread)
+ {
+-    memset(q,0,sizeof(*q)); q->pb=pb;
++    memset(q,0,sizeof(*q)); q->pb=pb;q->low=TTS_QUEUE_BYTES;
+     q->data=malloc(TTS_QUEUE_BYTES);
+     if (!q->data) return -ENOMEM;
+     int result=pthread_mutex_init(&q->lock,NULL);
+@@ -1203,6 +1254,20 @@
+     if (!result) result=q->error;
+     syslog(LOG_INFO,"[%s] TTS PCM queue peak=%zu capacity=%u rc=%d\n",
+            TAG,q->peak,TTS_QUEUE_BYTES,result);
++    int64_t rx_span=q->last_rx_ms-q->first_rx_ms;
++    int64_t play_span=q->last_play_ms-q->first_play_ms;
++    uint64_t rx_rate=rx_span>0?(uint64_t)q->received_bytes*1000/(uint64_t)rx_span:0;
++    uint64_t ideal_ms=(uint64_t)q->played_bytes*1000/
++        (AGENT_TTS_WS_SAMPLE_RATE*AGENT_VOICE_CHANNELS*(AGENT_VOICE_BITS/8));
++    syslog(LOG_INFO,"[%s] TTS PCM bytes rx=%zu played=%zu low=%zu chunks=%u min_chunk=%zu max_chunk=%zu\n",
++           TAG,q->received_bytes,q->played_bytes,q->low,q->chunks,q->min_chunk,q->max_chunk);
++    syslog(LOG_INFO,"[%s] TTS PCM timing rx_ms=%lld rx_Bps=%llu dma_ms=%llu play_ms=%lld ideal_ms=%llu\n",
++           TAG,(long long)rx_span,(unsigned long long)rx_rate,(unsigned long long)q->dma_ms,
++           (long long)play_span,(unsigned long long)ideal_ms);
++    syslog(LOG_INFO,"[%s] TTS PCM gaps count=%u empty_ms=%llu max_empty_ms=%llu gap_ms=%llu max_gap_ms=%llu fragment_wait_ms=%llu full_wait_ms=%llu\n",
++           TAG,q->underflows,(unsigned long long)q->empty_ms,(unsigned long long)q->max_empty_ms,
++           (unsigned long long)q->gap_ms,(unsigned long long)q->max_gap_ms,
++           (unsigned long long)q->fragment_wait_ms,(unsigned long long)q->full_wait_ms);
+     pthread_cond_destroy(&q->changed); pthread_mutex_destroy(&q->lock);
+     free(q->data);
+     return result;

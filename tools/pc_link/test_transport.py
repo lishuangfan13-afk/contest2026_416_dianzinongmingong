@@ -8,11 +8,12 @@ import json
 import os
 import io
 import contextlib
+import ast
 from pathlib import Path
 from unittest.mock import patch
 from types import SimpleNamespace
 
-from start import ControlHealth, drain_board_quit, main as start_main, open_gateway, relay_inbound, read_board_exit, validate_board_exit, write_status
+from start import ControlHealth, UART_WRITE_CHUNK, drain_board_quit, main as start_main, open_gateway, read_available, relay_inbound, read_board_exit, traffic_snapshot, validate_board_exit, write_status
 from control import process_error, request
 from launch import read_status
 
@@ -30,6 +31,155 @@ class SerialSink:
 
 
 class RelayTests(unittest.TestCase):
+    def test_tcp_nodelay_is_enabled_on_both_host_and_wsl_sockets(self):
+        calls=[]
+        class Link:
+            def sendall(self,data):calls.append(('auth',data))
+            def setsockopt(self,*args):calls.append(('option',args))
+            def settimeout(self,value):calls.append(('timeout',value))
+        link=Link()
+        with patch('start.socket.create_connection',return_value=link):
+            self.assertIs(open_gateway({'port':123,'token':'test-token'}),link)
+        option=(socket.IPPROTO_TCP,socket.TCP_NODELAY,1)
+        self.assertEqual(calls,[('auth',b'test-token\n'),('option',option),('timeout',None)])
+        # Evaluate only the accepted-peer socket option, not gateway setup.
+        module=ast.parse(Path(__file__).with_name('gateway.py').read_text(encoding='utf-8'))
+        accepted=[node for node in ast.walk(module) if isinstance(node,ast.Call) and
+                  isinstance(node.func,ast.Attribute) and node.func.attr=='setsockopt' and
+                  isinstance(node.func.value,ast.Name) and node.func.value.id=='peer']
+        self.assertEqual(len(accepted),1)
+        calls.clear()
+        eval(compile(ast.Expression(accepted[0]),'gateway-nodelay','eval'),
+             {'peer':link,'socket':socket})
+        self.assertEqual(calls,[('option',option)])
+
+    def test_tcp_nodelay_failure_closes_transport(self):
+        closed=[]
+        class Link:
+            def sendall(self,data):pass
+            def setsockopt(self,*args):raise OSError('socket option failed')
+            def close(self):closed.append(True)
+        with patch('start.socket.create_connection',return_value=Link()):
+            with self.assertRaisesRegex(OSError,'socket option failed'):
+                open_gateway({'port':123,'token':'test-token'})
+        self.assertEqual(closed,[True])
+
+    def test_gateway_negotiates_raw_uart_without_optional_control_escaping(self):
+        # Inspect only the subprocess argument expression; importing this script
+        # would start a real gateway and mutate network rules.
+        module=ast.parse(Path(__file__).with_name('gateway.py').read_text(encoding='utf-8'))
+        calls=[node for node in ast.walk(module) if isinstance(node,ast.Call) and
+               isinstance(node.func,ast.Attribute) and node.func.attr=='Popen']
+        self.assertEqual(len(calls),1)
+        command=eval(compile(ast.Expression(calls[0].args[0]),'gateway-command','eval'),
+                     {'root':Path('test-session')})
+        self.assertEqual(command[0],'pppd')
+        self.assertEqual(command[command.index('asyncmap')+1],'0')
+        self.assertNotIn('escape',command)
+        self.assertEqual(command[command.index('mtu')+1],'512')
+        self.assertEqual(command[command.index('mru')+1],'512')
+        self.assertIn('noccp',command);self.assertIn('novj',command)
+
+    def test_large_transfer_is_byte_exact_bounded_and_has_no_fixed_sleep(self):
+        payload=bytes(range(256))*1025
+        chunks=iter([payload,b''])
+        class Link:
+            def recv(self,_):return next(chunks)
+        class Sink(SerialSink):
+            def __init__(self):super().__init__();self.sizes=[]
+            def write(self,data):self.sizes.append(len(data));return super().write(data)
+        sink=Sink();errors=[];stop=threading.Event();closing=threading.Event();closing.set()
+        metrics={'gateway_to_uart_bytes':0,'uart_to_gateway_bytes':0,
+                 'last_gateway_data':None,'last_uart_data':None,'uart_write_pending':False}
+        with patch('start.time.sleep',side_effect=AssertionError('relay must not insert fixed delays')):
+            relay_inbound(Link(),sink,stop,errors,metrics,expected_close=closing)
+        self.assertEqual(sink.received,payload)
+        self.assertEqual(errors,[]);self.assertTrue(stop.is_set())
+        self.assertEqual(max(sink.sizes),512)
+        self.assertEqual(len(sink.sizes),(len(payload)+511)//512)
+        self.assertEqual(metrics['gateway_to_uart_bytes'],len(payload))
+        self.assertEqual(metrics['uart_write_calls'],len(sink.sizes))
+        self.assertFalse(metrics['uart_write_pending'])
+        snapshot=traffic_snapshot(metrics)
+        self.assertEqual(snapshot['uart_write_chunk_limit'],512)
+        self.assertEqual(snapshot['uart_write_max_bytes'],512)
+        self.assertGreater(snapshot['uart_write_seconds'],0)
+        self.assertGreater(snapshot['uart_active_bytes_per_second'],0)
+
+    def test_serial_backpressure_does_not_prefetch_more_network_data(self):
+        entered=threading.Event();release=threading.Event();reads=[];errors=[];stop=threading.Event()
+        class Link:
+            def recv(self,_):
+                reads.append(1)
+                return b'x'*1024 if len(reads)==1 else b''
+        class Sink(SerialSink):
+            def write(self,data):
+                entered.set();release.wait(2);return super().write(data)
+        sink=Sink();closing=threading.Event();closing.set()
+        worker=threading.Thread(target=relay_inbound,args=(Link(),sink,stop,errors),kwargs={'expected_close':closing})
+        try:
+            worker.start();self.assertTrue(entered.wait(1))
+            self.assertEqual(len(reads),1)
+            self.assertEqual(sink.received,b'')
+        finally:
+            release.set();worker.join(2)
+        self.assertFalse(worker.is_alive());self.assertEqual(errors,[])
+        self.assertEqual(sink.received,b'x'*1024)
+
+    def test_cancellation_and_console_restore_stop_at_a_bounded_write(self):
+        for restoring_console in (False,True):
+            with self.subTest(restoring_console=restoring_console):
+                stop=threading.Event();done=threading.Event();errors=[];reads=[]
+                class Link:
+                    def recv(self,_):reads.append(1);return b'x'*8192
+                class Sink(SerialSink):
+                    def write(self,data):
+                        (done if restoring_console else stop).set()
+                        return super().write(data)
+                sink=Sink();relay_inbound(Link(),sink,stop,errors,console_done=done)
+                self.assertEqual(sink.received,b'x'*UART_WRITE_CHUNK)
+                self.assertEqual(reads,[1]);self.assertEqual(errors,[])
+
+    def test_uart_exception_clears_pending_and_stops_without_retry(self):
+        class Link:
+            def recv(self,_):return b'frame'
+        class Sink:
+            def write(self,_):raise OSError('write failed')
+        metrics={'gateway_to_uart_bytes':0,'uart_to_gateway_bytes':0,
+                 'last_gateway_data':None,'last_uart_data':None,'uart_write_pending':False}
+        errors=[];stop=threading.Event();relay_inbound(Link(),Sink(),stop,errors,metrics)
+        self.assertTrue(stop.is_set());self.assertFalse(metrics['uart_write_pending'])
+        self.assertEqual(metrics['gateway_to_uart_bytes'],0)
+        self.assertEqual(metrics['uart_write_calls'],1)
+        self.assertIn('write failed',errors[0])
+
+    def test_read_available_waits_only_for_first_ack_byte(self):
+        sizes=[]
+        class Port:
+            in_waiting=0
+            def read(self,count):sizes.append(count);return b'A'
+        port=Port();self.assertEqual(read_available(port),b'A')
+        port.in_waiting=3;read_available(port)
+        port.in_waiting=20000;read_available(port)
+        self.assertEqual(sizes,[1,3,8192])
+
+    def test_read_available_legacy_test_port_also_waits_for_one_byte(self):
+        class Port:
+            def read(self,count):self.count=count;return b'ack'
+        port=Port();self.assertEqual(read_available(port),b'ack');self.assertEqual(port.count,1)
+
+    def test_traffic_snapshot_supports_zero_clock_origin_and_idle_session(self):
+        metrics={'gateway_to_uart_bytes':0,'uart_to_gateway_bytes':0,
+                 'last_gateway_data':None,'last_uart_data':None,'uart_write_pending':False}
+        value=traffic_snapshot(metrics,now=0)
+        self.assertIsNone(value['uart_active_bytes_per_second']);self.assertIsNone(value['uart_span_bytes_per_second'])
+        metrics.update(gateway_to_uart_bytes=100,uart_write_seconds=.5,
+                       first_uart_write_started=0,last_uart_write_completed=2,last_gateway_data=0)
+        value=traffic_snapshot(metrics,now=3)
+        self.assertEqual(value['uart_active_bytes_per_second'],200)
+        self.assertEqual(value['uart_span_bytes_per_second'],50)
+        self.assertEqual(value['gateway_rx_age_seconds'],3)
+
     def test_idle_connection_still_receives_later_ppp_frame(self):
         # Reproduce the failure without a ten-second test: the connection
         # deadline is short, but the gateway's next packet arrives later.

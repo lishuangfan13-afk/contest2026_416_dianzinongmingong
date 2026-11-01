@@ -41,7 +41,9 @@ int voice_tts_speak_stream(const char *text,voice_tts_chunk_cb cb,void *arg)
     unsigned char pcm[640]={0};cb(pcm,sizeof(pcm),0,arg);
     if(s_auto.enabled) {
         char state[512];voice_channel_auto_status(state,sizeof(state));
-        assert(strstr(state,"正在播放回答"));
+        /* Enqueueing a small first fragment does not mean DMA has started.
+         * The dedicated PCM consumer owns that state transition. */
+        assert(strstr(state,"正在合成语音") || strstr(state,"正在播放回答"));
     }
     usleep(20000);cb(NULL,0,1,arg);return 0;
 }

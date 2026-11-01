@@ -1,0 +1,192 @@
+--- a/netutils/pppd/pppd.c
++++ b/netutils/pppd/pppd.c
+@@ -225,6 +225,10 @@
+       ctx->pc_rx_length = 0;
+       ctx->pc_rx_error = 0;
+       ctx->pc_rx_fd = ctx->ctl.fd;
++      ctx->pc_tx_length = 0;
++      ctx->pc_tx_started = false;
++      ctx->pc_tx_fd = ctx->ctl.fd;
++      ctx->pc_tx_error = 0;
+ 
+       if (ctx->ppp_flags & PPP_RX_READY)
+         {
+@@ -364,10 +368,137 @@
+  * Name: ppp_arch_putchar
+  ****************************************************************************/
+ 
++#ifdef CONFIG_EXAMPLES_ZHAOXI
++static int64_t ppp_pc_tx_now_ms(void)
++{
++  struct timespec ts;
++  if (clock_gettime(CLOCK_MONOTONIC, &ts) < 0)
++    {
++      return -1;
++    }
++
++  return (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
++}
++
++static int ppp_pc_tx_flush(FAR struct ppp_context_s *ctx)
++{
++  int64_t start = ppp_pc_tx_now_ms();
++  if (start < 0)
++    {
++      return -EIO;
++    }
++
++  for (;;)
++    {
++      if (zhaoxi_pc_link_stopping && zhaoxi_pc_link_stopping())
++        {
++          return -ECANCELED;
++        }
++
++      int64_t now = ppp_pc_tx_now_ms();
++      if (now < 0 || now - start >= 1000)
++        {
++          return now < 0 ? -EIO : -ETIMEDOUT;
++        }
++
++      int available = 0;
++      int result = ioctl(ctx->ctl.fd, FIONSPACE, (unsigned long)&available);
++      if (result < 0 && errno != EINTR && errno != EAGAIN)
++        {
++          return -errno;
++        }
++
++      if (result >= 0 && available >= ctx->pc_tx_length)
++        {
++          ssize_t written = write(ctx->ctl.fd, ctx->pc_tx_buffer,
++                                  ctx->pc_tx_length);
++          if (written == ctx->pc_tx_length)
++            {
++              return 0;
++            }
++
++          /* A positive short write has already exposed a frame prefix.
++           * Never replay it or resume it as another supposedly atomic frame. */
++
++          if (written > 0)
++            {
++              return -EIO;
++            }
++
++          if (written < 0 && errno != EINTR && errno != EAGAIN)
++            {
++              return -errno;
++            }
++        }
++
++      usleep(1000);
++    }
++}
++
++static int ppp_pc_tx_char(FAR struct ppp_context_s *ctx, uint8_t c)
++{
++  if (ctx->pc_tx_fd != ctx->ctl.fd)
++    {
++      ctx->pc_tx_fd = ctx->ctl.fd;
++      ctx->pc_tx_length = 0;
++      ctx->pc_tx_started = false;
++      ctx->pc_tx_error = 0;
++    }
++
++  if (ctx->pc_tx_error)
++    {
++      return 0;
++    }
++
++  if (zhaoxi_pc_link_stopping && zhaoxi_pc_link_stopping())
++    {
++      ctx->pc_tx_error = -ECANCELED;
++      return 0;
++    }
++
++  if (!ctx->pc_tx_started)
++    {
++      if (c != 0x7e)
++        {
++          ctx->pc_tx_error = -EPROTO;
++          return 0;
++        }
++
++      ctx->pc_tx_buffer[0] = c;
++      ctx->pc_tx_length = 1;
++      ctx->pc_tx_started = true;
++      return 1;
++    }
++
++  if (ctx->pc_tx_length >= sizeof(ctx->pc_tx_buffer))
++    {
++      ctx->pc_tx_error = -EMSGSIZE;
++      return 0;
++    }
++
++  ctx->pc_tx_buffer[ctx->pc_tx_length++] = c;
++  if (c == 0x7e)
++    {
++      ctx->pc_tx_error = ppp_pc_tx_flush(ctx);
++      ctx->pc_tx_length = 0;
++      ctx->pc_tx_started = false;
++    }
++
++  return ctx->pc_tx_error ? 0 : 1;
++}
++#endif
++
+ int ppp_arch_putchar(FAR struct ppp_context_s *ctx, uint8_t c)
+ {
+   int ret;
+   struct pollfd fds;
++
++#ifdef CONFIG_EXAMPLES_ZHAOXI
++  if (ctx->pc_link_managed)
++    {
++      return ppp_pc_tx_char(ctx, c);
++    }
++#endif
+ 
+   ret = write(ctx->ctl.fd, &c, 1);
+   if (ret < 0 && errno == EAGAIN)
+@@ -397,7 +528,8 @@
+ static int ppp_uart_poll_timeout(FAR struct ppp_context_s *ctx)
+ {
+ #ifdef CONFIG_EXAMPLES_ZHAOXI
+-  if (ctx->pc_link_managed && ctx->pc_rx_position < ctx->pc_rx_length)
++  if (ctx->pc_link_managed && (ctx->pc_rx_position < ctx->pc_rx_length ||
++                               ctx->pc_tx_error))
+     {
+       return 0;
+     }
+@@ -478,9 +610,9 @@
+       ppp_poll(ctx);
+ 
+ #ifdef CONFIG_EXAMPLES_ZHAOXI
+-      if (ctx->pc_link_managed && ctx->pc_rx_error)
+-        {
+-          result = ctx->pc_rx_error;
++      if (ctx->pc_link_managed && (ctx->pc_rx_error || ctx->pc_tx_error))
++        {
++          result = ctx->pc_rx_error ? ctx->pc_rx_error : ctx->pc_tx_error;
+           break;
+         }
+ 
+--- a/netutils/pppd/ppp.h
++++ b/netutils/pppd/ppp.h
+@@ -187,6 +187,15 @@
+   int      pc_rx_fd;
+   int      pc_rx_error;
+ 
++  /* Submit one escaped frame per UART write, so ordinary log writes cannot
++   * splice bytes into PPP frames. The maximum includes escaped FCS/headers. */
++
++  uint8_t  pc_tx_buffer[2 * (PPP_RX_BUFFER_SIZE + 8) + 2];
++  uint16_t pc_tx_length;
++  bool     pc_tx_started;
++  int      pc_tx_fd;
++  int      pc_tx_error;
++
+ #endif
+ 
+   /* Statistics counters */

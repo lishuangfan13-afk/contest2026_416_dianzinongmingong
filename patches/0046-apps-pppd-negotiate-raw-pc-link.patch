@@ -1,0 +1,30 @@
+--- a/netutils/pppd/lcp.c
++++ b/netutils/pppd/lcp.c
+@@ -528,12 +528,23 @@
+ 
+           /* Write options */
+ 
++          uint8_t accm = 0xff;
++#ifdef CONFIG_EXAMPLES_ZHAOXI
++          /* The direct PC UART is binary-transparent, with software flow
++           * control and line processing disabled. Modems retain the default
++           * map; LCP frames themselves are always escaped by AHDLC. */
++
++          if (ctx->pc_link_managed)
++            {
++              accm = 0;
++            }
++#endif
+           *bptr++ = LPC_ACCM;
+           *bptr++ = 0x6;
+-          *bptr++ = 0xff;
+-          *bptr++ = 0xff;
+-          *bptr++ = 0xff;
+-          *bptr++ = 0xff;
++          *bptr++ = accm;
++          *bptr++ = accm;
++          *bptr++ = accm;
++          *bptr++ = accm;
+ 
+ #if 0
+           /* Write magic number */

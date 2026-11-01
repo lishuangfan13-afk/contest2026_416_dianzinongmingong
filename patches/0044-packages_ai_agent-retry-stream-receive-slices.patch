@@ -1,0 +1,27 @@
+--- a/src/infra/vela_tls.c
++++ b/src/infra/vela_tls.c
+@@ -824,10 +824,21 @@
+                    &timeout, sizeof(timeout)) < 0)
+         return MBEDTLS_ERR_NET_RECV_FAILED;
+ #ifdef CONFIG_ZHAOXI_BES_AUDIO
+-    return zhaoxi_tls_recv(bio->net, data, length);
++    int ret = zhaoxi_tls_recv(bio->net, data, length);
+ #else
+-    return mbedtls_net_recv(bio->net, data, length);
+-#endif
++    int ret = mbedtls_net_recv(bio->net, data, length);
++#endif
++    int saved_errno = errno;
++    /* mbedtls_net_recv maps EAGAIN on a blocking fd to NET_RECV_FAILED.
++     * Here SO_RCVTIMEO is only a one-second slice of the absolute response
++     * deadline, so an idle slice must not truncate an otherwise valid SSE. */
++    if (ret == MBEDTLS_ERR_NET_RECV_FAILED &&
++        (saved_errno == EAGAIN || saved_errno == EWOULDBLOCK ||
++         saved_errno == EINTR || saved_errno == ETIMEDOUT)) {
++        return tls_stream_now_ms() >= bio->deadline ? MBEDTLS_ERR_SSL_TIMEOUT :
++                                                     MBEDTLS_ERR_SSL_WANT_READ;
++    }
++    return ret;
+ }
+ 
+ typedef struct {

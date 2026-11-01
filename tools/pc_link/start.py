@@ -158,6 +158,9 @@ def open_gateway(settings):
     link=socket.create_connection(('127.0.0.1',settings['port']),10)
     try:
         link.sendall((settings['token']+'\n').encode())
+        # A UART read can contain only the first octet of a TCP ACK frame.
+        # Forward the remainder immediately rather than waiting on Nagle.
+        link.setsockopt(socket.IPPROTO_TCP,socket.TCP_NODELAY,1)
         # The ten-second limit is only for connecting. An idle PPP link must
         # continue receiving the peer's next packet, including LCP keepalives.
         link.settimeout(None)
@@ -165,6 +168,36 @@ def open_gateway(settings):
     except BaseException:
         link.close()
         raise
+
+UART_WRITE_CHUNK = 512
+
+
+def read_available(port,maximum=8192):
+    """Forward small ACKs immediately instead of waiting to fill an 8-KiB read."""
+    waiting=getattr(port,'in_waiting',0)
+    return port.read(min(maximum,waiting) if waiting else 1)
+
+
+def traffic_snapshot(metrics,now=None):
+    now=time.monotonic() if now is None else now
+    count=metrics['gateway_to_uart_bytes'];active=metrics.get('uart_write_seconds',0.0)
+    first=metrics.get('first_uart_write_started');last=metrics.get('last_uart_write_completed')
+    span=last-first if first is not None and last is not None else 0.0
+    return {
+        'gateway_to_uart_bytes':count,
+        'uart_to_gateway_bytes':metrics['uart_to_gateway_bytes'],
+        'gateway_rx_age_seconds':round(now-metrics['last_gateway_data'],1) if metrics['last_gateway_data'] is not None else None,
+        'uart_rx_age_seconds':round(now-metrics['last_uart_data'],1) if metrics['last_uart_data'] is not None else None,
+        'uart_write_pending':metrics['uart_write_pending'],
+        'uart_write_chunk_limit':UART_WRITE_CHUNK,
+        'uart_write_calls':metrics.get('uart_write_calls',0),
+        'uart_write_max_bytes':metrics.get('uart_write_max_bytes',0),
+        'uart_write_seconds':round(active,6),
+        'uart_write_max_seconds':round(metrics.get('uart_write_max_seconds',0.0),6),
+        'uart_active_bytes_per_second':round(count/active,1) if active>0 else None,
+        'uart_span_bytes_per_second':round(count/span,1) if span>0 else None,
+    }
+
 
 def relay_inbound(link,port,stop,errors,metrics=None,expected_close=None,console_done=None):
     try:
@@ -175,16 +208,28 @@ def relay_inbound(link,port,stop,errors,metrics=None,expected_close=None,console
                     errors.append('Gateway closed the PPP transport')
                 break
             if metrics is not None:metrics['last_gateway_data']=time.monotonic()
-            for at in range(0,len(data),128):
+            # Bounded writes preserve cancellation checks and let the serial
+            # driver apply backpressure. Per-128-byte sleeps previously added
+            # 8.192 seconds of deliberate idle time per MiB, before USB costs.
+            for at in range(0,len(data),UART_WRITE_CHUNK):
                 if stop.is_set() or console_done and console_done.is_set():break
-                piece=data[at:at+128]
-                if metrics is not None:metrics['uart_write_pending']=True
+                piece=data[at:at+UART_WRITE_CHUNK]
+                started=time.monotonic()
+                if metrics is not None:
+                    metrics['uart_write_pending']=True
+                    if metrics.get('first_uart_write_started') is None:metrics['first_uart_write_started']=started
+                    metrics['uart_write_calls']=metrics.get('uart_write_calls',0)+1
+                    metrics['uart_write_max_bytes']=max(metrics.get('uart_write_max_bytes',0),len(piece))
                 try:
                     if port.write(piece)!=len(piece):raise RuntimeError('Short UART write')
                 finally:
-                    if metrics is not None:metrics['uart_write_pending']=False
+                    if metrics is not None:
+                        ended=time.monotonic();elapsed=ended-started
+                        metrics['uart_write_pending']=False
+                        metrics['uart_write_seconds']=metrics.get('uart_write_seconds',0.0)+elapsed
+                        metrics['uart_write_max_seconds']=max(metrics.get('uart_write_max_seconds',0.0),elapsed)
+                        metrics['last_uart_write_completed']=ended
                 if metrics is not None:metrics['gateway_to_uart_bytes']+=len(piece)
-                time.sleep(.001)
     except Exception as error:
         if not stop.is_set():errors.append(repr(error))
     finally:
@@ -233,7 +278,7 @@ def drain_board_quit(port,link,tail,serial_log,send,capture_exit,errors,
     closer=threading.Thread(target=request_quit,daemon=True);closer.start()
     until=clock()+timeout
     while clock()<until:
-        data=port.read(8192)
+        data=read_available(port)
         if data:
             if metrics is not None:metrics['last_uart_data']=clock()
             serial_log.write(data);serial_log.flush();tail.extend(data)
@@ -276,13 +321,7 @@ def main():
             'board_exit_rc':None,'board_exit_line_complete':False}
     status.update(automatic.result)
     def update():
-        now=time.monotonic()
-        status['traffic']={
-            'gateway_to_uart_bytes':metrics['gateway_to_uart_bytes'],
-            'uart_to_gateway_bytes':metrics['uart_to_gateway_bytes'],
-            'gateway_rx_age_seconds':round(now-metrics['last_gateway_data'],1) if metrics['last_gateway_data'] else None,
-            'uart_rx_age_seconds':round(now-metrics['last_uart_data'],1) if metrics['last_uart_data'] else None,
-            'uart_write_pending':metrics['uart_write_pending']}
+        status['traffic']=traffic_snapshot(metrics)
         write_status(root/'status.json',status)
     update()
     try:
@@ -336,7 +375,7 @@ def main():
             if (root/'stop.request').exists():
                 print('Stop requested; returning the board to its console',flush=True)
                 break
-            data=port.read(8192)
+            data=read_available(port)
             if data:
                 metrics['last_uart_data']=time.monotonic()
                 serial_log.write(data);serial_log.flush()

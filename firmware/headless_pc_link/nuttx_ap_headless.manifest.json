@@ -1,7 +1,7 @@
 {
   "image": "nuttx_ap_headless.bin",
-  "size": 1322000,
-  "sha256": "c19ddd07801675f8aafce01db45519fc2f6bdd5f2b2814b627bb83a0827d4c2c",
+  "size": 1329688,
+  "sha256": "4e22a19662433dca3acc301e380a68187efd2bf73d1cd3fc492fd090620d06f2",
   "flash_address": "0x30190000",
   "ntc_patch": {
     "offset": 18364,
@@ -13,16 +13,18 @@
   "credentials_source": "runtime device config, not build options",
   "hardware_functional_acceptance_complete": false,
   "app_sources": {
-    "app/zhaoxi/CMakeLists.txt": "4549f1c1fbba29132a34c5b27c09d27acb1f88248f3e09dcb9ec830c8939d275",
+    "app/zhaoxi/CMakeLists.txt": "c9099aa9dc13412bb9ee79f6c92fcf999e9bd4644b384d9100930662315f7d09",
     "app/zhaoxi/Kconfig": "18b7407180279284da6177f1b058976da8efa116001d0ede103ff127ae0a9c5c",
     "app/zhaoxi/Make.defs": "4b383b583ca2cac953df60dafcd5eee42ae1a1e52e448f085110960d7b006a93",
-    "app/zhaoxi/Makefile": "678a488abab8d4bfb91e4384aac2075c61df17792d5b7ac09d06f65f80c49c76",
-    "app/zhaoxi/README.md": "f3060dbbcd0e9b3826563861642cc602389359db39ebbcbce95a098379269ed7",
-    "app/zhaoxi/bes_audio.c": "a449a64e33e4c962ea36d48048ca366fd75f3462e90cab96f977eff93241e2e0",
+    "app/zhaoxi/Makefile": "dcf9dddd52252e614dcd0ec37ee93af0619578d4513e3f360729b53d05145fe8",
+    "app/zhaoxi/README.md": "a3add9728b3a2d9cb4d4ce7aea2dda687f0b33ee49d4b2c3f284c4bcea1d61e2",
+    "app/zhaoxi/bes_audio.c": "c121de020faa76eecb1461feac63626025f4ef3c8f1e288732b0f73ed260b5a4",
     "app/zhaoxi/bes_clock.c": "75966f28160828c958ea59b1444b138f032fb92ef69f02c68bbae73ee81a075b",
     "app/zhaoxi/dns_diag.c": "ccefe6e324910fc2ec0725d3ea798ce042bcefe4ccec422188dd301a856368e1",
     "app/zhaoxi/dns_diag.h": "36c0fc7ea733e8bbc6cb74a4b2f078f7a5e882c7d2148669c28c08574f7d71cb",
-    "app/zhaoxi/mimo_voice.c": "14ebeff6c0f0ef8bf048e49f0f7b51d1965242916fa964939bdabbcfd1dddd65",
+    "app/zhaoxi/mimo_sse.c": "758758ec217157c8ebef9e5c5289de803a4605200cfee0db0a11931f806e2d4c",
+    "app/zhaoxi/mimo_sse.h": "9e3cb8428fe971264a5ac2548d450d1a7b018c857f2269480b21295131b30cd7",
+    "app/zhaoxi/mimo_voice.c": "e46b1eecfc0f6abc3c2a27bbc3b0082f4d817786a07547d6ef23b615f65927cb",
     "app/zhaoxi/pc_control.c": "344400d43c2518d28c6344c5cf50c48a61ba687a7afd410566627cfb1d7c9f11",
     "app/zhaoxi/pc_link.c": "4b1a590583958c59079b0c210700b785011e7b7ff45737617147275d510612f6",
     "app/zhaoxi/pc_link.h": "b904efc2e217f751a9c6496f74f3e600cd6fcd20f270ba6491c8f7ac5a6d9ccc",
@@ -60,6 +62,16 @@
     "0034-packages_ai_agent-autonomous-local-voice-terminal.patch": "b1062bbebe85c06d3fc2e2a774ac73cfbbaddee77625b29b988ec1f3de024db4",
     "0035-packages_ai_agent-complete-automatic-voice-replies.patch": "7c5851c6e092c049077be16ee57b3b2e708d3cf02cc1dc98fe004653357cce70",
     "0036-packages_ai_agent-fix-automatic-turn-boundaries.patch": "fa79dfb3328842d41428e102bb39cb42f5465610c286879da688b3ee724fe5c7",
-    "0037-packages_ai_agent-finish-cancelled-voice-turns.patch": "9d568749f7dc875b87f25870a2b8f71f9b03b7514e8f803366854ce048c92cea"
+    "0037-packages_ai_agent-finish-cancelled-voice-turns.patch": "9d568749f7dc875b87f25870a2b8f71f9b03b7514e8f803366854ce048c92cea",
+    "0038-packages_ai_agent-incremental-https-body.patch": "eaa21896221e2464964f4d158715f9fc473ae5a56a314ba820cffe5a8b97f14c",
+    "0039-packages_ai_agent-buffer-streamed-pcm-playback.patch": "e7b831fb66d9c3d9ef36b625c5aa4f2ba70e6335abe7d7885adb3b00981a0916",
+    "0040-packages_ai_agent-mimo-product-fast-response.patch": "62c34bb37c11b1cb1394a5e9951c8fec8f9419ab9fa935f811c29265a85c668e",
+    "0041-packages_ai_agent-observe-and-coalesce-pcm-queue.patch": "b8e9b4a8f5985b7be56bc60c8f2f12b99e9d44b7435e9e48f269ad19ceca1dc4",
+    "0042-apps-pppd-buffer-pc-uart.patch": "ae10350b900a24865645a774dc823026e4240c3d23d3ae917f9a108994e32555",
+    "0043-packages_ai_agent-prioritize-pcm-consumer.patch": "6a447a9088378943c9fbcd84f96e3326fd16208426ba61efcd7be68d8560a3bf",
+    "0044-packages_ai_agent-retry-stream-receive-slices.patch": "4f54239a330699156fc3ef0f2356592b96d0d555f275071e0d47d92af3a20a21",
+    "0045-packages_ai_agent-cushion-initial-stream-playback.patch": "c485c1e71640c52ace1fc28954ba54a6e90fe81950ba30ee21c0c37b31fb7f17",
+    "0046-apps-pppd-negotiate-raw-pc-link.patch": "107a04e4d6351f2f5f7efb99c72af7b1cf16577a8dbbcfe2ee3a4496e1659b0b",
+    "0047-apps-pppd-submit-atomic-pc-frames.patch": "44d3e1a5ef3036c0c3a72cdf6b519a34a8200cf9616b59c1d7a63c78489736a6"
   }
 }

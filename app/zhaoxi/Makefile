@@ -8,7 +8,7 @@ ifeq ($(CONFIG_ZHAOXI_BES_AUDIO),y)
 CSRCS += bes_audio.c bes_clock.c reminder.c dns_diag.c
 endif
 ifeq ($(CONFIG_ZHAOXI_MIMO_VOICE),y)
-CSRCS += mimo_voice.c
+CSRCS += mimo_voice.c mimo_sse.c
 endif
 ifeq ($(CONFIG_NETUTILS_PPPD),y)
 CSRCS += pc_link.c pc_control.c

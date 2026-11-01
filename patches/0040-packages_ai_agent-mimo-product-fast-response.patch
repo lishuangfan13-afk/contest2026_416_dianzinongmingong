@@ -1,0 +1,45 @@
+--- a/src/llm/llm_proxy.c
++++ b/src/llm/llm_proxy.c
+@@ -62,6 +62,26 @@
+ }
+ 
+ 
++/* Product voice interactions prefer a prompt final answer. MiMo v2.6-flash
++ * otherwise enables deep thinking by default. Keep other models/providers and
++ * ordinary SDK profiles unchanged, including their output token limits. */
++static void apply_product_mimo_latency(cJSON *body, const char *model,
++    const char *host)
++{
++#ifdef CONFIG_EXAMPLES_ZHAOXI
++    bool official = !strcmp(host, "api.xiaomimimo.com")
++        || !strcmp(host, "token-plan-cn.xiaomimimo.com")
++        || !strcmp(host, "token-plan-sgp.xiaomimimo.com")
++        || !strcmp(host, "token-plan-ams.xiaomimimo.com");
++    if (official && !strcmp(model_name_for_api(model, host), "mimo-v2.6-flash")) {
++        cJSON *thinking = cJSON_AddObjectToObject(body, "thinking");
++        if (thinking) cJSON_AddStringToObject(thinking, "type", "disabled");
++    }
++#else
++    (void)body; (void)model; (void)host;
++#endif
++}
++
+ int resp_buf_init(resp_buf_t* rb, size_t initial_cap)
+ {
+     rb->data = calloc(1, initial_cap);
+@@ -590,6 +610,7 @@
+     cJSON* body = cJSON_CreateObject();
+     cJSON_AddStringToObject(body, "model",
+         model_name_for_api(model, llm_host));
++    apply_product_mimo_latency(body, model, llm_host);
+ 
+     if (is_openai_compat_host(llm_host))
+         cJSON_AddNumberToObject(body, "max_completion_tokens",
+@@ -706,6 +727,7 @@
+ 
+     cJSON_AddStringToObject(body, "model",
+         model_name_for_api(model, llm_host));
++    apply_product_mimo_latency(body, model, llm_host);
+ 
+     if (is_openai_compat_host(llm_host)) {
+         cJSON_AddNumberToObject(body, "max_completion_tokens",

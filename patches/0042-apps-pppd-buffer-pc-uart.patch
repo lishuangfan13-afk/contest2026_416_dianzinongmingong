@@ -1,0 +1,131 @@
+--- a/netutils/pppd/pppd.c
++++ b/netutils/pppd/pppd.c
+@@ -221,6 +221,11 @@
+ 
+   if (ctx->pc_link_managed)
+     {
++      ctx->pc_rx_position = 0;
++      ctx->pc_rx_length = 0;
++      ctx->pc_rx_error = 0;
++      ctx->pc_rx_fd = ctx->ctl.fd;
++
+       if (ctx->ppp_flags & PPP_RX_READY)
+         {
+           ctx->lcp_state |= LCP_TX_TIMEOUT;
+@@ -307,6 +312,50 @@
+ {
+   int ret;
+ 
++#ifdef CONFIG_EXAMPLES_ZHAOXI
++  if (ctx->pc_link_managed)
++    {
++      if (ctx->pc_rx_fd != ctx->ctl.fd)
++        {
++          ctx->pc_rx_fd = ctx->ctl.fd;
++          ctx->pc_rx_position = ctx->pc_rx_length = 0;
++          ctx->pc_rx_error = 0;
++        }
++
++      if (ctx->pc_rx_position == ctx->pc_rx_length)
++        {
++          if (ctx->pc_rx_error ||
++              (zhaoxi_pc_link_stopping && zhaoxi_pc_link_stopping()))
++            {
++              return 0;
++            }
++
++          ret = read(ctx->ctl.fd, ctx->pc_rx_buffer,
++                     sizeof(ctx->pc_rx_buffer));
++          if (ret <= 0)
++            {
++              /* Raw UART VMIN=0 may report zero without EOF. Preserve the
++               * old empty-read behavior; valid-frame inactivity is bounded
++               * by the existing 63-second session deadline. */
++
++              if (ret < 0 && errno != EAGAIN && errno != EWOULDBLOCK &&
++                  errno != EINTR)
++                {
++                  ctx->pc_rx_error = -errno;
++                }
++
++              return 0;
++            }
++
++          ctx->pc_rx_position = 0;
++          ctx->pc_rx_length = (uint16_t)ret;
++        }
++
++      *c = ctx->pc_rx_buffer[ctx->pc_rx_position++];
++      return 1;
++    }
++#endif
++
+   ret = read(ctx->ctl.fd, c, 1);
+   return ret == 1 ? ret : 0;
+ }
+@@ -340,6 +389,24 @@
+ /****************************************************************************
+  * Name: pppd
+  ****************************************************************************/
++
++/* A frame may end before the read-ahead buffer is empty. The fd itself
++ * need not remain readable; process cached frames without a 1-second poll.
++ */
++
++static int ppp_uart_poll_timeout(FAR struct ppp_context_s *ctx)
++{
++#ifdef CONFIG_EXAMPLES_ZHAOXI
++  if (ctx->pc_link_managed && ctx->pc_rx_position < ctx->pc_rx_length)
++    {
++      return 0;
++    }
++#else
++  (void)ctx;
++#endif
++
++  return 1000;
++}
+ 
+ int pppd(const struct pppd_settings_s *pppd_settings)
+ {
+@@ -394,7 +461,7 @@
+ #endif
+       fds[0].revents = fds[1].revents = 0;
+ 
+-      ret = poll(fds, 2, 1000);
++      ret = poll(fds, 2, ppp_uart_poll_timeout(ctx));
+ 
+       if (ret > 0 && fds[0].revents & POLLIN)
+         {
+@@ -411,6 +478,12 @@
+       ppp_poll(ctx);
+ 
+ #ifdef CONFIG_EXAMPLES_ZHAOXI
++      if (ctx->pc_link_managed && ctx->pc_rx_error)
++        {
++          result = ctx->pc_rx_error;
++          break;
++        }
++
+       /* Config-Nak already assigns an address and brings TUN up, but only
+        * both IPCP directions being open permits ppp_send() to send IPv4.
+        */
+--- a/netutils/pppd/ppp.h
++++ b/netutils/pppd/ppp.h
+@@ -177,6 +177,16 @@
+   bool     pc_link_managed;
+   bool     pc_link_ipv4_notified;
+   time_t   pc_link_last_rx;
++
++  /* The direct UART is nonblocking. Keep read-ahead bytes in this session,
++   * rather than doing one VFS read for every escaped PPP octet. */
++
++  uint8_t  pc_rx_buffer[512];
++  uint16_t pc_rx_position;
++  uint16_t pc_rx_length;
++  int      pc_rx_fd;
++  int      pc_rx_error;
++
+ #endif
+ 
+   /* Statistics counters */
