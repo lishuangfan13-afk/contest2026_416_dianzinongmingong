@@ -1,28 +1,44 @@
-# 朝夕无屏核心资产
+# 朝夕设备端业务资产
 
-当前仅部署问答所需的人格配置、智能记事本和智能提醒。默认 cron.json 是空任务列表；每日简报、喝水和久坐等扩展资产保存在 legacy/agent_extensions，首版不部署。启用无屏配置后，原生 Skill 加载器只安装并发现 note-taker 与 reminder；设备残留的旧扩展文件不会进入当前摘要。
+本目录提供朝夕的人格配置、智能记事本和智能提醒 Skill。固件内置本地记事、待办、相对时间提醒和喝水控制，常用明确指令直接在板上执行；这些资产为问答和其他自由表达提供业务规则。
 
-## 部署清单
+首次部署的 `cron.json` 是空任务列表，喝水提醒由使用者主动开启。喝水功能已经包含在产品固件中，通过 `drink` 命令或明确中文指令管理，无需额外安装旧版健康提醒 Skill。每日简报和久坐等旧资产保留在 [legacy/agent_extensions](../../legacy/agent_extensions)，当前部署列表使用两个业务 Skill。
 
-| 文件 | 设备路径 |
-| --- | --- |
-| SOUL.md、USER.md | <BASE>/config/ |
-| MEMORY.md | <BASE>/memory/MEMORY.md |
-| cron.json | <BASE>/cron.json |
-| note-taker.md、reminder.md | <BASE>/skills/ |
+## 部署内容
 
-当前实板 <BASE> 是持久存储 /emmc/zhaoxi；历史固件可能使用 /data/ai_agent 或 /data/agent。资产中的 {{AGENT_DATA_DIR}} 是部署占位符，tools/deploy_assets.ps1 会在写入和回读校验时替换为同一个实际根目录。
+| 文件 | 设备位置 | 作用 |
+| --- | --- | --- |
+| `SOUL.md`、`USER.md` | `<BASE>/config/` | 产品身份、对话方式与用户配置 |
+| `MEMORY.md` | `<BASE>/memory/MEMORY.md` | 长期记忆初始文件 |
+| `cron.json` | `<BASE>/cron.json` | 初始调度列表 |
+| `note-taker.md`、`reminder.md` | `<BASE>/skills/` | 自由表达的记事、待办和提醒规则 |
 
-## 业务执行
+清单由 [asset_profile.ps1](../../tools/asset_profile.ps1) 统一定义。当前数据根目录 `<BASE>` 为 `/emmc/zhaoxi`；[部署脚本](../../tools/deploy_assets.ps1) 将资产中的 `{{AGENT_DATA_DIR}}` 替换为实际目录，写入后逐文件回读校验。
 
-问答复用原 AI Agent；记事由现有 read_file、write_file 执行；提醒由 cron_add、cron_list、cron_remove 执行，到期消息通过 channel=voice 进入原语音输出。创建普通提醒不再使用屏幕文件作为出口。
+## 部署步骤
 
-部署前先执行 zhaoxi stop 并等待 Shutdown complete；部署后重新运行 ai_agent --headless &，使调度列表重新加载。首次尚未启动时可直接部署。不要同时启动两个 Agent。
+1. 使用 `python tools/pc_link/launch.py --stop` 正常结束电脑供网，等待板子回到控制台、串口释放。若直接运行了后台 Agent，则在 NSH 执行 `zhaoxi stop`，等待 `Shutdown complete`。
+2. 在仓库根目录运行部署脚本，按实际端口替换 `COM3`：
 
-部署更新人格配置和业务 Skill；MEMORY.md、cron.json 仅在目标文件不存在时初始化，已有用户数据保留。当前固件使用实测 exFAT 挂载；历史 tmpfs 上的资产和记录不能保证跨重启保留。
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File tools/deploy_assets.ps1 -Port COM3 -BaseDir /emmc/zhaoxi
+   ```
 
-## 入口
+3. 保留脚本的回读校验，完成后按日常入口启动：
 
-应用 assets 部署完成并配置好原模型与语音服务后，以 ai_agent --headless 启动后台 Agent，并使用 zhaoxi 命令或原语音输入通道提交请求。--headless 和总线就绪检查需要 patches/0008。
+   ```powershell
+   python tools/pc_link/launch.py --port COM3
+   ```
 
-首版成功的定义是实际工具完成操作、问答返回真实内容、到期提醒能听见。串口显示请求已提交只说明进入了消息队列。
+日常入口会校准板上 UTC、建立 PPP，再启动业务服务。维护时也可在 NSH 使用 `ai_agent --headless &`；同一时刻只运行一个 Agent，供网运行期间通过控制通道操作业务。
+
+更新会替换人格配置和两个 Skill；`MEMORY.md`、`cron.json` 只在目标不存在时初始化，已有记忆与提醒保留。当天备忘和 `TASKS.md` 由业务模块维护，API 凭据另存设备配置。
+
+## 业务怎样执行
+
+- **问答：** 板端 Agent 调用当前模型，语音回答通过增量 TTS 和 PCM 播放输出。
+- **记事与待办：** 明确命令和 [有限中文句式](../../docs/本地中文指令.md) 进入本地模块，保存并回读后确认；其他表达结合智能记事本 Skill 和文件工具处理。
+- **定时提醒：** 明确相对时间直接创建并读回任务，复杂表达使用 `cron_add`、`cron_list`、`cron_remove`。普通到期提醒投递到 `voice` 通道。
+- **喝水控制：** `drink start`、`drink status`、`drink stop` 与对应中文句式共用本地周期任务，关闭时只移除本功能的任务。
+
+默认联网入口保持麦克风关闭。三项核心的完整操作见 [功能说明](../../docs/无屏核心功能.md)，喝水控制见 [喝水提醒](../../docs/喝水提醒.md)，版本与安装见 [BES 固件构建与验收](../../docs/BES固件构建与验收.md)。

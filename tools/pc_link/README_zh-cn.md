@@ -55,7 +55,9 @@ python tools/pc_link/control.py --time
 python tools/pc_link/launch.py --auto-voice
 ```
 
-窗口确认可以说话后，自然说一句，等喇叭回答结束再问下一句。板端采用声音检测和约 1.2 秒静音封句，识别、处理和播放期间暂停收音。当前版本使用该启动入口控制监听，尚未配置唤醒词。
+窗口确认可以说话后，先说“你好，openvela”或“Hello，openvela”，也可以紧接着说出需求。唤醒后可继续提问，空闲 60 秒会回到等待唤醒。板端采用声音检测和约 1.2 秒静音封句，识别、处理和播放期间暂停收音；等喇叭回答结束，再说下一句。
+
+自动收音默认关闭。通过上述入口主动开启后，检测到的语句会发送给云端 ASR，再由板端检查唤醒前缀。`python tools/pc_link/control.py --cmd auto wake on` 可启用前缀检查，`--cmd auto wake off` 用于现场调试的自由对话，`python tools/pc_link/control.py --auto-status` 查询当前开关与完整收音状态；这些命令本身不会启动录音。完整使用规则见 [ASR 唤醒短语](../../docs/ASR唤醒短语.md)。
 
 窗口会显示环境校准、等待说话、收音、识别、等待回答、合成与播放阶段。结束使用同一个停止入口。两种启动模式各管理一个会话，切换前先正常结束当前会话。
 

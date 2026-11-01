@@ -91,7 +91,7 @@ int audio_capture_read(audio_capture_t *cap, void *out, size_t length)
     int frame=atomic_fetch_add(&reads,1),pattern=atomic_load(&fake_input_pattern);
     if(pattern) {
         int level=20;
-        if(frame>=80 && (pattern==2 ? frame<360 : pattern==4 ? frame<130 : frame<95))level=2000;
+        if(frame>=80 && (pattern==2 ? frame<360 : pattern==4 ? frame<130 : pattern==5 ? frame<86 : frame<95))level=2000;
         int followup=atomic_load(&fake_followup_begin);
         if(pattern==3 && followup>=0 && frame>=followup && frame<followup+30)level=2000;
         int16_t *samples=out;

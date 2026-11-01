@@ -14,7 +14,7 @@ from unittest.mock import patch
 from types import SimpleNamespace
 
 from start import ControlHealth, UART_WRITE_CHUNK, drain_board_quit, main as start_main, open_gateway, read_available, relay_inbound, read_board_exit, synchronize_board_clock, traffic_snapshot, validate_board_exit, write_status
-from control import process_error, request
+from control import main as control_main, process_error, request
 from launch import read_status
 
 
@@ -268,6 +268,47 @@ class RelayTests(unittest.TestCase):
 
 
 class ControlTests(unittest.TestCase):
+    def test_auto_status_reads_state_without_a_microphone_command(self):
+        state={'rc':0,'auto_voice':{'enabled':False,'running':False,'wake_enabled':True,
+                                  'awake':False,'wake_phrase':'你好，openvela'}}
+        output=io.StringIO()
+        with patch('sys.argv',['control.py','--auto-status']), \
+             patch('control.request',return_value=state) as send,contextlib.redirect_stdout(output):
+            self.assertEqual(control_main(),0)
+        send.assert_called_once_with({'action':'auto-status'},90)
+        self.assertEqual(json.loads(output.getvalue()),state)
+
+    def test_auto_status_is_exclusive_with_other_actions(self):
+        combinations=[['--auto-status','--'+name] for name in
+                      ['status','quit','notes','tasks','reminders','time']]
+        combinations.extend([['--auto-status','--cmd','auto','start'],
+                             ['--auto-status','--encoded','eyJhY3Rpb24iOiJwaW5nIn0='],
+                             ['--status','--auto-status'],[]])
+        for options in combinations:
+            with self.subTest(options=options),patch('sys.argv',['control.py']+options), \
+                 patch('control.request') as send,contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as stopped:control_main()
+                self.assertEqual(stopped.exception.code,2)
+                send.assert_not_called()
+
+    def test_auto_status_preserves_board_failure(self):
+        state={'rc':-5}
+        output=io.StringIO()
+        with patch('sys.argv',['control.py','--auto-status']), \
+             patch('control.request',return_value=state) as send,contextlib.redirect_stdout(output):
+            self.assertEqual(control_main(),1)
+        send.assert_called_once_with({'action':'auto-status'},90)
+        self.assertEqual(json.loads(output.getvalue()),state)
+
+    def test_auto_status_transport_failure_returns_without_retrying(self):
+        error=io.StringIO()
+        with patch('sys.argv',['control.py','--auto-status']), \
+             patch('control.request',side_effect=TimeoutError('status timed out')) as send, \
+             contextlib.redirect_stderr(error):
+            self.assertEqual(control_main(),2)
+        send.assert_called_once_with({'action':'auto-status'},90)
+        self.assertIn('status timed out',error.getvalue())
+
     def test_nonzero_business_result_is_preserved(self):
         child=SimpleNamespace(returncode=1,stdout=b'{"rc":-2,"tool_output":"File not found"}',
                               stderr='wsl: localhost proxy warning\r\n'.encode('utf-16-le'))

@@ -19,7 +19,9 @@ def main():
                  ROOT/'patches/0041-packages_ai_agent-observe-and-coalesce-pcm-queue.patch',
                  ROOT/'patches/0043-packages_ai_agent-prioritize-pcm-consumer.patch',
                  ROOT/'patches/0045-packages_ai_agent-cushion-initial-stream-playback.patch',
-                 ROOT/'patches/0054-packages_ai_agent-gate-automatic-voice-with-asr-wake-phrases.patch']
+                 ROOT/'patches/0054-packages_ai_agent-gate-automatic-voice-with-asr-wake-phrases.patch',
+                 ROOT/'patches/0062-packages_ai_agent-use-contest-wake-phrases-and-clear-rejected-vad.patch',
+                 ROOT/'patches/0063-packages_ai_agent-serialize-local-alert-output.patch']
         for patch in reversed(patches):
             subprocess.run(['patch','-R','-p1','--batch','-i',str(patch)],cwd=temp,check=True,capture_output=True)
         for patch in patches:

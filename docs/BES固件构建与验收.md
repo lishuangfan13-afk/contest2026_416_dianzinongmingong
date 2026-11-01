@@ -9,13 +9,13 @@
 | 开发板 | BES2800BP EVB，板级目录 `vendor/bes/boards/best1700_ep/aos_evb` |
 | 产品配置 | `apheadless`，匹配 `apaudio3` BSP 库 |
 | 镜像 | [nuttx_ap_headless.bin](../firmware/headless_pc_link/nuttx_ap_headless.bin) |
-| 镜像大小 | 1,355,464 字节 |
-| SHA256 | `7b648badc1fd194bcfff746a2509c90e249d8637ebcbbbe38b5247f0a951a31e` |
+| 镜像大小 | 1,355,784 字节 |
+| SHA256 | `763b7bd1ef1b10f7205f89380b4bf30a31a61cbb833ca7e18c0a6519d6bd8aec` |
 | AP 烧录地址 | `0x30190000` |
 | 持久数据目录 | `/emmc/zhaoxi` |
 | 来源与校验 | [固件 manifest](../firmware/headless_pc_link/nuttx_ap_headless.manifest.json) |
 
-BES 源码现已整合电脑 PPP、实际音频、MiMo ASR／增量 TTS、本地备忘与待办、明确中文指令、提醒调度、喝水任务、ASR 唤醒短语和固定目标飞书通知。EasyMatrix 作为独立显示终端，由电脑主机桥连接。本轮 46 项集成版已完成完整 AP 构建与烧录，发布固件和 manifest 成对更新。使用方式为电脑供网、文字业务与语音播报，开发与现场复核安排见 [首页当前状态](../README.md#当前演示与版本)。
+BES 源码现已整合电脑 PPP、实际音频、MiMo ASR／增量 TTS、本地备忘与待办、明确中文指令、提醒调度、喝水任务、ASR 唤醒短语和固定目标飞书通知。EasyMatrix 作为独立显示终端，由电脑主机桥连接。本轮集成版已完成完整 AP 构建与烧录，发布固件和 manifest 成对更新。使用方式为电脑供网、文字业务与语音播报，开发与现场复核安排见 [首页当前状态](../README.md#当前演示与版本)。
 
 ## 工作区与固定依赖
 
@@ -37,7 +37,7 @@ BES 源码现已整合电脑 PPP、实际音频、MiMo ASR／增量 TTS、本地
 以下命令在本仓库根目录运行，`/path/to/openvela` 替换为完整工作区。
 
 1. 将 `app/zhaoxi` 链接为工作区的 `packages/zhaoxi`，让 packages 的 CMake／Kconfig 发现 `ai_agent` 和 `zhaoxi`。原圆屏 `zhaoxi_ui` 保存在 [legacy](../legacy/README.md)，当前构建使用新的无屏入口。
-2. 按 [补丁顺序](../patches/README.md) 分别更新 SDK、apps、vendor 与 NuttX。SDK 当前 46 项，apps 顺序为 `0025 → 0042 → 0046 → 0047`。
+2. 按 [补丁顺序](../patches/README.md) 分别更新 SDK、apps、vendor 与 NuttX。SDK 顺序以 `tools/check_agent_patches.py` 的 `SERIES` 为准，apps 顺序为 `0025 → 0042 → 0046 → 0047`。
 3. 核对实际源码与完整补丁序列：
 
    ```bash
@@ -119,14 +119,15 @@ EasyMatrix 源码、依赖锁和分区说明位于 [extension/EasyMatrix](../ext
 
 ## 源码检查
 
-当前 SDK 的 46 个补丁已从固定提交回放，并与实际构建工作区的 28 个目标文件比较。Windows 主机回归 83 项、显示桥回归 53 项通过；apps、存储、语音与通知模块各自保留检查入口，运行版本由发布 manifest 对齐。
+当前 SDK 的集成补丁已从固定提交回放，并与实际构建工作区的 28 个目标文件比较。Windows 主机回归 87 项、显示桥回归 53 项通过；apps、存储、语音与通知模块各自保留检查入口，运行版本由发布 manifest 对齐。
 
 | 检查入口 | 覆盖内容 |
 | --- | --- |
 | `tests/headless/check_local_intent.py` | 明确中文句式、本地执行、提醒读回、取消与真实线程路由 |
 | `tests/headless/check_journal.py` | 北京日期、本地追加、回读与写入错误 |
 | `tests/headless/check_drink.py` | 喝水任务归属、周期设置、并发与存储错误 |
-| `tests/headless/voice/check_voice_wake.py` | ASR 前缀唤醒、会话窗口、休眠与停止 |
+| `tests/headless/voice/check_voice_wake.py` | 指定双语 ASR 前缀、会话窗口、短噪声恢复、休眠与停止 |
+| `tests/headless/voice/check_local_alert_auto.py` | 实际提醒与自动采集互斥、错误恢复、并发播放及播放中停止监听 |
 | `tests/headless/pc_link/check_memory_history.py` | 每日记忆保留与 JSON 历史读取 |
 | `tests/headless/pc_link/check_network_policy.py` | 产品默认电脑供网与显式 Wi-Fi 策略 |
 | `tests/headless/pc_link/check_owned_shutdown.py` | 有线会话与 Agent 的退出顺序 |
@@ -171,14 +172,14 @@ powershell -File tests/headless/test_assets.ps1
 | 检查范围 | 实际结果 |
 | --- | --- |
 | 电脑供网与 UTC | 正式入口完成授时、控制通信和真实模型请求 |
-| 直接备忘与待办 | 追加、查询、精确完成及旧内容保留通过；直接备忘约 0.310s，待办约 0.300～0.333s |
+| 直接备忘与待办 | 追加、查询、精确完成及旧内容保留通过；直接备忘约 0.349s，待办约 0.331～0.377s |
 | 中文快捷指令 | 记事、待办、三十秒相对提醒、喝水开启／状态／重复开启／关闭均走本地，文本模型调用为零 |
 | 定时提醒 | 创建、同编号回读、到期移除、取消后不投递，以及既有任务保留通过 |
-| 问答 | 当前问题取得真实回答，本轮确认耗时约 4.376s，包含脚本约 1 秒观察等待 |
+| 问答 | 11 次真实请求均取得对应回答；板端模型阶段中位数 1.946s，范围 1.674～42.235s |
 | 退出与串口 | `quit` 返回 0，主机确认真实关闭串口 |
 | 连续启停 | 同一固件连续 10 轮完成启动、对应问题的正确回答与正常退出，无回答缓存命中；串口、接收线程及网关均完成清理，退出后无残留 Agent |
 
-10 轮启停均无需按 RESET，每轮完整启动至停机约 19.754～21.883 秒；这个时间包含启动与清理，问答耗时按上表单独记录。
+10 轮启停均无需按 RESET，每轮完整启动至停机约 19.700～22.042 秒；这个时间包含启动与清理，问答耗时按上表单独记录。
 
 EasyMatrix 的七种表情、协议回执、帧更新、TTL 恢复和状态读回通过，原有 23 项像素钟配置保持。实物交接按 [交付清单](交付核对清单.md) 复核供电、POWER、接口、数据回读和合盖后的声音。
 

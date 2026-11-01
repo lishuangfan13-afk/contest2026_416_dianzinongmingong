@@ -56,12 +56,14 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     group=parser.add_mutually_exclusive_group(required=True)
     for name in ['status','quit','notes','tasks','reminders','time']:group.add_argument('--'+name,action='store_true')
+    group.add_argument('--auto-status',action='store_true',help='Read automatic voice and wake state without starting the microphone')
     group.add_argument('--cmd',nargs=argparse.REMAINDER)
     group.add_argument('--encoded',help=argparse.SUPPRESS)
     parser.add_argument('--timeout',type=int,default=90,help=argparse.SUPPRESS)
     args=parser.parse_args()
     if args.encoded:value=json.loads(base64.b64decode(args.encoded))
     elif args.cmd is not None:value={'action':'command','args':args.cmd}
+    elif args.auto_status:value={'action':'auto-status'}
     else:
         action=next(name for name in ['status','quit','notes','tasks','reminders','time'] if getattr(args,name))
         value={'action':'ping' if action=='status' else action}

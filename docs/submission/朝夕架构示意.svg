@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1090" viewBox="0 0 1600 1090">
+<rect width="1600" height="1090" fill="white"/>
+<text x="70" y="54" font-family="Microsoft YaHei, sans-serif" font-size="34" fill="#000000" font-weight="700">朝夕运行架构</text>
+<text x="70" y="101" font-family="Microsoft YaHei, sans-serif" font-size="25" fill="#5B6470" font-weight="400">音频 业务 调度在 BES 上运行  电脑提供网络与操作入口</text>
+<rect x="55" y="155" width="850" height="750" rx="15" fill="#F8FAFA" stroke="#8AA6A3" stroke-width="2"/>
+<text x="90" y="216" font-family="Microsoft YaHei, sans-serif" font-size="31" fill="#000000" font-weight="700">BES2800BP  openvela / NuttX</text>
+<rect x="90" y="265" width="310" height="125" rx="15" fill="#FFFFFF" stroke="#8AA6A3" stroke-width="2"/>
+<text x="115" y="309" font-family="Microsoft YaHei, sans-serif" font-size="27" fill="#000000" font-weight="700">麦克风采集</text>
+<text x="115" y="349" font-family="Microsoft YaHei, sans-serif" font-size="22" fill="#000000" font-weight="400">VAD 封句 → 云端 ASR</text>
+<rect x="555" y="265" width="310" height="125" rx="15" fill="#FFFFFF" stroke="#8AA6A3" stroke-width="2"/>
+<text x="580" y="309" font-family="Microsoft YaHei, sans-serif" font-size="27" fill="#000000" font-weight="700">语音播报</text>
+<text x="580" y="349" font-family="Microsoft YaHei, sans-serif" font-size="22" fill="#000000" font-weight="400">增量 PCM → DMA 喇叭</text>
+<rect x="90" y="445" width="775" height="180" rx="15" fill="#E3EFED" stroke="#8AA6A3" stroke-width="2"/>
+<text x="120" y="495" font-family="Microsoft YaHei, sans-serif" font-size="30" fill="#000000" font-weight="700">AI Agent 与本地指令</text>
+<text x="120" y="539" font-family="Microsoft YaHei, sans-serif" font-size="24" fill="#000000" font-weight="400">明确事项 → 本地记事 待办 提醒</text>
+<text x="120" y="575" font-family="Microsoft YaHei, sans-serif" font-size="24" fill="#000000" font-weight="400">普通问答与复杂表达 → MiMo 模型请求</text>
+<polyline points="245,390 245,445" fill="none" stroke="#22615C" stroke-width="4"/>
+<polygon points="245,445 238.47551698833155,431.49329346470984 251.52448301166845,431.49329346470984" fill="#22615C"/>
+<polyline points="710,445 710,390" fill="none" stroke="#22615C" stroke-width="4"/>
+<polygon points="710,390 716.5244830116685,403.50670653529016 703.4755169883315,403.50670653529016" fill="#22615C"/>
+<rect x="90" y="690" width="365" height="150" rx="15" fill="#FFFFFF" stroke="#8AA6A3" stroke-width="2"/>
+<text x="115" y="734" font-family="Microsoft YaHei, sans-serif" font-size="27" fill="#000000" font-weight="700">eMMC 持久存储</text>
+<text x="115" y="777" font-family="Microsoft YaHei, sans-serif" font-size="23" fill="#000000" font-weight="400">备忘 待办 提醒 配置</text>
+<text x="115" y="811" font-family="Microsoft YaHei, sans-serif" font-size="23" fill="#000000" font-weight="400">保存后核对实际内容</text>
+<rect x="500" y="690" width="365" height="150" rx="15" fill="#FFFFFF" stroke="#8AA6A3" stroke-width="2"/>
+<text x="525" y="734" font-family="Microsoft YaHei, sans-serif" font-size="27" fill="#000000" font-weight="700">本地任务调度</text>
+<text x="525" y="777" font-family="Microsoft YaHei, sans-serif" font-size="23" fill="#000000" font-weight="400">到期主动投递</text>
+<text x="525" y="811" font-family="Microsoft YaHei, sans-serif" font-size="23" fill="#000000" font-weight="400">一次性与固定间隔任务</text>
+<polyline points="270,625 270,690" fill="none" stroke="#22615C" stroke-width="4"/>
+<polygon points="270,690 263.47551698833155,676.4932934647098 276.52448301166845,676.4932934647098" fill="#22615C"/>
+<polyline points="680,625 680,690" fill="none" stroke="#22615C" stroke-width="4"/>
+<polygon points="680,690 673.4755169883315,676.4932934647098 686.5244830116685,676.4932934647098" fill="#22615C"/>
+<rect x="1035" y="155" width="505" height="255" rx="15" fill="#F3F5F8" stroke="#9BA6B4" stroke-width="2"/>
+<text x="1065" y="206" font-family="Microsoft YaHei, sans-serif" font-size="29" fill="#000000" font-weight="700">Windows 与 WSL</text>
+<text x="1065" y="254" font-family="Microsoft YaHei, sans-serif" font-size="24" fill="#000000" font-weight="400">USB2UART → PPP 网络转发</text>
+<text x="1065" y="290" font-family="Microsoft YaHei, sans-serif" font-size="24" fill="#000000" font-weight="400">UTC 授时与文字控制入口</text>
+<text x="1065" y="326" font-family="Microsoft YaHei, sans-serif" font-size="24" fill="#000000" font-weight="400">独立串口桥接 EasyMatrix</text>
+<polyline points="905,530 970,530 970,280 1035,280" fill="none" stroke="#22615C" stroke-width="4"/>
+<polygon points="1035,280 1021.4932934647098,286.52448301166845 1021.4932934647098,273.47551698833155" fill="#22615C"/>
+<polyline points="1035,280 970,280 970,530 905,530" fill="none" stroke="#22615C" stroke-width="4"/>
+<polygon points="905,530 918.5067065352902,523.4755169883315 918.5067065352902,536.5244830116685" fill="#22615C"/>
+<text x="918" y="568" font-family="Microsoft YaHei, sans-serif" font-size="20" fill="#5B6470" font-weight="400">模型 HTTPS</text>
+<text x="918" y="598" font-family="Microsoft YaHei, sans-serif" font-size="20" fill="#5B6470" font-weight="400">经网关传输</text>
+<rect x="1035" y="515" width="505" height="155" rx="15" fill="#FFFFFF" stroke="#9BA6B4" stroke-width="2"/>
+<text x="1065" y="564" font-family="Microsoft YaHei, sans-serif" font-size="29" fill="#000000" font-weight="700">MiMo 云端服务</text>
+<text x="1065" y="612" font-family="Microsoft YaHei, sans-serif" font-size="25" fill="#000000" font-weight="400">文本模型  ASR  TTS</text>
+<polyline points="1288,410 1288,515" fill="none" stroke="#22615C" stroke-width="4"/>
+<polygon points="1288,515 1281.4755169883315,501.49329346470984 1294.5244830116685,501.49329346470984" fill="#22615C"/>
+<polyline points="1288,515 1288,410" fill="none" stroke="#22615C" stroke-width="4"/>
+<polygon points="1288,410 1294.5244830116685,423.50670653529016 1281.4755169883315,423.50670653529016" fill="#22615C"/>
+<rect x="1035" y="770" width="505" height="135" rx="15" fill="#FFFFFF" stroke="#9BA6B4" stroke-width="2"/>
+<text x="1065" y="812" font-family="Microsoft YaHei, sans-serif" font-size="27" fill="#000000" font-weight="700">EasyMatrix  ESP32-C3</text>
+<text x="1065" y="856" font-family="Microsoft YaHei, sans-serif" font-size="22" fill="#000000" font-weight="400">状态颜文字  租约到期恢复时钟</text>
+<polyline points="1540,280 1570,280 1570,835 1540,835" fill="none" stroke="#22615C" stroke-width="4"/>
+<polygon points="1540,835 1553.50670653529,828.4755169883315 1553.50670653529,841.5244830116685" fill="#22615C"/>
+<text x="70" y="983" font-family="Microsoft YaHei, sans-serif" font-size="23" fill="#000000" font-weight="700">业务流程</text>
+<text x="70" y="1029" font-family="Microsoft YaHei, sans-serif" font-size="26" fill="#000000" font-weight="400">输入 → 板端路由 → 本地执行或模型请求 → 结果核对 → 文字或语音回复</text>
+</svg>

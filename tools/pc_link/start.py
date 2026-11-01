@@ -106,7 +106,7 @@ class AutoVoiceDisplay:
                 }
                 text=messages.get(state,'板端语音状态：'+str(state))
                 if state in ['等待说话','正在聆听'] and accepting is True and voice.get('wake_enabled') is True:
-                    text=('正在等待唤醒；请先说“朝夕”，也可以接着说出问题。' if voice.get('awake') is False else
+                    text=('正在等待唤醒；请先说“你好，openvela”或“Hello，openvela”，也可以接着说出问题。' if voice.get('awake') is False else
                           '朝夕已唤醒，可以直接说下一句；安静一分钟后回到等待唤醒。')
                 if state in ['等待说话','正在聆听'] and accepting is not True:
                     text=('板端正在恢复收音，尚未确认可以接收下一句话，请稍等。' if accepting is False else
