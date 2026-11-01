@@ -4,6 +4,7 @@
  */
 #include "voice/audio_capture.h"
 #include "voice/audio_playback.h"
+#include "voice/voice_channel.h"
 #include <errno.h>
 #include <pthread.h>
 #include <stdatomic.h>
@@ -158,7 +159,7 @@ static int start_session(struct pcm_session *s)
         result = codec_int_stream_set_chan_vol(0, 1, level);
         if (result) return -EIO;
         unsigned gain = *(volatile unsigned *)0x503000b4 & 0xfffff;
-        printf("BESPCM playback volume_index=%u gain_code=%u expected=16384\n", level, gain);
+        printf("BESPCM playback volume_index=%u gain_code=%u expected=16384 pcm_divisor=1\n", level, gain);
         if (gain != 16384) return -EIO;
     }
     return 0;
@@ -242,7 +243,9 @@ int audio_playback_write(audio_playback_t *pb, const void *buffer, size_t length
     size_t used = 0;
     while (used < length / 2) {
         unsigned samples = length / 2 - used; if (samples > 1600) samples = 1600;
-        for (unsigned i = 0; i < samples; i++) pb->pcm.buffer[i] = in[used+i] / 4;
+        /* User-selected speech level: preserve the provider's full PCM range.
+         * The hardware DAC remains at unity gain; no digital overdrive. */
+        for (unsigned i = 0; i < samples; i++) pb->pcm.buffer[i] = in[used+i];
         result = transfer(&pb->pcm, samples); if (result) return result;
         used += samples;
     }
@@ -250,3 +253,33 @@ int audio_playback_write(audio_playback_t *pb, const void *buffer, size_t length
 }
 void audio_playback_stop(audio_playback_t *pb) { if (pb) atomic_store(&pb->pcm.aborted, true); }
 void audio_playback_close(audio_playback_t *pb) { if (pb) { close_session(&pb->pcm); free(pb); } }
+
+/* Cues are emitted only after the automatic worker releases capture. */
+void voice_channel_auto_feedback(int event)
+{
+    static atomic_uint previous = ATOMIC_VAR_INIT(0);
+    bool ready = event == VOICE_AUTO_FEEDBACK_READY;
+    bool accepted = event == VOICE_AUTO_FEEDBACK_ACCEPTED;
+    if (ready) puts("AUTO_VOICE_READY：提示音后可以说下一句。");
+    else if (accepted) puts("AUTO_VOICE_ACCEPTED：本句话已收取，正在处理；回答结束再说下一句。");
+    else {
+        unsigned now = milliseconds(), last = atomic_exchange(&previous, now);
+        if (event == VOICE_AUTO_FEEDBACK_TOO_LONG)
+            puts("AUTO_VOICE_TOO_LONG：本句话超过长度限制，整段未提交；停顿后请分句重说。");
+        else printf("AUTO_VOICE_ERROR event=%d：语音处理未完成，正在恢复等待。\n", event);
+        if (last && now - last < 2000) return;
+    }
+    audio_playback_t *pb = audio_playback_open(NULL, 16000, 1, 16);
+    if (!pb) return;
+    static const int16_t wave[16] = {0,3134,5792,7568,8192,7568,5792,3134,
+        0,-3134,-5792,-7568,-8192,-7568,-5792,-3134};
+    int16_t pcm[1280];
+    if (ready || accepted) {
+        for (unsigned i = 0; i < 768; i++) pcm[i] = wave[(accepted ? i / 2 : i) % 16];
+        audio_playback_write(pb, pcm, 768 * sizeof(pcm[0]));
+    } else for (int part = 0; part < 3; part++) {
+        for (unsigned i = 0; i < 1280; i++) pcm[i] = part == 1 ? 0 : wave[i % 16];
+        if (audio_playback_write(pb, pcm, sizeof(pcm)) != sizeof(pcm)) break;
+    }
+    audio_playback_close(pb);
+}

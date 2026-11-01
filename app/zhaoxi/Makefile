@@ -10,6 +10,9 @@ endif
 ifeq ($(CONFIG_ZHAOXI_MIMO_VOICE),y)
 CSRCS += mimo_voice.c
 endif
+ifeq ($(CONFIG_NETUTILS_PPPD),y)
+CSRCS += pc_link.c pc_control.c
+endif
 CFLAGS += -I$(APPDIR)/packages/ai_agent/src -I$(APPDIR)/packages/ai_agent/include
 CFLAGS += -I$(APPDIR)/netutils/cjson/cJSON -I$(APPDIR)/crypto/mbedtls/mbedtls/include
 include $(APPDIR)/Application.mk

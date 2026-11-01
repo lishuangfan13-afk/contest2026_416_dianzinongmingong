@@ -10,6 +10,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef CONFIG_NETUTILS_PPPD
+#include "pc_link.h"
+#endif
 #ifdef CONFIG_ZHAOXI_BES_AUDIO
 #include "reminder.h"
 #include "dns_diag.h"
@@ -43,6 +46,9 @@ static int usage(void)
     puts("  zhaoxi status");
     puts("  zhaoxi stop   （请求停止 Agent，等待 Shutdown complete 后再更新资产）");
     puts("  zhaoxi listen start|stop");
+#ifdef CONFIG_ZHAOXI_BES_AUDIO
+    puts("  zhaoxi auto start|stop|status （启动一次，自动收音与回答）");
+#endif
 #ifdef CONFIG_ZHAOXI_BES_AUDIO
     puts("  zhaoxi test-speaker   （两秒本机提示音，不需要网络）");
 #endif
@@ -80,7 +86,32 @@ int main(int argc, char **argv)
     int first_text = 0;
     int needs_text = 1;
     if (argc < 2 || !strcmp(argv[at], "help")) return usage();
+#ifdef CONFIG_NETUTILS_PPPD
+    if (!strcmp(argv[at], "pc-link")) {
+        if (argc != 3) return 1;
+        if (!strcmp(argv[2], "serve")) return zhaoxi_pc_link(0) ? 1 : 0;
+        char *end = NULL;
+        unsigned long seconds = strtoul(argv[2], &end, 10);
+        if (!end || *end || seconds < 45 || seconds > 600) return 1;
+        return zhaoxi_pc_link((unsigned)seconds) ? 1 : 0;
+    }
+#endif
 #ifdef CONFIG_ZHAOXI_BES_AUDIO
+    if (!strcmp(argv[at], "auto")) {
+        if (argc != 3) return 1;
+        if (!strcmp(argv[2], "start")) {
+            if (!message_bus_is_ready()) return 1;
+            int result = voice_channel_auto_start();
+            puts(result ? "自动语音启动失败，请查看服务状态。" : "自动语音已启动，校准环境后等待你说话。");
+            return result ? 1 : 0;
+        }
+        if (!strcmp(argv[2], "stop")) return voice_channel_auto_stop() ? 1 : 0;
+        if (!strcmp(argv[2], "status")) {
+            char status[1024]; int result = voice_channel_auto_status(status, sizeof(status));
+            puts(status); return result ? 1 : 0;
+        }
+        return 1;
+    }
     if (!strcmp(argv[at], "--wifi-mac")) {
         /* This BSP exports the query but does not ship its public header.
          * The devnum, output-buffer and signed return ABI were checked in

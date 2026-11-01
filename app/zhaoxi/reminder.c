@@ -16,13 +16,13 @@
 
 int zhaoxi_play_alert(void)
 {
-    /* Same amplitude, sample rate and two-second duration as the board test
-     * already heard by the user. The PCM adapter applies its existing /4. */
+    /* Fixed 16 kHz, two-second alert at its previously selected amplitude;
+     * speech can use the provider's full PCM range without raising this tone. */
     static const int16_t wave[16] = {0, 12537, 23165, 30266, 32760, 30266,
         23165, 12537, 0, -12537, -23165, -30266, -32760, -30266, -23165, -12537};
     int16_t *pcm = malloc(3200);
     if (!pcm) return -ENOMEM;
-    for (int i = 0; i < 1600; i++) pcm[i] = wave[i % 16];
+    for (int i = 0; i < 1600; i++) pcm[i] = wave[i % 16] / 2;
     audio_playback_t *playback = audio_playback_open(NULL, 16000, 1, 16);
     int result = playback ? 0 : -(errno ? errno : EIO);
     for (int i = 0; playback && !result && i < 20; i++) {

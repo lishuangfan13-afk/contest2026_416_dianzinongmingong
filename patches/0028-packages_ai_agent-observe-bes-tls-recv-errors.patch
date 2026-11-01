@@ -1,0 +1,47 @@
+--- a/src/infra/vela_tls.c
++++ b/src/infra/vela_tls.c
+@@ -311,6 +311,28 @@
+ }
+ #endif
+ 
++#ifdef CONFIG_ZHAOXI_BES_AUDIO
++/* Observe the socket error before another operation can overwrite errno.
++ * Payloads and credentials are never logged; receive behavior is unchanged.
++ */
++static int zhaoxi_tls_recv(void *opaque, unsigned char *buffer, size_t length)
++{
++    int ret = mbedtls_net_recv(opaque, buffer, length);
++    int saved_errno = errno;
++    if (ret < 0 && ret != MBEDTLS_ERR_SSL_WANT_READ &&
++        ret != MBEDTLS_ERR_SSL_WANT_WRITE) {
++        int fd = ((mbedtls_net_context *)opaque)->fd;
++        int flags = fcntl(fd, F_GETFL, 0);
++        int flags_errno = flags < 0 ? errno : 0;
++        syslog(LOG_ERR,
++            "[%s] BIO recv failed ret=-0x%04x errno=%d fd=%d flags=%d flags_errno=%d pid=%ld\n",
++            TAG, -ret, saved_errno, fd, flags, flags_errno, (long)getpid());
++    }
++    errno = saved_errno;
++    return ret;
++}
++#endif
++
+ static int tls_ctx_connect(tls_ctx_t* ctx, const char* host, const char* port)
+ {
+     int ret;
+@@ -464,8 +486,13 @@
+ 
+     /* Use blocking recv — no select()/poll().  The read
+      * timeout is enforced by the SO_RCVTIMEO socket option set above. */
+-    mbedtls_ssl_set_bio(&ctx->ssl, &ctx->net,
+-        mbedtls_net_send, mbedtls_net_recv, NULL);
++    mbedtls_ssl_set_bio(&ctx->ssl, &ctx->net, mbedtls_net_send,
++#ifdef CONFIG_ZHAOXI_BES_AUDIO
++        zhaoxi_tls_recv,
++#else
++        mbedtls_net_recv,
++#endif
++        NULL);
+ 
+     /* Handshake */
+     while ((ret = mbedtls_ssl_handshake(&ctx->ssl)) != 0) {

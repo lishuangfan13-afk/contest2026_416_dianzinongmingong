@@ -1,0 +1,323 @@
+--- a/src/core/agent_loop.c
++++ b/src/core/agent_loop.c
+@@ -36,6 +36,9 @@
+ #include "tools/tool_registry.h"
+ #include "agent_compat.h"
+ #include "agent_config.h"
++#ifdef CONFIG_EXAMPLES_ZHAOXI
++#include "voice/voice_channel.h"
++#endif
+ 
+ #include <pthread.h>
+ #include <stdint.h>
+@@ -134,6 +137,51 @@
+     }
+ 
+     cJSON_AddItemToArray(messages, asst_msg);
++}
++
++/* A transport turn ID must not split the user's conversation history. */
++static bool automatic_voice_message(const agent_msg_t *msg)
++{
++#ifdef CONFIG_EXAMPLES_ZHAOXI
++    return !strcmp(msg->channel, AGENT_CHAN_VOICE) &&
++           !strncmp(msg->chat_id, "voice_auto_", 11);
++#else
++    (void)msg; return false;
++#endif
++}
++
++static const char *conversation_id(const agent_msg_t *msg)
++{
++    return automatic_voice_message(msg) ? "voice_auto" : msg->chat_id;
++}
++
++static bool automatic_voice_cancelled(const agent_msg_t *msg)
++{
++#ifdef CONFIG_EXAMPLES_ZHAOXI
++    return automatic_voice_message(msg) &&
++           !voice_channel_auto_reply_is_active(msg->chat_id);
++#else
++    (void)msg; return false;
++#endif
++}
++
++/* Consume the reply buffer on every path, including a full queue or cancellation. */
++static void push_final_reply(const agent_msg_t *msg, char *content)
++{
++    if (automatic_voice_cancelled(msg)) { free(content); return; }
++    if (content && content[0]) {
++        agent_msg_t out = {0};
++        strncpy(out.channel, msg->channel, sizeof(out.channel)-1);
++        strncpy(out.chat_id, msg->chat_id, sizeof(out.chat_id)-1);
++        out.content = content;
++        if (message_bus_push_outbound(&out) == OK) return;
++    }
++    free(content);
++#ifdef CONFIG_EXAMPLES_ZHAOXI
++    if (automatic_voice_message(msg))
++        voice_channel_auto_reply_failed_for(msg->chat_id,
++                                            VOICE_AUTO_FEEDBACK_DISPATCH_ERROR);
++#endif
+ }
+ 
+ /* Auto-inject channel/chat_id into cron_add input JSON. */
+@@ -877,32 +925,21 @@
+ static void dispatch_response(const agent_msg_t* msg,
+     char* final_text)
+ {
++    if (automatic_voice_cancelled(msg)) { free(final_text); return; }
+     if (final_text && final_text[0]) {
+-        session_append(msg->chat_id, "user", msg->content);
+-        session_append(msg->chat_id, "assistant", final_text);
+-
+-        agent_msg_t out = { 0 };
+-        strncpy(out.channel, msg->channel,
+-            sizeof(out.channel) - 1);
+-        strncpy(out.chat_id, msg->chat_id,
+-            sizeof(out.chat_id) - 1);
+-        out.content = final_text;
+-        if (message_bus_push_outbound(&out) != OK) {
+-            free(final_text);
+-        }
++        session_append(conversation_id(msg), "user", msg->content);
++        session_append(conversation_id(msg), "assistant", final_text);
++        push_final_reply(msg, final_text);
+     } else {
+         free(final_text);
+-        agent_msg_t out = { 0 };
+-        strncpy(out.channel, msg->channel,
+-            sizeof(out.channel) - 1);
+-        strncpy(out.chat_id, msg->chat_id,
+-            sizeof(out.chat_id) - 1);
+-        out.content = strdup("Sorry, I encountered an error.");
+-        if (out.content) {
+-            if (message_bus_push_outbound(&out) != OK) {
+-                free(out.content);
+-            }
+-        }
++#ifdef CONFIG_EXAMPLES_ZHAOXI
++        const char *error = !strcmp(msg->channel, AGENT_CHAN_VOICE)
++                         ? "这次没有处理成功，请再试一次。"
++                         : "Sorry, I encountered an error.";
++#else
++        const char *error = "Sorry, I encountered an error.";
++#endif
++        push_final_reply(msg, strdup(error));
+     }
+ }
+ 
+@@ -1095,6 +1132,10 @@
+ 
+     for (iteration = 0; iteration < AGENT_AI_AGENT_MAX_TOOL_ITER;
+          iteration++) {
++        if (automatic_voice_cancelled(msg)) {
++            agent_trace_end(&trace, AGENT_TRACE_FAIL);
++            return NULL;
++        }
+         send_working_status(msg, iteration);
+ 
+         llm_response_t resp;
+@@ -1104,6 +1145,11 @@
+         gettimeofday(&tv_end, NULL);
+         uint32_t latency_ms = calc_elapsed_ms(&tv_start, &tv_end);
+ 
++        if (automatic_voice_cancelled(msg)) {
++            llm_response_free(&resp);
++            agent_trace_end(&trace, AGENT_TRACE_FAIL);
++            return NULL;
++        }
+         /* Router failover: on LLM call failure, try next backend */
+         if (err != OK && router_idx >= 0) {
+             syslog(LOG_WARNING,
+@@ -1268,6 +1314,11 @@
+             break;
+         }
+ 
++        if (automatic_voice_cancelled(msg)) {
++            llm_response_free(&resp);
++            agent_trace_end(&trace, AGENT_TRACE_FAIL);
++            return NULL;
++        }
+         syslog(LOG_INFO, "[%s] Tool iter %d: %d calls\n",
+             TAG, iteration + 1, resp.call_count);
+ 
+@@ -1423,7 +1474,20 @@
+ static void inject_session_context(char* sys_prompt, size_t size,
+     const char* channel, const char* chat_id)
+ {
+-    size_t len = strlen(sys_prompt);
++    size_t len = strnlen(sys_prompt, size);
++    if (len >= size) return;
++#ifdef CONFIG_EXAMPLES_ZHAOXI
++    if (channel && !strcmp(channel, AGENT_CHAN_VOICE)) {
++        snprintf(sys_prompt + len, size - len,
++            "\n## Spoken reply\n"
++            "默认用自然中文先简短回答当前问题，通常先说一句；"
++            "用户要求解释或展开时再补充。不要主动加闲聊追问。"
++            "直接说适合听的句子，不朗读Markdown、内部路径或技术元数据。"
++            "记事、待办和提醒仍须执行真实工具并核对结果，"
++            "失败时明确说明，不能为缩短回答省略操作或声称成功。\n");
++        len = strnlen(sys_prompt, size);
++    }
++#endif
+ 
+     snprintf(sys_prompt + len, size - len,
+         "\n## Current Session\n"
+@@ -1506,6 +1570,14 @@
+             break;
+         }
+ 
++        msg.channel[sizeof(msg.channel)-1] = '\0';
++        msg.chat_id[sizeof(msg.chat_id)-1] = '\0';
++        if (!msg.content || automatic_voice_cancelled(&msg)) {
++            if (!msg.content) push_final_reply(&msg, NULL);
++            free(msg.content); free(msg.image_b64);
++            continue;
++        }
++
+         syslog(LOG_INFO, "[%s] Processing message from %s:%s\n",
+             TAG, msg.channel, msg.chat_id);
+ 
+@@ -1515,17 +1587,8 @@
+             syslog(LOG_WARNING,
+                 "[%s] Low memory: %zu bytes free, skipping\n",
+                 TAG, mem_st.free_heap);
+-            agent_msg_t out = { 0 };
+-            strncpy(out.channel, msg.channel,
+-                sizeof(out.channel) - 1);
+-            strncpy(out.chat_id, msg.chat_id,
+-                sizeof(out.chat_id) - 1);
+-            out.content = strdup("系统内存不足，请稍后再试。");
+-            if (out.content) {
+-                if (message_bus_push_outbound(&out) != OK) {
+-                    free(out.content);
+-                }
+-            }
++            push_final_reply(&msg, strdup("系统内存不足，请稍后再试。"));
++            free(msg.image_b64);
+             free(msg.content);
+             continue;
+         }
+@@ -1540,8 +1603,9 @@
+                 TAG, msg.channel, msg.chat_id);
+             reply = strdup("I can't do that.");
+             if (!reply) {
+-                /* Fail-closed: skip this message entirely */
+-                free(msg.content);
++                /* Fail-closed: finish the failed turn without dispatching work. */
++                push_final_reply(&msg, NULL);
++                free(msg.content); free(msg.image_b64);
+                 continue;
+             }
+         }
+@@ -1552,16 +1616,8 @@
+         }
+ 
+         if (reply) {
+-            agent_msg_t out = { 0 };
+-            strncpy(out.channel, msg.channel,
+-                sizeof(out.channel) - 1);
+-            strncpy(out.chat_id, msg.chat_id,
+-                sizeof(out.chat_id) - 1);
+-            out.content = reply;
+-            if (message_bus_push_outbound(&out) != OK) {
+-                free(reply);
+-            }
+-            free(msg.content);
++            push_final_reply(&msg, reply);
++            free(msg.content); free(msg.image_b64);
+             continue;
+         }
+ 
+@@ -1579,7 +1635,7 @@
+         free(tools_json);
+         tools_json = tool_registry_get_tools_json();
+ 
+-        cJSON* messages = build_messages(msg.chat_id, msg.content,
++        cJSON* messages = build_messages(conversation_id(&msg), msg.content,
+             history_json, hist_size);
+ 
+         char* final_text = NULL;
+--- a/src/agent_main.c
++++ b/src/agent_main.c
+@@ -373,6 +373,28 @@
+  * Reads messages from the outbound queue and dispatches them to the
+  * appropriate channel (FeiShu, WebSocket, CLI, etc.).
+  */
++/* Turn IDs guard against late network replies after stop or timeout. */
++static bool automatic_voice_outbound(const agent_msg_t *msg)
++{
++#ifdef CONFIG_EXAMPLES_ZHAOXI
++    return !strcmp(msg->channel, AGENT_CHAN_VOICE) &&
++           !strncmp(msg->chat_id, "voice_auto_", 11);
++#else
++    (void)msg; return false;
++#endif
++}
++
++static void automatic_voice_outbound_failed(const agent_msg_t *msg)
++{
++#ifdef CONFIG_EXAMPLES_ZHAOXI
++    if (automatic_voice_outbound(msg))
++        voice_channel_auto_reply_failed_for(msg->chat_id,
++                                            VOICE_AUTO_FEEDBACK_DISPATCH_ERROR);
++#else
++    (void)msg;
++#endif
++}
++
+ static void* outbound_dispatch_task(void* arg)
+ {
+     (void)arg;
+@@ -385,7 +407,16 @@
+         msg.channel[sizeof(msg.channel) - 1] = '\0';
+         msg.chat_id[sizeof(msg.chat_id) - 1] = '\0';
+ 
++#ifdef CONFIG_EXAMPLES_ZHAOXI
++        if (automatic_voice_outbound(&msg) &&
++            !voice_channel_auto_reply_is_active(msg.chat_id)) {
++            free(msg.content);
++            syslog(LOG_INFO, "[%s] Discard cancelled automatic voice reply\n", TAG);
++            continue;
++        }
++#endif
+         if (!msg.content) {
++            automatic_voice_outbound_failed(&msg);
+             syslog(LOG_WARNING, "[%s] Skip outbound message with NULL content\n", TAG);
+             continue;
+         }
+@@ -394,6 +425,8 @@
+ 
+         /* Let registered taps intercept before normal dispatch */
+         if (mbus_tap_try_deliver(&msg)) {
++            /* A tap consumed this final message; no speaker completion follows. */
++            automatic_voice_outbound_failed(&msg);
+             free(msg.content);
+             continue;
+         }
+@@ -437,6 +470,7 @@
+             if (s_voice_cooldown && time(NULL) < s_voice_cooldown_until) {
+                 syslog(LOG_WARNING,
+                     "[%s] voice cooldown active, dropping message\n", TAG);
++                automatic_voice_outbound_failed(&msg);
+             } else {
+                 s_voice_cooldown = false;
+                 int vret = voice_channel_speak(msg.content);
+@@ -444,11 +478,13 @@
+                     syslog(LOG_ERR, "[%s] voice_channel_speak failed: %d\n", TAG, vret);
+                     s_voice_cooldown = true;
+                     s_voice_cooldown_until = time(NULL) + 5;
++                    automatic_voice_outbound_failed(&msg);
+                 }
++#ifdef CONFIG_EXAMPLES_ZHAOXI
++                else if (automatic_voice_outbound(&msg))
++                    voice_channel_auto_reply_done_for(msg.chat_id);
++#endif
+             }
+-#ifdef CONFIG_EXAMPLES_ZHAOXI
+-            if (!strcmp(msg.chat_id, "voice_auto")) voice_channel_auto_reply_done();
+-#endif
+ #ifdef CONFIG_AI_AGENT_LVGL_UI
+         } else if (strcmp(msg.channel, AGENT_CHAN_LVGL_UI) == 0) {
+             int uret = lvgl_ui_channel_send(msg.content);

@@ -13,6 +13,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
+
+static int64_t monotonic_ms(void)
+{
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    return (int64_t)now.tv_sec * 1000 + now.tv_nsec / 1000000;
+}
 
 static int credentials(char key[128], char host[128])
 {
@@ -26,19 +34,23 @@ static int credentials(char key[128], char host[128])
     return 0;
 }
 
-static cJSON *request(cJSON *body, size_t capacity)
+static cJSON *request(cJSON *body, size_t capacity, const char *phase)
 {
+    int64_t started = monotonic_ms();
     char key[128] = {0}, host[128] = {0};
     if (credentials(key, host)) return NULL;
     char *payload = cJSON_PrintUnformatted(body);
     char *response = malloc(capacity);
-    if (!payload || !response) { free(payload); free(response); return NULL; }
+    if (!payload || !response) {
+        free(payload); free(response); memset(key, 0, sizeof(key)); return NULL;
+    }
     vela_header_t headers[] = {{"api-key", key}, {NULL, NULL}};
     int status = vela_https_post_json(host, "443", "/v1/chat/completions", headers,
                                       payload, response, capacity);
     free(payload);
     cJSON *result = status == 200 ? cJSON_Parse(response) : NULL;
-    printf("MIMOVOICE http=%d parsed=%d\n", status, result != NULL);
+    printf("MIMOVOICE http=%d parsed=%d phase=%s elapsed_ms=%lld\n",
+           status, result != NULL, phase, (long long)(monotonic_ms() - started));
     free(response);
     memset(key, 0, sizeof(key));
     return result;
@@ -79,7 +91,8 @@ static int recognize(const unsigned char *pcm, size_t length, char *out, size_t 
     cJSON_AddStringToObject(cJSON_AddObjectToObject(audio, "input_audio"), "data", encoded);
     free(encoded);
     cJSON_AddStringToObject(cJSON_AddObjectToObject(body, "asr_options"), "language", "zh");
-    cJSON *result = request(body, 16384); cJSON_Delete(body);
+    printf("MIMOVOICE phase=asr begin audio_ms=%lu\n", (unsigned long)(length / 32));
+    cJSON *result = request(body, 16384, "asr"); cJSON_Delete(body);
     if (!result) return -EIO;
     const char *text = cJSON_GetStringValue(cJSON_GetObjectItem(message(result), "content"));
     rc = !text ? -EIO : strlen(text) >= capacity ? -ENOSPC : 0;
@@ -100,7 +113,8 @@ static int fetch_speech(const char *text, unsigned char **pcm, size_t *length)
     cJSON *audio = cJSON_AddObjectToObject(body, "audio");
     cJSON_AddStringToObject(audio, "format", "pcm16");
     cJSON_AddStringToObject(audio, "voice", "mimo_default");
-    cJSON *result = request(body, 4 * 1024 * 1024); cJSON_Delete(body);
+    printf("MIMOVOICE phase=tts begin text_bytes=%lu\n", (unsigned long)strlen(text));
+    cJSON *result = request(body, 4 * 1024 * 1024, "tts"); cJSON_Delete(body);
     if (!result) return -EIO;
     const char *encoded = cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetObjectItem(message(result), "audio"), "data"));
     int rc = -EIO;

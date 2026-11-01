@@ -1,0 +1,218 @@
+--- a/netutils/pppd/pppd.c
++++ b/netutils/pppd/pppd.c
+@@ -60,6 +60,11 @@
+ 
+ #include "ppp.h"
+ 
++#ifdef CONFIG_EXAMPLES_ZHAOXI
++extern bool zhaoxi_pc_link_stopping(void) __attribute__((weak));
++extern void zhaoxi_pc_link_ipv4_ready(void) __attribute__((weak));
++#endif
++
+ #include "netutils/chat.h"
+ #include "netutils/pppd.h"
+ 
+@@ -207,6 +212,27 @@
+   int retry = PPP_MAX_CONNECT;
+   const struct pppd_settings_s *pppd_settings = ctx->settings;
+   netlib_ifdown((char *)ctx->ifname);
++
++#ifdef CONFIG_EXAMPLES_ZHAOXI
++  /* Direct PPP to the attached computer has no modem to reset.  A link
++   * failure belongs to the session owner; do not send AT commands or start
++   * a second negotiation while that owner is using the command channel.
++   */
++
++  if (ctx->pc_link_managed)
++    {
++      if (ctx->ppp_flags & PPP_RX_READY)
++        {
++          ctx->lcp_state |= LCP_TX_TIMEOUT;
++          return;
++        }
++
++      ppp_init(ctx);
++      ppp_connect(ctx);
++      ctx->ip_len = 0;
++      return;
++    }
++#endif
+ 
+   lcp_disconnect(ctx, ++ctx->ppp_id);
+   sleep(1);
+@@ -319,13 +345,20 @@
+ {
+   struct pollfd fds[2];
+   int ret;
++  int result = 0;
+   FAR struct ppp_context_s *ctx;
+ 
+   ctx = (struct ppp_context_s *)malloc(sizeof(struct ppp_context_s));
++  if (!ctx) return 2;
+   memset(ctx, 0, sizeof(struct ppp_context_s));
+   strlcpy((char *)ctx->ifname, "ppp%d", sizeof(ctx->ifname));
+ 
+   ctx->settings = pppd_settings;
++#ifdef CONFIG_EXAMPLES_ZHAOXI
++  ctx->pc_link_managed = zhaoxi_pc_link_stopping &&
++                        !pppd_settings->connect_script &&
++                        !pppd_settings->disconnect_script;
++#endif
+   ctx->if_fd = tun_alloc((char *)ctx->ifname);
+   if (ctx->if_fd < 0)
+     {
+@@ -356,6 +389,9 @@
+ 
+   while (1)
+     {
++#ifdef CONFIG_EXAMPLES_ZHAOXI
++      if (zhaoxi_pc_link_stopping && zhaoxi_pc_link_stopping()) break;
++#endif
+       fds[0].revents = fds[1].revents = 0;
+ 
+       ret = poll(fds, 2, 1000);
+@@ -374,8 +410,42 @@
+ 
+       ppp_poll(ctx);
+ 
++#ifdef CONFIG_EXAMPLES_ZHAOXI
++      /* Config-Nak already assigns an address and brings TUN up, but only
++       * both IPCP directions being open permits ppp_send() to send IPv4.
++       */
++
++      if (ctx->pc_link_managed && !ctx->pc_link_ipv4_notified &&
++          (ctx->ipcp_state & IPCP_TX_UP) &&
++          (ctx->ipcp_state & IPCP_RX_UP))
++        {
++          ctx->pc_link_ipv4_notified = true;
++          if (zhaoxi_pc_link_ipv4_ready)
++            {
++              zhaoxi_pc_link_ipv4_ready();
++            }
++        }
++#endif
++
++      /* Process queued receive bytes before judging inactivity. */
++
++#ifdef CONFIG_EXAMPLES_ZHAOXI
++      if (ppp_pc_link_expired(ctx))
++        {
++          result = -ENETDOWN;
++          break;
++        }
++#endif
++
+       if (ppp_check_errors(ctx))
+         {
++#ifdef CONFIG_EXAMPLES_ZHAOXI
++          if (ctx->pc_link_managed)
++            {
++              result = -ENETDOWN;
++              break;
++            }
++#endif
+           ppp_reconnect(ctx);
+         }
+       else
+@@ -396,5 +466,9 @@
+         }
+     }
+ 
+-  return 1;
+-}
++  netlib_ifdown((char *)ctx->ifname);
++  close(ctx->ctl.fd);
++  close(ctx->if_fd);
++  free(ctx);
++  return result;
++}
+--- a/netutils/pppd/ppp.h
++++ b/netutils/pppd/ppp.h
+@@ -48,6 +48,7 @@
+ #include <nuttx/config.h>
+ 
+ #include <stdint.h>
++#include <stdbool.h>
+ 
+ #include "netutils/chat.h"
+ 
+@@ -170,6 +171,14 @@
+   uint8_t  ahdlc_flags;      /* ahdlc state flags, see above */
+   uint8_t  ahdlc_tx_offline;
+ 
++#ifdef CONFIG_EXAMPLES_ZHAOXI
++  /* Direct PC PPP uses elapsed receive inactivity, never a TX frame count. */
++
++  bool     pc_link_managed;
++  bool     pc_link_ipv4_notified;
++  time_t   pc_link_last_rx;
++#endif
++
+   /* Statistics counters */
+ 
+ #ifdef PPP_STATISTICS
+@@ -187,6 +196,21 @@
+ 
+   const struct pppd_settings_s *settings;
+ };
++
++#ifdef CONFIG_EXAMPLES_ZHAOXI
++/* LCP sends an Echo every >20 seconds. Allow three such intervals without
++ * a valid received frame; the owner polls this even when no data is sent.
++ */
++
++#define PPP_PC_LINK_RX_TIMEOUT (3 * (LCP_ECHO_INTERVAL + 1))
++
++static inline bool ppp_pc_link_expired(FAR struct ppp_context_s *ctx)
++{
++  return ctx->pc_link_managed &&
++         ppp_arch_clock_seconds() - ctx->pc_link_last_rx >=
++         PPP_PC_LINK_RX_TIMEOUT;
++}
++#endif
+ 
+ /****************************************************************************
+  * Public Function Prototypes
+--- a/netutils/pppd/ahdlc.c
++++ b/netutils/pppd/ahdlc.c
+@@ -101,6 +101,9 @@
+   ctx->ahdlc_flags = PPP_RX_ASYNC_MAP;
+   ctx->ahdlc_rx_count = 0;
+   ctx->ahdlc_tx_offline = 0;
++#ifdef CONFIG_EXAMPLES_ZHAOXI
++  ctx->pc_link_last_rx = ppp_arch_clock_seconds();
++#endif
+ 
+ #ifdef PPP_STATISTICS
+   ctx->ahdlc_crc_error = 0;
+@@ -197,6 +200,12 @@
+               /* Remove CRC bytes from packet */
+ 
+               ctx->ahdlc_rx_count -= 2;
++
++#ifdef CONFIG_EXAMPLES_ZHAOXI
++              /* The peer is alive before an upcall can generate a reply. */
++
++              ctx->pc_link_last_rx = ppp_arch_clock_seconds();
++#endif
+ 
+               /* Lock PPP buffer */
+ 
+@@ -352,7 +361,16 @@
+           "offline %d\n",
+          protocol, datalen + headerlen, ctx->ahdlc_tx_offline));
+ 
+-  if (AHDLC_TX_OFFLINE && (ctx->ahdlc_tx_offline++ > AHDLC_TX_OFFLINE))
++  /* The managed direct session has a receive-inactivity deadline in
++   * pppd's main loop, after pending RX is processed.  Packet count cannot
++   * distinguish a normal burst from a missing peer.
++   */
++
++  if (
++#ifdef CONFIG_EXAMPLES_ZHAOXI
++      !ctx->pc_link_managed &&
++#endif
++      AHDLC_TX_OFFLINE && (ctx->ahdlc_tx_offline++ > AHDLC_TX_OFFLINE))
+     {
+       ctx->ahdlc_tx_offline = 0;
+       DEBUG1(("\nAHDLC_TX to many outstanding TX packets => "

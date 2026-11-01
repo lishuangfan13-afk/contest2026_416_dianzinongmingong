@@ -1,0 +1,15 @@
+{
+  "date": "2026-10-31",
+  "test_image_sha256": "2b43fc731895be85b981381959bba274f69f4276a2577d3549849a6401a38b42",
+  "transport": "BES native IPv4 and TLS over USB2UART PPP; computer forwards packets",
+  "board_native_tls": true,
+  "ppp_ipv4": "10.254.42.2",
+  "external_dns_rc": 0,
+  "board_https_status": 200,
+  "model_answer": "PPP network works",
+  "dns_restore_rc": 0,
+  "host_temporary_forwarding_rules_cleaned": true,
+  "result": 0,
+  "continuous_mode_acceptance_complete": false,
+  "three_core_voice_functions_acceptance_complete": false
+}

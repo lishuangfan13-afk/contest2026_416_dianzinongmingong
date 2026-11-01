@@ -1,0 +1,57 @@
+{
+  "date": "2026-11-01",
+  "firmware_sha256": "c19ddd07801675f8aafce01db45519fc2f6bdd5f2b2814b627bb83a0827d4c2c",
+  "size": 1322000,
+  "flash_address": "0x30190000",
+  "full_build": "passed",
+  "ap_programming": "PROGRAMMING SUCCEEDED; exit 0",
+  "sdk_patch_count": 25,
+  "sdk_source_files_compared": 21,
+  "ordered_patch_and_source_match": "passed",
+  "host_tests": 45,
+  "actual_sdk_voice_asan_ubsan": "passed",
+  "voice_business_product_and_standard_asan_ubsan": "passed",
+  "capture_order_regression": "passed",
+  "core_headless_regression": "passed",
+  "microphone_requested": false,
+  "before": {
+    "enabled": false,
+    "running": false,
+    "accepting_speech": false,
+    "state": "已停止",
+    "noise": 0,
+    "threshold": 0,
+    "last_error": 0,
+    "frames": 0,
+    "utterances": 0,
+    "asr_calls": 0,
+    "rejected": 0,
+    "last_pcm_bytes": 0
+  },
+  "after": {
+    "enabled": false,
+    "running": false,
+    "accepting_speech": false,
+    "state": "已停止",
+    "noise": 0,
+    "threshold": 0,
+    "last_error": 0,
+    "frames": 0,
+    "utterances": 0,
+    "asr_calls": 0,
+    "rejected": 0,
+    "last_pcm_bytes": 0
+  },
+  "board_checks": {
+    "LOGIC_NIGHT_1": true,
+    "LOGIC_NIGHT_2": true,
+    "existing_task_retained": true
+  },
+  "forwarder_exit": 0,
+  "automatic_human_retest_of_this_image": false,
+  "remaining": [
+    "真人重新验证提示音和1.2秒停顿行为",
+    "当前语音仍整段下载后播放，响应延迟尚未解决",
+    "板载WiFi间歇联网和个别旧实例退出等待仍需独立处理"
+  ]
+}

@@ -1,0 +1,19 @@
+--- a/src/tools/tool_registry.c
++++ b/src/tools/tool_registry.c
+@@ -172,6 +172,8 @@
+ int tool_registry_init(void)
+ {
+     s_tool_count = 0;
++    /* A previous Agent lifetime may have freed the cached schema. */
++    s_tools_dirty = true;
+ 
+ #ifdef CONFIG_AI_AGENT_MCP
+     if (mcp_bridge_init() != OK) {
+@@ -534,6 +536,7 @@
+     free(s_tools_json);
+     s_tools_json = NULL;
+     s_tool_count = 0;
++    s_tools_dirty = true;
+     pthread_mutex_unlock(&s_tools_mtx);
+ }
+ 

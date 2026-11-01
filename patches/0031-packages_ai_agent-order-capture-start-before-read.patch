@@ -1,0 +1,138 @@
+--- a/src/voice/voice_channel.c
++++ b/src/voice/voice_channel.c
+@@ -213,7 +213,8 @@
+     size_t pcm_cap; /* buffer capacity */
+     pthread_t rec_thread;
+     voice_asr_stream_t* asr_stream; /* streaming ASR handle */
+-    sem_t rec_ready; /* posted by recording_thread when ready to consume */
++    sem_t rec_ready; /* posted after capture start succeeds or fails */
++    int rec_start_result;
+     volatile int tts_abort; /* set to 1 to stop active TTS playback */
+     audio_playback_t* tts_pb; /* active TTS playback handle (or NULL) */
+     pthread_mutex_t speak_lock; /* serialize concurrent speak calls */
+@@ -368,6 +369,17 @@
+     return 0;
+ }
+ 
++/* Publish startup outcome before waking voice_channel_start(). On failure,
++ * the starter joins the worker and owns cleanup of the returned stream. */
++static void recording_start_complete(int result, voice_asr_stream_t *stream)
++{
++    pthread_mutex_lock(&s_voice.lock);
++    s_voice.rec_start_result = result;
++    if (result != 0) s_voice.asr_stream = stream;
++    pthread_mutex_unlock(&s_voice.lock);
++    sem_post(&s_voice.rec_ready);
++}
++
+ /* ── Recording thread (PTT mode — streaming ASR) ─────────── */
+ 
+ static void* recording_thread(void* arg)
+@@ -400,9 +412,8 @@
+ 
+         pthread_mutex_lock(&s_voice.lock);
+         if (alloc_fallback_buffer_locked() != 0) {
+-            s_voice.state = VOICE_IDLE;
+             pthread_mutex_unlock(&s_voice.lock);
+-            sem_post(&s_voice.rec_ready);
++            recording_start_complete(-ENOMEM, stream);
+             return NULL;
+         }
+         pthread_mutex_unlock(&s_voice.lock);
+@@ -410,15 +421,17 @@
+         syslog(LOG_INFO, "[%s] using pre-connected ASR stream\n", TAG);
+     }
+ 
+-    /* Signal voice_channel_start() that we are ready to consume
+-     * audio frames. Without this, sem_wait in start() deadlocks. */
+-    sem_post(&s_voice.rec_ready);
+-
+-    /* No flush needed: the new start sequence guarantees that
+-     * audio_capture_start() runs AFTER this thread is ready,
+-     * so there is no stale data in the queue. The old flush
+-     * was harmful — audio_capture_read() blocks, so it would
+-     * consume real audio frames instead of stale ones. */
++    /* This consumer is ready now. Start capture in the same thread before
++     * its first read: waking the starter and reading immediately races the
++     * device's open-to-start transition on strict PCM backends such as BES. */
++    int capture_result = audio_capture_start(s_voice.cap);
++    if (capture_result < 0) {
++        recording_start_complete(capture_result, stream);
++        return NULL;
++    }
++    recording_start_complete(0, NULL);
++
++    /* No flush: the next read is the first frame of this recording. */
+ 
+     while (1) {
+         pthread_mutex_lock(&s_voice.lock);
+@@ -677,6 +690,7 @@
+     s_voice.pcm_buf = NULL;
+     s_voice.pcm_len = 0;
+     s_voice.asr_stream = NULL;
++    s_voice.rec_start_result = -EINPROGRESS;
+ 
+     /* Pre-open streaming ASR session HERE (before spawning the
+      * recording thread) so that TLS handshake (~300-800ms) completes
+@@ -694,10 +708,8 @@
+         s_voice.asr_stream = pre_stream;
+     }
+ 
+-    /* Open capture device (but do NOT start yet — start after the
+-     * recording thread is spawned so the consumer is ready before
+-     * audio frames begin flowing, preventing media_recorder queue
+-     * overflow "data queue is more than max count(4)"). */
++    /* Open capture; the recording worker will start it after ASR setup,
++     * immediately before its first read, keeping start/read ordered. */
+     s_voice.cap = audio_capture_open(
+         AGENT_AUDIO_CAPTURE_DEV,
+         AGENT_VOICE_SAMPLE_RATE,
+@@ -717,7 +729,7 @@
+     s_voice.state = VOICE_RECORDING;
+     pthread_mutex_unlock(&s_voice.lock);
+ 
+-    /* Spawn recording thread BEFORE starting capture */
++    /* The recording worker owns the capture start/read sequence. */
+     pthread_attr_t attr;
+ 
+     pthread_attr_init(&attr);
+@@ -743,22 +755,25 @@
+         return -ret;
+     }
+ 
+-    /* Now start capture — wait for recording thread to be ready first */
+-    sem_wait(&s_voice.rec_ready);
+-
+-    if (audio_capture_start(s_voice.cap) < 0) {
++    /* Report success only after the worker has actually started capture. */
++    int wait_result;
++    do {
++        wait_result = sem_wait(&s_voice.rec_ready);
++    } while (wait_result < 0 && errno == EINTR);
++    int wait_error = wait_result < 0 ? -errno : 0;
++    pthread_mutex_lock(&s_voice.lock);
++    int start_result = wait_error ? wait_error : s_voice.rec_start_result;
++    if (!start_result && s_voice.state != VOICE_RECORDING) start_result = -EIO;
++    if (start_result) s_voice.state = VOICE_STOPPING;
++    audio_capture_t *capture = s_voice.cap;
++    pthread_mutex_unlock(&s_voice.lock);
++    if (start_result) {
++        if (capture) audio_capture_abort(capture);
++        pthread_join(s_voice.rec_thread, NULL);
+         pthread_mutex_lock(&s_voice.lock);
+-        s_voice.state = VOICE_IDLE;
+-        if (s_voice.asr_stream) {
+-            voice_asr_stream_abort(s_voice.asr_stream);
+-            s_voice.asr_stream = NULL;
+-        }
++        recording_cleanup_locked(s_voice.asr_stream);
+         pthread_mutex_unlock(&s_voice.lock);
+-        audio_capture_abort(s_voice.cap);
+-        pthread_join(s_voice.rec_thread, NULL);
+-        audio_capture_close(s_voice.cap);
+-        s_voice.cap = NULL;
+-        return -EIO;
++        return start_result;
+     }
+ 
+     syslog(LOG_INFO, "[%s] PTT recording started\n", TAG);

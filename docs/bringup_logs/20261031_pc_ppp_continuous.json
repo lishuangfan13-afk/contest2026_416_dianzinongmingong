@@ -1,0 +1,238 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-31",
+  "transport": "BES native DNS, TCP and TLS over USB2UART PPP; computer forwards IP packets",
+  "board_native_tls": true,
+  "tested_firmware": {
+    "sha256": "5e1bee6c30b37fb696f6e8df7f49a2f146e1fa45678e5af7591df079954e438e",
+    "size_bytes": 1319432,
+    "flashed_and_tested": true,
+    "packaged_directory": "firmware/headless_pc_link"
+  },
+  "session_observation": {
+    "firmware_sha256": "5e1bee6c30b37fb696f6e8df7f49a2f146e1fa45678e5af7591df079954e438e",
+    "network_only_validation_passed": true,
+    "consecutive_actual_model_replies": 2,
+    "microphone_enabled": false,
+    "quit_rc": 0,
+    "forwarder_exit_code": 0,
+    "long_duration_stability_validated": false
+  },
+  "core_function_checks": {
+    "text_question_answer": {
+      "passed": true,
+      "actual_agent_reply": "QATEST_1031_OK",
+      "firmware_sha256": "3ad7f651917b38409018634ab5b3e595644f19cf859ddf9cc7c45f24156230f2",
+      "4235_successful_model_and_file_tool_calls": true
+    },
+    "daily_note": {
+      "passed": true,
+      "controlled_marker": "PPP_NOTE_1031",
+      "actual_file_readback_verified": true,
+      "new_power_cycle_persistence_test_performed": false,
+      "firmware_sha256": "42354401b389a69eb4c96e879665cd4b9ca018aa9e205b224c871cf87606952b",
+      "persisted_across_ap_firmware_update": true,
+      "latest_update_readback_verified_on_firmware": "5e1bee6c30b37fb696f6e8df7f49a2f146e1fa45678e5af7591df079954e438e"
+    },
+    "todo_workflow": {
+      "passed": true,
+      "firmware_sha256": "42354401b389a69eb4c96e879665cd4b9ca018aa9e205b224c871cf87606952b",
+      "added_controlled_markers": [
+        "PPP_TODO_A_1031",
+        "PPP_TODO_B_1031"
+      ],
+      "actual_task_file_readback_verified": true,
+      "only_target_completed": true,
+      "completed_controlled_marker": "PPP_TODO_A_1031",
+      "other_test_todo_preserved": "PPP_TODO_B_1031",
+      "other_records_preserved": true,
+      "earlier_missing_file_shortcut_failure_fixed": true,
+      "latest_update_readback_verified_on_firmware": "5e1bee6c30b37fb696f6e8df7f49a2f146e1fa45678e5af7591df079954e438e"
+    },
+    "local_cli_reminder_due": {
+      "passed": true,
+      "delivery_observed": true,
+      "one_shot_removed_after_delivery": true,
+      "voice_delivery_accepted": false,
+      "reverified_on_firmware_sha256": "42354401b389a69eb4c96e879665cd4b9ca018aa9e205b224c871cf87606952b"
+    },
+    "local_reminder_cancel": {
+      "passed": true,
+      "target_removed": true,
+      "no_delivery_after_original_deadline": true,
+      "reverified_on_firmware_sha256": "42354401b389a69eb4c96e879665cd4b9ca018aa9e205b224c871cf87606952b"
+    }
+  },
+  "direct_tts_playback": {
+    "firmware_sha256": "42354401b389a69eb4c96e879665cd4b9ca018aa9e205b224c871cf87606952b",
+    "http_status": 200,
+    "playback_done_observed": true,
+    "playback_seconds_approximate": 12.3,
+    "pcm_divisor": 2,
+    "prior_pcm_divisor": 4,
+    "new_volume_user_confirmation": "pending",
+    "prior_volume_user_confirmed_clearly_audible": true,
+    "prior_volume_user_requested_higher_volume": true,
+    "prior_confirmation_firmware_sha256": "3ad7f651917b38409018634ab5b3e595644f19cf859ddf9cc7c45f24156230f2"
+  },
+  "three_core_voice_functions_acceptance_complete": false,
+  "microphone_asr_business_tts_full_chain_accepted_in_this_session": false,
+  "native_wifi_fix_demonstrated": false,
+  "antenna_fix_demonstrated": false,
+  "public_evidence_policy": "Only controlled test markers, outcomes, firmware identities and transport counters are included",
+  "prior_verified_session": {
+    "firmware": {
+      "sha256": "3ad7f651917b38409018634ab5b3e595644f19cf859ddf9cc7c45f24156230f2",
+      "size_bytes": 1315584,
+      "flashed_and_tested": true
+    },
+    "session_observation": {
+      "observed_seconds_at_last_heartbeat": 860,
+      "control_ping_verified": true,
+      "periodic_health_checks_used": true,
+      "gateway_to_board_uart_bytes": 288513,
+      "board_uart_to_gateway_bytes": 153701,
+      "continuous_network_sample_passed": true,
+      "long_duration_stability_validated": false
+    },
+    "direct_tts_playback": {
+      "http_status": 200,
+      "audio_parse_succeeded": true,
+      "playback_done_observed": true,
+      "playback_seconds_approximate": 9,
+      "user_confirmed_clearly_audible": true,
+      "user_requested_higher_volume": true,
+      "higher_volume_candidate_board_accepted": false
+    },
+    "session_exit": {
+      "board_finished_marker_observed": true,
+      "windows_forwarder_exit_code": 0,
+      "gateway_temporary_rules_cleanup_confirmed": true,
+      "forwarder_reported_errors": [],
+      "external_quit_response_received": false
+    }
+  },
+  "voice_input_test": {
+    "streaming_asr_available": false,
+    "batch_fallback_entered": true,
+    "capture_read_errno": 22,
+    "capture_read_error": "EINVAL",
+    "valid_recording_obtained": false,
+    "identified_issue": "Race between starting the capture worker and starting capture hardware",
+    "complete_asr_input_accepted": false,
+    "fix_board_verified": false,
+    "observation_scope": "Early recording attempt before capture-start ordering fix; not a retest of later firmware"
+  },
+  "three_core_text_entry_functions_have_board_evidence": true,
+  "current_firmware_session_exit_revalidated": true,
+  "automatic_voice_validation": {
+    "status": "human_multi_turn_acceptance_paused_at_user_request_not_passed",
+    "current_work_mode": "network_only",
+    "default_microphone_enabled": false,
+    "automatic_voice_product_requirement_retained": true,
+    "enable_requires_explicit_user_action": true
+  },
+  "evidence_scope": "Final no-microphone repeat validation on 5e1b firmware; earlier 4235 text workflows, 3ad7 voice observations and failed startup are retained with their own attribution",
+  "historical_fix_status_at_4235_test": [
+    {
+      "area": "Bounded TLS teardown during Agent shutdown",
+      "patch_number": "0030",
+      "host_tests_passed": true,
+      "flashed_and_board_verified": false
+    },
+    {
+      "area": "Start audio capture hardware before the capture worker can read",
+      "patch_number": "0031 in preparation",
+      "flashed_and_board_verified": false
+    }
+  ],
+  "later_network_only_startup_check": {
+    "accepted": false,
+    "board_ppp_address_obtained": true,
+    "board_external_dns_rc": 1,
+    "board_exit_rc": -113,
+    "automatic_voice_started": false,
+    "microphone_enabled": false,
+    "old_host_exit_classification_incorrectly_reported_normal": true,
+    "host_split_exit_line_fix_tested_on_host": true,
+    "board_startup_timing_fix_requires_live_retest": false,
+    "subsequent_ipcp_ready_fix_validation_passed_on_firmware": "5e1bee6c30b37fb696f6e8df7f49a2f146e1fa45678e5af7591df079954e438e"
+  },
+  "earlier_4235_text_acceptance": {
+    "firmware": {
+      "sha256": "42354401b389a69eb4c96e879665cd4b9ca018aa9e205b224c871cf87606952b",
+      "size_bytes": 1315288,
+      "flashed_and_tested": true,
+      "update_method": "Storage sync followed by software whole-board reset and AP download"
+    },
+    "session_observation": {
+      "firmware_sha256": "42354401b389a69eb4c96e879665cd4b9ca018aa9e205b224c871cf87606952b",
+      "observed_seconds_at_last_heartbeat": 860,
+      "control_ping_verified": true,
+      "periodic_health_checks_used": true,
+      "gateway_to_board_uart_bytes": 413641,
+      "board_uart_to_gateway_bytes": 272895,
+      "continuous_network_sample_passed": true,
+      "long_duration_stability_validated": false,
+      "snapshot_phase": "connected",
+      "snapshot_ready": true
+    }
+  },
+  "latest_final_validation_evidence": "20261031_pc_ppp_final_no_microphone.json",
+  "latest_final_validation": {
+    "schema_version": 1,
+    "date": "2026-10-31",
+    "firmware": {
+      "sha256": "5e1bee6c30b37fb696f6e8df7f49a2f146e1fa45678e5af7591df079954e438e",
+      "size_bytes": 1319432,
+      "actually_flashed": true,
+      "packaged_directory": "firmware/headless_pc_link"
+    },
+    "network_validation": {
+      "board_native_model_requests": true,
+      "true_bidirectional_ipcp_ready_fix_included": true,
+      "network_only_validation_passed": true
+    },
+    "consecutive_text_question_answer": {
+      "controlled_reply_markers": [
+        "QA_FINAL_1_1031",
+        "QA_FINAL_2_1031"
+      ],
+      "actual_agent_replies_verified": true,
+      "successful_traces_verified": true,
+      "both_passed": true
+    },
+    "persistent_records_after_update": {
+      "notes_verified": true,
+      "tasks_verified": true,
+      "new_todo_mutation_or_reminder_retest_claimed": false
+    },
+    "microphone_requested": false,
+    "automatic_voice_before": {
+      "enabled": false,
+      "running": false,
+      "frames": 0,
+      "asr_calls": 0
+    },
+    "automatic_voice_after": {
+      "enabled": false,
+      "running": false,
+      "frames": 0,
+      "asr_calls": 0
+    },
+    "quit_rc": 0,
+    "forwarder_exit_code": 0,
+    "automatic_multi_turn_human_voice_acceptance": "paused_at_user_request_not_passed",
+    "chinese_time_voice_acceptance": false,
+    "full_pcm_volume_satisfaction_independently_confirmed": false,
+    "older_r10_directory_preserved": "firmware/headless",
+    "evidence_scope": "Controlled reply markers and outcomes only; no private note or task contents, credentials, audio, or local runtime paths"
+  },
+  "time_voice_observation": {
+    "user_confirmed_audible": true,
+    "spoken_language_observed": "English",
+    "chinese_time_rendering_fix_host_tested": true,
+    "chinese_time_rendering_live_accepted": false,
+    "full_pcm_volume_satisfaction_independently_confirmed": false
+  }
+}
