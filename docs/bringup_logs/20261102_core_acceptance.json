@@ -4,8 +4,8 @@
   "firmware": {
     "bes_ap": {
       "image": "nuttx_ap_headless.bin",
-      "sha256": "7b648badc1fd194bcfff746a2509c90e249d8637ebcbbbe38b5247f0a951a31e",
-      "size": 1355464,
+      "sha256": "763b7bd1ef1b10f7205f89380b4bf30a31a61cbb833ca7e18c0a6519d6bd8aec",
+      "size": 1355784,
       "address": "0x30190000"
     },
     "easymatrix": {
@@ -16,7 +16,7 @@
     }
   },
   "sdk_patch_replay": {
-    "patches": 46,
+    "patches": 48,
     "files_compared": 28,
     "byte_equal_to_build_workspace": true
   },
@@ -76,10 +76,15 @@
       "gateway cleanup completed",
       "ai_agent task absent"
     ],
-    "physical_reset_required": false
+    "physical_reset_required": false,
+    "default_official_wake_phrase_verified_each_cycle": true,
+    "full_cycle_seconds": {
+      "min": 19.7,
+      "max": 22.042
+    }
   },
   "host_tests": {
-    "pc_link": 83,
+    "pc_link": 87,
     "display_link": 53
   },
   "display_hardware": {
@@ -90,11 +95,32 @@
     "existing_matrix_config_values_preserved": 23
   },
   "local_command_timings_seconds": {
-    "note_complete": 0.31,
-    "todo_A_complete": 0.333,
-    "todo_B_complete": 0.328,
-    "todo_complete_A_complete": 0.328,
-    "todo_list_complete": 0.3
+    "note_complete": 0.349,
+    "todo_A_complete": 0.364,
+    "todo_B_complete": 0.377,
+    "todo_complete_A_complete": 0.357,
+    "todo_list_complete": 0.331
   },
-  "notification_interface_validation": "Local HTTP fixtures; live account configuration is supplied separately."
+  "notification_interface_validation": "Local HTTP fixtures; live account configuration is supplied separately.",
+  "voice_code_regression": {
+    "input": "synthetic PCM and ASR fixtures with actual voice worker and reminder implementation",
+    "contest_wake_phrases": [
+      "你好，openvela",
+      "Hello，openvela"
+    ],
+    "short_rejected_vad_releases_busy": true,
+    "local_alert_excludes_capture": true,
+    "tts_failure_and_dac_failures_restore_state": true,
+    "stop_during_local_output_keeps_microphone_off": true,
+    "asan_ubsan": "passed"
+  },
+  "read_only_auto_status_cli_actual": true,
+  "model_request_timings": {
+    "samples": 11,
+    "metric": "board LLM stage seconds",
+    "median_seconds": 1.946,
+    "min_seconds": 1.674,
+    "max_seconds": 42.235,
+    "microphone_enabled": false
+  }
 }

@@ -1,0 +1,52 @@
+--- a/src/voice/voice_channel.c
++++ b/src/voice/voice_channel.c
+@@ -1936,6 +1936,32 @@
+     return result;
+ }
+ 
++/* A local alert uses the same capture exclusion and output mutex as TTS.
++ * The callback's first successful write marks actual PCM output. */
++static void local_playback_started(void)
++{
++#ifdef CONFIG_ZHAOXI_BES_AUDIO
++    pthread_mutex_lock(&s_auto.lock);
++    if (s_auto.speakers) s_auto.tts_playing = true;
++    pthread_mutex_unlock(&s_auto.lock);
++#endif
++}
++
++int voice_channel_play_local(voice_local_playback_cb callback, void *context)
++{
++    if (!callback) return -EINVAL;
++#ifdef CONFIG_ZHAOXI_BES_AUDIO
++    voice_auto_pause_for_tts();
++#endif
++    int lock_result = pthread_mutex_lock(&s_voice.speak_lock);
++    int result = lock_result ? -lock_result : callback(context, local_playback_started);
++    if (!lock_result) pthread_mutex_unlock(&s_voice.speak_lock);
++#ifdef CONFIG_ZHAOXI_BES_AUDIO
++    voice_auto_resume_after_tts();
++#endif
++    return result;
++}
++
+ /* ── Test commands (file-based, for QEMU) ───────────────── */
+ 
+ int voice_channel_test_tts(const char* text, const char* out_path)
+--- a/src/voice/voice_channel.h
++++ b/src/voice/voice_channel.h
+@@ -76,6 +76,14 @@
+ /* Synthesize text and play back (called from outbound dispatcher). */
+ int voice_channel_speak(const char *text);
+ 
++/* Synchronous bounded local PCM output. The callback owns its codec handle
++ * and closes it before returning. Call started() after the first successful
++ * PCM write; it changes display state only and must not be retained. The
++ * scope excludes automatic capture and serializes with cloud speech on all
++ * success/error returns. The callback must not reenter voice output APIs. */
++typedef int (*voice_local_playback_cb)(void *context, void (*started)(void));
++int voice_channel_play_local(voice_local_playback_cb callback, void *context);
++
+ /* Streaming providers check between PCM callbacks to abort network reads.
+  * Returns 0 while playback can continue, negative errno on failure/cancel. */
+ int voice_channel_tts_stream_error(void);

@@ -4,6 +4,7 @@
 #include "core/message_bus.h"
 #include "infra/cron_service.h"
 #include "voice/audio_playback.h"
+#include "voice/voice_channel.h"
 #include <assert.h>
 #include <errno.h>
 #include <pthread.h>
@@ -20,6 +21,10 @@ static int speech_result, speech_calls, writes, closes, fail_write, fail_open;
 static pthread_t scheduler;
 static int audio_token;
 static time_t fake_time;
+static int local_scopes, local_started;
+static void mark_local_started(void) { local_started++; }
+int voice_channel_play_local(voice_local_playback_cb callback, void *context)
+{ assert(callback); local_scopes++; return callback(context, mark_local_started); }
 time_t __real_time(time_t *out);
 time_t __wrap_time(time_t *out)
 {
@@ -95,6 +100,7 @@ int main(void)
 
     assert(zhaoxi_deliver_reminder("offline reminder") == 0);
     assert(speech_calls == 0 && writes == 20 && closes == 1);
+    assert(local_scopes == 1 && local_started == 1);
     connected = true;
     assert(zhaoxi_deliver_reminder("spoken reminder") == 0);
     assert(speech_calls == 1 && writes == 20);
@@ -106,6 +112,7 @@ int main(void)
     assert(closes == 3);
     fail_open = 1;
     assert(zhaoxi_deliver_reminder("busy audio") == -EBUSY && closes == 3);
+    assert(local_scopes == 4 && local_started == 2);
     fail_write = fail_open = 0;
 
     /* Fill the actual outbound queue. A due one-shot must stay persisted

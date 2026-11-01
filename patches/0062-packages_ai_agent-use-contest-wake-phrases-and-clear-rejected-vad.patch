@@ -1,0 +1,72 @@
+diff --git a/src/voice/voice_wake.c b/src/voice/voice_wake.c
+--- a/src/voice/voice_wake.c
++++ b/src/voice/voice_wake.c
+@@ -24,20 +24,38 @@
+     size_t n = strlen(part);
+     return !strncmp(text, part, n) ? skip_separators(text + n) : NULL;
+ }
++static bool ascii_word(unsigned char c)
++{
++    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
++           (c >= '0' && c <= '9') || c == '_';
++}
++static const char *consume_ascii(const char *text, const char *part)
++{
++    for (; *part; part++, text++) {
++        unsigned char c = (unsigned char)*text;
++        if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
++        if (c != (unsigned char)*part) return NULL;
++    }
++    return text;
++}
+ static const char *wake_prefix(const char *text)
+ {
+-    const char *name = text;
+-    const char *greeting = consume(text, "你");
+-    if (greeting) {
+-        greeting = consume(greeting, "好");
+-        if (!greeting) return NULL;
+-        name = greeting;
++    /* Match only the contest greeting at the start. Separators accommodate
++     * ASR punctuation; an ASCII word suffix is never part of the phrase. */
++    const char *name = consume(text, "你");
++    if (name) {
++        name = consume(name, "好");
++        if (!name) return NULL;
+     } else {
+-        const char *small = consume(text, "小");
+-        if (small) name = small;
++        name = consume_ascii(text, "hello");
++        if (!name) return NULL;
++        name = skip_separators(name);
+     }
+-    const char *after = consume(name, "朝");
+-    return after ? consume(after, "夕") : NULL;
++    const char *after = consume_ascii(name, "open");
++    if (!after) return NULL;
++    after = consume_ascii(skip_separators(after), "vela");
++    if (!after || ascii_word((unsigned char)*after)) return NULL;
++    return skip_separators(after);
+ }
+ static bool exact_control(const char *text, const char *phrase)
+ {
+diff --git a/src/voice/voice_channel.c b/src/voice/voice_channel.c
+--- a/src/voice/voice_channel.c
++++ b/src/voice/voice_channel.c
+@@ -559,6 +559,7 @@
+                 auto_set_state(AUTO_TOO_LONG,-E2BIG);continue;
+             }
+             if(event==-1){vad.active=false;vad.consecutive=0;used=0;
++                auto_wake_processing(false);
+                 pthread_mutex_lock(&s_auto.lock);s_auto.rejected++;pthread_mutex_unlock(&s_auto.lock);
+                 auto_set_state(AUTO_LISTENING,0);}
+             if(vad.calibrated==AUTO_CALIBRATE_FRAMES && !vad.active)
+@@ -706,7 +707,7 @@
+     bool awake=s_auto.enabled && voice_wake_poll(&s_auto.wake,(uint64_t)auto_now_ms());
+     bool output_active=s_auto.speakers>0;
+     int written=snprintf(output,capacity,
+-        "{\"enabled\":%s,\"running\":%s,\"accepting_speech\":%s,\"wake_enabled\":%s,\"awake\":%s,\"wake_phrase\":\"朝夕\",\"accepting_commands\":%s,\"output_active\":%s,\"output_playing\":%s,\"state\":\"%s\",\"noise\":%d,\"threshold\":%d,\"last_error\":%d,\"frames\":%u,\"utterances\":%u,\"asr_calls\":%u,\"rejected\":%u,\"last_pcm_bytes\":%zu}",
++        "{\"enabled\":%s,\"running\":%s,\"accepting_speech\":%s,\"wake_enabled\":%s,\"awake\":%s,\"wake_phrase\":\"你好，openvela / Hello，openvela\",\"accepting_commands\":%s,\"output_active\":%s,\"output_playing\":%s,\"state\":\"%s\",\"noise\":%d,\"threshold\":%d,\"last_error\":%d,\"frames\":%u,\"utterances\":%u,\"asr_calls\":%u,\"rejected\":%u,\"last_pcm_bytes\":%zu}",
+         s_auto.enabled?"true":"false",s_auto.running?"true":"false",accepting?"true":"false",
+         s_auto.wake.enabled?"true":"false",awake?"true":"false",(accepting && awake)?"true":"false",
+         output_active?"true":"false",(output_active && s_auto.tts_playing)?"true":"false",name,

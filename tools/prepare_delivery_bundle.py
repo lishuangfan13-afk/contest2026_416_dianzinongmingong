@@ -174,6 +174,7 @@ def main():
              'tools/deploy_assets.ps1', 'tools/asset_profile.ps1',
              'tools/prepare_delivery_bundle.py',
              'docs/交付核对清单.md', 'docs/外壳交接要点.md',
+             'docs/三项核心功能实板验收.md', 'docs/答辩与视频准备.md',
              'docs/BES固件构建与验收.md', 'docs/无屏核心功能.md',
              'docs/语音响应优化.md', 'docs/颜文字屏使用.md',
              'docs/喝水提醒.md', 'docs/ASR唤醒短语.md',
@@ -184,6 +185,14 @@ def main():
     names += [p.relative_to(REPO).as_posix() for p in sorted((REPO/'tools/pc_link').iterdir())
               if p.is_file() and p.suffix in ('.py', '.md', '.cmd')]
     names += extension_source_names()
+    # Keep reviewed contest materials with the portable handoff when present.
+    # The explicit names exclude render workspaces and local review records.
+    names += [name for name in (
+        'docs/submission/README.md',
+        'docs/submission/朝夕作品介绍.docx',
+        'docs/submission/朝夕作品介绍.pdf',
+        'docs/submission/朝夕架构示意.svg',
+        'docs/submission/朝夕架构示意.png') if (REPO / name).is_file()]
     names = list(dict.fromkeys(names))
     for name in names:
         path = REPO/name

@@ -91,7 +91,7 @@ python tools/pc_link/control.py --reminders
 | 扩展 | 使用方式 |
 | --- | --- |
 | [喝水提醒](docs/喝水提醒.md) | 说“开启喝水提醒／查询喝水提醒／关闭喝水提醒”本地执行，默认每 60 分钟提示；也保留 `drink` 命令 |
-| [ASR 唤醒短语](docs/ASR唤醒短语.md) | 主动开启自动语音后先说“朝夕”，会话内可继续提问，空闲后回到等待唤醒 |
+| [ASR 唤醒短语](docs/ASR唤醒短语.md) | 主动开启自动语音后先说“你好，openvela”，会话内可继续提问，空闲后回到等待唤醒 |
 | [飞书通知](docs/飞书通知接口.md) | 配置固定收件目标，使用 `notify test/send` 发送并读取服务回执 |
 | [EasyMatrix 颜文字屏](docs/颜文字屏使用.md) | 通过独立 CH343 USB 串口显示聆听、思考、播报、成功等状态，退出后恢复时钟 |
 
@@ -99,7 +99,7 @@ python tools/pc_link/control.py --reminders
 
 ## 当前演示与版本
 
-当前 46 项 SDK 集成固件已完成完整构建与烧录，麦克风关闭状态下的 37 项核心业务检查通过，覆盖真实问答、本地中文记事／待办／提醒、喝水任务、旧数据保留和正常退出；同一固件还通过了 10 次连续完整启停，均无需按 RESET。自动语音的新逻辑与听感安排在有人在场时复核；飞书实发还需填写 App ID、App Secret 和固定目标，独立 Wi-Fi 继续联调。默认联网策略见 [联网配置](docs/联网方式配置.md)。BES 当前版本以 [AP manifest](firmware/headless_pc_link/nuttx_ap_headless.manifest.json) 为准，安装与检查见 [构建说明](docs/BES固件构建与验收.md)。
+当前 SDK 集成固件已完成完整构建与烧录，麦克风关闭状态下的 37 项核心业务检查通过，覆盖真实问答、本地中文记事／待办／提醒、喝水任务、旧数据保留和正常退出；同一固件还通过了 10 次连续完整启停，均无需按 RESET。自动语音的新逻辑与听感安排在有人在场时复核；飞书实发还需填写 App ID、App Secret 和固定目标，独立 Wi-Fi 继续联调。默认联网策略见 [联网配置](docs/联网方式配置.md)。BES 当前版本以 [AP manifest](firmware/headless_pc_link/nuttx_ap_headless.manifest.json) 为准，安装与检查见 [构建说明](docs/BES固件构建与验收.md)。
 
 ## 源码与文档
 
@@ -114,4 +114,6 @@ python tools/pc_link/control.py --reminders
 | [configs](configs/bes_headless.sources.json) | 固定源码版本、BSP 库校验值和构建配置 |
 | [固件构建与验收](docs/BES固件构建与验收.md) | 构建依赖、AP 镜像、烧录、资产部署和测试入口 |
 | [交付核对清单](docs/交付核对清单.md) | 演示电脑、实物外壳与比赛材料交接 |
+| [答辩与视频准备](docs/答辩与视频准备.md) | 官方评分映射、五分钟内视频与团队材料安排 |
+| [作品介绍 Word 与 PDF](docs/submission/README.md) | 可编辑介绍文档、PDF 预览与架构图 |
 | [legacy](legacy/README.md) | 原圆屏应用及历史扩展，保留供后续移植参考 |

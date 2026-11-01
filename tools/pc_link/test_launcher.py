@@ -79,7 +79,7 @@ class AutomaticStatusTests(unittest.TestCase):
     def test_wake_mode_explains_when_a_command_can_be_given(self):
         display=AutoVoiceDisplay()
         waiting=self.display_state('等待说话',accepting_speech=True,wake_enabled=True,awake=False)
-        self.assertIn('请先说“朝夕”',display.message(waiting))
+        self.assertIn('请先说“你好，openvela”或“Hello，openvela”',display.message(waiting))
         awake=self.display_state('等待说话',accepting_speech=True,wake_enabled=True,awake=True)
         self.assertIn('已唤醒',display.message(awake))
         self.assertIsNone(display.message(awake))

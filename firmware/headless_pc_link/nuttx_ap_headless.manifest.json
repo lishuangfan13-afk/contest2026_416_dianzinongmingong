@@ -1,7 +1,7 @@
 {
   "image": "nuttx_ap_headless.bin",
-  "size": 1355464,
-  "sha256": "7b648badc1fd194bcfff746a2509c90e249d8637ebcbbbe38b5247f0a951a31e",
+  "size": 1355784,
+  "sha256": "763b7bd1ef1b10f7205f89380b4bf30a31a61cbb833ca7e18c0a6519d6bd8aec",
   "flash_address": "0x30190000",
   "ntc_patch": {
     "offset": 18364,
@@ -17,8 +17,8 @@
     "app/zhaoxi/Kconfig": "18b7407180279284da6177f1b058976da8efa116001d0ede103ff127ae0a9c5c",
     "app/zhaoxi/Make.defs": "4b383b583ca2cac953df60dafcd5eee42ae1a1e52e448f085110960d7b006a93",
     "app/zhaoxi/Makefile": "8f965a6ade599b85097fa3ea30bc53148475ed85f96b4353bc9828940ba2956a",
-    "app/zhaoxi/README.md": "651082a8964bc4192e9415a0970f36b1020a8e4600da0bb40a55bb44ae3a7dc3",
-    "app/zhaoxi/bes_audio.c": "9158b96a82544c29716423d3531e51b0bca31201ec69ba2c6373c30cd580b9ca",
+    "app/zhaoxi/README.md": "f3c5420e9d7d9444f0902f6681a72058cfbb42c00a5c86d6a4ac8326b964b9ea",
+    "app/zhaoxi/bes_audio.c": "f2fc45e6ca3ea5cb37118e9c7ceb03d00bef7be71f80fd04604dec609987d293",
     "app/zhaoxi/bes_clock.c": "381ed18aa3e544e9791dff9e9415c38590a011582d50b66b7c9dc6f7a9a2cc4b",
     "app/zhaoxi/dns_diag.c": "ccefe6e324910fc2ec0725d3ea798ce042bcefe4ccec422188dd301a856368e1",
     "app/zhaoxi/dns_diag.h": "36c0fc7ea733e8bbc6cb74a4b2f078f7a5e882c7d2148669c28c08574f7d71cb",
@@ -37,7 +37,7 @@
     "app/zhaoxi/pc_control.c": "6204965c4b25b8e11af4216e81826722f7076fb9f5e300d96cf3e73f9da96b61",
     "app/zhaoxi/pc_link.c": "7cb1b358c085f1fd2480610ec65a5be9820fa21fcdbcdc28448c6cf9e0c769b4",
     "app/zhaoxi/pc_link.h": "b904efc2e217f751a9c6496f74f3e600cd6fcd20f270ba6491c8f7ac5a6d9ccc",
-    "app/zhaoxi/reminder.c": "0ff67cfe4ed3c669d8c7bec9039b92776637bda3f47f4c8238f5892bb94f2578",
+    "app/zhaoxi/reminder.c": "06eb2c4d0783fd5ceb46c530129321e34e71f45febcc0414336ff1b6f50e9c79",
     "app/zhaoxi/reminder.h": "62d77798f4ea7f8938da805f571cda0fd0c3aef365106d3b82fa57ac9252674d",
     "app/zhaoxi/todo_store.c": "bc41c9d872bc025d9d58644f7644357250bc0cce2cc5f42a1e776cbaf8938781",
     "app/zhaoxi/todo_store.h": "c9e678b442d4f37493cf455eab69e0abae9755416e8baf2e145038d300bb9d20",
@@ -97,6 +97,8 @@
     "0058-packages_ai_agent-add-opt-in-ppp-tls-receive-window.patch": "43ab0608284025c09bc878b17bcf3121b28da99fa6a0ace3dd8e0834592753dc",
     "0059-packages_ai_agent-disable-product-answer-result-cache.patch": "ce2ca1311a07e56ecd31a0d5dc6f52d153dda1c41ef2aea0074d01258d64996d",
     "0060-packages_ai_agent-verify-slash-reminders-and-reject-truncation.patch": "5c3b6ca4035ef2cd756dce8592496c98f574c85d1f15e610536aa3191207a921",
-    "0061-packages_ai_agent-retire-workers-by-stable-cleanup-token.patch": "b6aade06fd361b378112d4ff5c8b2ba18ff3d737f66d87fe31f7194c1f1cf384"
+    "0061-packages_ai_agent-retire-workers-by-stable-cleanup-token.patch": "b6aade06fd361b378112d4ff5c8b2ba18ff3d737f66d87fe31f7194c1f1cf384",
+    "0062-packages_ai_agent-use-contest-wake-phrases-and-clear-rejected-vad.patch": "be014c8b37b6eceb0d62b442fd51e625b89968a8a4ce9a234188b27c090b9cd5",
+    "0063-packages_ai_agent-serialize-local-alert-output.patch": "daed2fb1dca4ed518fefb2f47dfd62f833b8a5917714a1bbbf42e356cc2cf226"
   }
 }

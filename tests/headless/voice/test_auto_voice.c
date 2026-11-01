@@ -94,7 +94,10 @@ static void test_vad_rules(void)
     for(int i=0;i<50;i++)event=local_vad_frame(&v,2000,50);
     assert(event==3); /* oversized command rejected rather than executed */
 }
-int main(void)
+#ifndef AUTO_VOICE_TESTS_MAIN
+#define AUTO_VOICE_TESTS_MAIN main
+#endif
+int AUTO_VOICE_TESTS_MAIN(void)
 {
     assert(voice_channel_init()==0);test_vad_rules();
     char initial[768];assert(voice_channel_auto_status(initial,sizeof(initial))==0);
@@ -201,13 +204,13 @@ int main(void)
     assert(strstr(status,"\"awake\":false")&&strstr(status,"\"accepting_commands\":false"));stop_auto();
 
     reset_fixture();allow_bus=1;assert(voice_channel_auto_wake_set_enabled(true)==0);
-    fake_batch_text="你好，朝夕";atomic_store(&fake_input_pattern,1);int tts_before=tts_calls;
+    fake_batch_text="你好，openvela";atomic_store(&fake_input_pattern,1);int tts_before=tts_calls;
     assert(voice_channel_auto_start()==0);wait_count(&fake_asr_calls,1);wait_count(&reads,250);
     assert(!atomic_load(&fake_bus_messages)&&tts_calls==tts_before);
     bool awake=false,wake_enabled=false;assert(voice_channel_auto_wake_get_state(&wake_enabled,&awake)==0&&wake_enabled&&awake);stop_auto();
 
     reset_fixture();allow_bus=1;assert(voice_channel_auto_wake_set_enabled(true)==0);
-    fake_batch_text="小朝夕，一加一等于几";atomic_store(&fake_input_pattern,1);
+    fake_batch_text="HeLLo，OPENVELA，一加一等于几";atomic_store(&fake_input_pattern,1);
     assert(voice_channel_auto_start()==0);wait_count(&fake_bus_messages,1);
     assert(!strcmp(last_content,"一加一等于几")&&s_auto.awaiting&&s_auto.wake.busy);
     pthread_mutex_lock(&s_auto.lock);s_auto.wake.deadline_ms=(uint64_t)auto_now_ms()-1;pthread_mutex_unlock(&s_auto.lock);
@@ -217,9 +220,29 @@ int main(void)
     stop_auto();
 
     reset_fixture();allow_bus=1;assert(voice_channel_auto_wake_set_enabled(true)==0);
-    fake_batch_text="朝夕，再见";atomic_store(&fake_input_pattern,1);
+    fake_batch_text="你好，openvela，再见";atomic_store(&fake_input_pattern,1);
     assert(voice_channel_auto_start()==0);wait_count(&fake_asr_calls,1);wait_count(&reads,250);
     assert(!atomic_load(&fake_bus_messages));assert(voice_channel_auto_wake_get_state(NULL,&awake)==0&&!awake);stop_auto();
+
+    /* A short VAD trigger rejected before ASR must release busy while the
+     * capture loop stays open, otherwise the idle window never expires. */
+    reset_fixture();allow_bus=1;assert(voice_channel_auto_wake_set_enabled(true)==0);
+    atomic_store(&fake_input_pattern,5);
+    unsigned rejected_base=s_auto.rejected;
+    assert(voice_channel_auto_start()==0);wait_count(&reads,75);
+    pthread_mutex_lock(&s_auto.lock);
+    char wake_command[80];
+    assert(voice_wake_process(&s_auto.wake,"你好，openvela",(uint64_t)auto_now_ms(),wake_command,sizeof(wake_command))==VOICE_WAKE_ONLY);
+    pthread_mutex_unlock(&s_auto.lock);
+    wait_count(&reads,200);
+    pthread_mutex_lock(&s_auto.lock);
+    assert(s_auto.rejected>rejected_base && s_auto.capture);
+    assert(!s_auto.wake_processing && !s_auto.wake.busy);
+    assert(s_auto.wake.deadline_ms>(uint64_t)auto_now_ms()+59000);
+    s_auto.wake.deadline_ms=(uint64_t)auto_now_ms()-1;
+    pthread_mutex_unlock(&s_auto.lock);
+    assert(voice_channel_auto_wake_get_state(NULL,&awake)==0&&!awake);
+    assert(!atomic_load(&fake_asr_calls)&&!atomic_load(&fake_bus_messages));stop_auto();
 
     reset_fixture();allow_bus=1;assert(voice_channel_auto_wake_set_enabled(true)==0);
     fake_batch_text="停止监听";atomic_store(&fake_input_pattern,1);
@@ -227,6 +250,6 @@ int main(void)
     assert(!s_auto.running&&!s_auto.enabled&&!s_auto.capture&&!atomic_load(&fake_bus_messages));
     char tiny[4];assert(voice_channel_auto_status(tiny,sizeof(tiny))==-ENOSPC);
     puts("auto voice passed: 1s continuation merged, 1.2s endpoint, oversized whole-turn and tail rejection, cue/capture exclusion, cancelled-ASR silence, generation-safe replies, timeout stops, true synthesis/playback stages, empty TTS failure");
-    puts("ASR wake worker passed: bystander discarded, wake-only local cue/no TTS, stripped same-sentence command, pending-work pause and reply renewal, sleep and actual stop");
+    puts("ASR wake worker passed: contest prefixes, bystander discarded, wake-only local cue/no TTS, stripped same-sentence command, pending-work pause and reply renewal, rejected short VAD releases busy and expires, sleep and actual stop");
     return 0;
 }

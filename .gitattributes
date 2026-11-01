@@ -40,3 +40,7 @@
 /extension/EasyMatrix/** whitespace=-blank-at-eol,-blank-at-eof
 /extension/EasyMatrix/emotion_* whitespace=blank-at-eol,blank-at-eof,space-before-tab
 /extension/EasyMatrix/tests/** whitespace=blank-at-eol,blank-at-eof,space-before-tab
+
+# Prepared contest documents are binary artifacts.
+/docs/submission/*.docx binary
+/docs/submission/*.pdf binary

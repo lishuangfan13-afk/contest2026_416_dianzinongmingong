@@ -14,8 +14,9 @@
 #include <string.h>
 #include <time.h>
 
-int zhaoxi_play_alert(void)
+static int play_alert_pcm(void *context, void (*started)(void))
 {
+    (void)context;
     /* Fixed 16 kHz, two-second alert at its previously selected amplitude;
      * speech can use the provider's full PCM range without raising this tone. */
     static const int16_t wave[16] = {0, 12537, 23165, 30266, 32760, 30266,
@@ -28,10 +29,18 @@ int zhaoxi_play_alert(void)
     for (int i = 0; playback && !result && i < 20; i++) {
         int written = audio_playback_write(playback, pcm, 3200);
         if (written != 3200) result = written < 0 ? written : -EIO;
+        else if (i == 0 && started) started();
     }
     if (playback) audio_playback_close(playback);
     free(pcm);
     return result;
+}
+
+int zhaoxi_play_alert(void)
+{
+    /* Local fallback alerts share the same capture exclusion and output
+     * serialization as cloud speech, including every error return. */
+    return voice_channel_play_local(play_alert_pcm, NULL);
 }
 
 int zhaoxi_deliver_reminder(const char *text)
