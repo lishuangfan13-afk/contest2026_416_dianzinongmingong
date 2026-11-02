@@ -4,6 +4,8 @@
 
 当前作品以语音交互为主，演示时由电脑经 USB2UART 提供网络。BES 负责采集声音、发起 MiMo 语音识别与模型请求、执行本地业务并播放合成语音，电脑负责网络转发和操作入口。可选的 EasyMatrix 像素屏用于显示朝夕的工作状态。
 
+**伙伴接手实物，请先看 [11 月 2 日夜间工作交接](docs/20261102夜间工作交接.md)**：里面列出了已完成的功能与检查、尚待现场确认的事项、换电脑后的启动方法，以及外壳和比赛材料安排。当前代码在个人 fork 的 [bes-single-board-baseline-20261030 分支](https://github.com/lishuangfan13-afk/contest2026_416_dianzinongmingong/tree/bes-single-board-baseline-20261030)，对应 [PR #12](https://github.com/open-vela/contest2026_416_dianzinongmingong/pull/12)。
+
 ## 三个核心功能
 
 | 功能 | 可以做什么 | 示例 |
