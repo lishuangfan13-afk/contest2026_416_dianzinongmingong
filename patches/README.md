@@ -6,12 +6,12 @@
 
 | 目标 | 基线 | 当前补丁 |
 | --- | --- | --- |
-| `packages/ai_agent` | `e65550f18759f086d7f544edcf17d1e31223244f` | 下表中的 49 项，依次应用 |
+| `packages/ai_agent` | `e65550f18759f086d7f544edcf17d1e31223244f` | 下表中的 51 项，依次应用 |
 | `apps` | `550cd3ba60a03f8ebf9ac7b72f6eed6aea3bedbe` | `0025 → 0042 → 0046 → 0047` |
 | `nuttx` | `76354c637858ecb0aa4601629327acb6f44a26bb` | `0022 → 0024` |
 | `vendor/bes` | 公共基线 `36465377d944a575ce8a0c7ba45259f5c6c61ea8` | `0009 → 0016`，再核对匹配 BSP 与本地 vendor 修改 |
 
-BSP 库、FatFs 和依赖的准确路径、提交及 SHA256 见 [来源清单](../configs/bes_headless.sources.json)。其中 vendor 本地提交与预编译库需要按清单单独准备。
+BSP 库、FatFs 和依赖的准确路径、提交及 SHA256 见 [来源清单](../configs/bes_headless.sources.json)。公开 vendor 基线的 `configs/ap` 三份库与来源清单哈希一致，可复制到 `configs/apaudio3` 并把 board/chip 库后缀从 `_ap` 改为 `_apaudio3`；配置沿用 `ap` 的 CMakeLists、Make.defs 和链接脚本。仍须逐个核对哈希，不能仅凭目录名称判断兼容性。
 
 ## AI Agent 顺序
 
@@ -66,6 +66,8 @@ BSP 库、FatFs 和依赖的准确路径、提交及 SHA256 见 [来源清单](.
 | 0062 | 统一比赛指定的双语 ASR 唤醒短语，短噪声被丢弃时释放会话忙状态 |
 | 0063 | 本机提示音与云端播放共用采集互斥，串行处理并恢复失败及停止状态 |
 | 0064 | 普通 HTTP 复用严格响应解析，处理合法分块、尾字段、临时响应与 HEAD/304，拒绝截断、非法长度和容量超限 |
+| 0065 | Agent 初始化后自动检测“你好，夕夕”及同音转写；完整播报“你好”后接受问题，取消与失败恢复，默认关闭的诊断开关 |
+| 0066 | 晨间任务生命周期、批次许可的语音入口与音频互斥、可取消且有总时限的独立后台 TLS、当天资讯的对话定位 |
 
 在 `packages/ai_agent` 中逐个执行 `git apply --check /path/to/patch`，检查成功后再执行 `git apply /path/to/patch`。完整顺序以 [check_agent_patches.py](../tools/check_agent_patches.py) 的 `SERIES` 为准。
 
@@ -77,7 +79,7 @@ python3 tools/check_agent_patches.py \
   --patched-agent /path/to/openvela/packages/ai_agent
 ```
 
-检查使用临时副本回放完整序列，再比较实际工作区。当前序列为 49 项，涉及 28 个目标文件，按完整序列回放并与实际构建工作区核对。
+检查使用临时副本回放完整序列，再比较实际工作区。当前序列为 51 项，按完整序列回放并与实际构建工作区核对。
 
 0050／0051 把业务完成确认与本轮工具执行连接起来：文件修改匹配目标业务路径、调用 ID 和成功保存结果；提醒创建／取消匹配成功的 `cron_add`／`cron_remove`。修改请求跳过回答缓存，缺少结果时纠正一次，再返回实际状态。产品的本地 `note` 与 `todo add/list/done` 分别由 `journal.c` 和 `todo_store.c` 执行。0057 用 weak hook 将有限的中文快捷指令接到这些模块与真实 cron，匹配后直接保存并回读；说明见 [本地中文指令](../docs/本地中文指令.md)。0059 在产品配置中完全关闭回答缓存，会话历史继续用于对话上下文。
 

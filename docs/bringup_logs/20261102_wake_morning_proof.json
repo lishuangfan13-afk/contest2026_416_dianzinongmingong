@@ -1,0 +1,128 @@
+{
+  "recorded_at": "2026-11-02T13:38:48.352205+00:00",
+  "firmware": {
+    "image": "nuttx_ap_headless.bin",
+    "size": 1362288,
+    "sha256": "0f4078aafd755bc0cf48d246c02736cbe5493bb05edcc6f4fe49884fd5474e64",
+    "flash_address": "0x30190000"
+  },
+  "flash": "PROGRAMMING SUCCEEDED",
+  "persona": "热爱 AI、电子技术的大学生，偏好中文、开源项目与动手实践。",
+  "live_user_confirmations": {
+    "automatic_offer_then_spoken_play": "heard offer, said 播放, heard real news",
+    "spoken_decline": "heard offer, said 暂不播放, no news playback",
+    "final_image_manual_replay": "wake greeting followed by 播放今天的新闻 successfully replayed cached news"
+  },
+  "reboot": {
+    "persona_readback": "passed",
+    "rtc_restore": "passed",
+    "news_state_after_reboot": {
+      "running": true,
+      "time_synced": true,
+      "phase": "idle",
+      "time_source": "PC",
+      "last_sync_epoch": 1793626258,
+      "last_error": 0,
+      "date": "2026-11-02",
+      "hour": 7,
+      "permission_timeout_seconds": 60,
+      "endpoint_configured": true,
+      "cached": true,
+      "count": 1,
+      "asked": true,
+      "declined": true,
+      "played_items": 1,
+      "batch_id": "c80d8601d7a7df06"
+    },
+    "automatic_reoffer_or_replay": "none"
+  },
+  "final_news_status": {
+    "running": true,
+    "time_synced": true,
+    "phase": "idle",
+    "time_source": "PC",
+    "last_sync_epoch": 1793626540,
+    "last_error": 0,
+    "date": "2026-11-02",
+    "hour": 7,
+    "permission_timeout_seconds": 60,
+    "endpoint_configured": true,
+    "cached": true,
+    "count": 1,
+    "asked": true,
+    "declined": false,
+    "played_items": 1,
+    "batch_id": "c80d8601d7a7df06"
+  },
+  "final_batch": {
+    "schema": 1,
+    "date": "2026-11-02",
+    "id": "c80d8601d7a7df06",
+    "asked": true,
+    "declined": false,
+    "played": 1,
+    "items": [
+      {
+        "id": "3fb8f19676cbb7b5024c4111f4b8c6e2d5ad4c0b5ece9ce01597c9e537395704",
+        "title": "Price rises for some 16GB Raspberry Pi products",
+        "source": "Raspberry Pi",
+        "url": "https://www.raspberrypi.com/news/price-rises-for-some-16gb-raspberry-pi-products/",
+        "summary": "由于元件成本上涨，16GB版树莓派5和计算模块5涨价，但Raspberry Pi 500+价格保持不变。",
+        "relevance": "涉及开源硬件树莓派的产品价格变动，与你的动手实践爱好相关。",
+        "published_at": 1793609952
+      }
+    ]
+  },
+  "final_voice_status": {
+    "enabled": true,
+    "running": true,
+    "accepting_speech": true,
+    "wake_enabled": true,
+    "awake": true,
+    "wake_phrase": "你好，夕夕 / Hello，xixi",
+    "accepting_commands": true,
+    "output_active": false,
+    "output_playing": false,
+    "state": "等待提问",
+    "noise": 71,
+    "threshold": 313,
+    "last_error": 0,
+    "frames": 7085,
+    "utterances": 5,
+    "asr_calls": 5,
+    "rejected": 10,
+    "last_pcm_bytes": 95360
+  },
+  "selected_device_events": [
+    "MORNING_TIME source=SNTP epoch=1793625820",
+    "MORNING_TIME source=PC epoch=1793625820",
+    "MORNING_READY date=2026-11-02 count=1",
+    "MORNING_PLAY rc=0 played=1 count=1",
+    "MORNING_TIME source=SNTP epoch=1793626257",
+    "MORNING_TIME source=PC epoch=1793626258",
+    "MORNING_TIME source=SNTP epoch=1793626539",
+    "MORNING_TIME source=PC epoch=1793626540",
+    "MORNING_PLAY rc=0 played=1 count=1"
+  ],
+  "checks": {
+    "actual_c_storage_with_asan_ubsan": "passed",
+    "actual_c_worker_consent_shutdown_with_asan_ubsan": "passed",
+    "grounded_model_output_validation_with_asan_ubsan": "passed",
+    "actual_tls_bio_stalled_sockets_deadline_cancel": "passed",
+    "actual_voice_state_machine": "passed",
+    "existing_tls_writer_reader_product_and_standard": "passed",
+    "feed_unit_tests": 5,
+    "pc_launcher_unit_tests": 33,
+    "sdk_sequential_patches": 51,
+    "sdk_source_comparison": "passed",
+    "review_bundle_apply_and_normalized_source_comparison": "passed",
+    "incremental_arm_build": "passed",
+    "git_diff_check": "passed"
+  },
+  "limitations": [
+    "Actual unattended next-day 07:00 run not yet tested; schedule boundaries covered by host clock tests.",
+    "RSS adapter currently lives on PC; independent phone-hotspot supply and hosted feed endpoint deferred.",
+    "Recognition and text-to-speech require Internet; no live voice interruption during playback.",
+    "Current PC session remains limited to one hour."
+  ]
+}

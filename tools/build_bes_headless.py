@@ -30,7 +30,9 @@ def main():
     parser.add_argument('--workspace', type=Path, required=True)
     parser.add_argument('--build-dir', type=Path)
     parser.add_argument('--output', type=Path, default=REPO / 'firmware/headless')
-    parser.add_argument('--stage-only', action='store_true', help='package an already completed build')
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument('--stage-only', action='store_true', help='package an already completed build')
+    mode.add_argument('--incremental', action='store_true', help='reuse the existing Ninja configuration; compile changed files and link')
     parser.add_argument('--jobs', type=int, default=4)
     args = parser.parse_args()
     ws = args.workspace.resolve()
@@ -52,20 +54,24 @@ def main():
         sdk = ws / 'packages/ai_agent/src/agent_main.c'
         if 'headless_network_pause' not in sdk.read_text():
             raise RuntimeError('Apply the complete ordered SDK patch series first.')
-        profile = ws / BOARD / 'configs/apheadless'
-        profile.mkdir(exist_ok=True)
-        text = (REPO / 'configs/bes_headless.defconfig').read_text()
-        text = re.sub(r'^CONFIG_APPS_DIR=.*$', f'CONFIG_APPS_DIR="{ws / "apps"}"', text, flags=re.M)
-        (profile / 'defconfig').write_text(text)
-        # CMake does not track changes to the nested .ap startup includes.
-        for name in ('rcS', 'rc.sysinit'):
-            (ws / BOARD / 'src/etc/init.d' / name).touch()
-        if (build / 'CMakeCache.txt').exists():
-            run(['cmake', '--build', build, '--target', 'resetconfig'], env, ws)
-        run(['cmake', '-B', build, '-S', ws / 'nuttx',
-             '-DBOARD_CONFIG=../' + str(BOARD / 'configs/apheadless'),
-             '-DCUSTOM_MODULE_PATH=' + str(ws / 'build/cmake'),
-             '-DEXTRA_FLAGS=-Wno-cpp -Wno-deprecated-declarations', '-GNinja'], env, ws)
+        if args.incremental:
+            if not (build / 'build.ninja').is_file():
+                raise RuntimeError('Incremental build requires an existing configured Ninja directory.')
+        else:
+            profile = ws / BOARD / 'configs/apheadless'
+            profile.mkdir(exist_ok=True)
+            text = (REPO / 'configs/bes_headless.defconfig').read_text()
+            text = re.sub(r'^CONFIG_APPS_DIR=.*$', f'CONFIG_APPS_DIR="{ws / "apps"}"', text, flags=re.M)
+            (profile / 'defconfig').write_text(text)
+            # CMake does not track changes to the nested .ap startup includes.
+            for name in ('rcS', 'rc.sysinit'):
+                (ws / BOARD / 'src/etc/init.d' / name).touch()
+            if (build / 'CMakeCache.txt').exists() and (build / 'build.ninja').exists():
+                run(['cmake', '--build', build, '--target', 'resetconfig'], env, ws)
+            run(['cmake', '-B', build, '-S', ws / 'nuttx',
+                 '-DBOARD_CONFIG=../' + str(BOARD / 'configs/apheadless'),
+                 '-DCUSTOM_MODULE_PATH=' + str(ws / 'build/cmake'),
+                 '-DEXTRA_FLAGS=-Wno-cpp -Wno-deprecated-declarations', '-GNinja'], env, ws)
         run(['cmake', '--build', build, '-j' + str(args.jobs)], env, ws)
     for directory in ('etc', 'romfs_etc'):
         startup = (build / directory / 'init.d/rcS').read_text()

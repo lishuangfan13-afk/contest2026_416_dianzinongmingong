@@ -1,6 +1,9 @@
 """Private, authenticated loopback transport for a native PPP proof on WSL."""
 from pathlib import Path
-import argparse,hmac,json,os,select,signal,socket,subprocess,time
+import argparse,hmac,json,os,select,signal,socket,subprocess,sys,time
+
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
+from morning_feed import FeedCompanion
 
 p=argparse.ArgumentParser();p.add_argument('--config',required=True);args=p.parse_args()
 config=json.loads(Path(args.config).read_text())
@@ -11,6 +14,7 @@ signal.signal(signal.SIGTERM,terminated)
 rules=[];forward=Path('/proc/sys/net/ipv4/ip_forward');previous=forward.read_text().strip()
 server=socket.socket();server.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
 peer=None;proc=None;changed=False;logfile=None
+news_feed=FeedCompanion()
 def rule(table,*items):
     command=['iptables']+(['-t',table] if table else [])+['-I']+list(items)
     subprocess.run(command,check=True,capture_output=True)
@@ -51,6 +55,7 @@ try:
     deadline=time.monotonic()+config['seconds']+300
     counts=[0,0]
     while time.monotonic()<deadline and proc.poll() is None:
+        news_feed.tick()
         readable,_,_=select.select([peer,proc.stdout],[],[],1)
         for source in readable:
             data=peer.recv(8192) if source is peer else os.read(proc.stdout.fileno(),8192)
@@ -68,6 +73,8 @@ try:
 except (EOFError,ConnectionError,BrokenPipeError) as error:print(type(error).__name__,flush=True)
 finally:
     cleanup_errors=[]
+    try:news_feed.close()
+    except Exception as error:cleanup_errors.append('morning feed: '+str(error))
     try:
         if proc and proc.poll() is None:
             proc.terminate()

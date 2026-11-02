@@ -149,8 +149,8 @@ def main():
     parser.add_argument('--state-dir',type=Path,default=STATE)
     parser.add_argument('--check-only',action='store_true',help='Inspect the environment without opening the board serial port')
     mode=parser.add_mutually_exclusive_group()
-    mode.add_argument('--auto-voice',action='store_true',help='Explicit opt-in: enable the board automatic voice loop')
-    mode.add_argument('--manual-voice','--network-only',dest='manual_voice',action='store_true',help='Provide IP forwarding only; this is the default')
+    mode.add_argument('--auto-voice',action='store_true',help='Enable automatic wake listening (default)')
+    mode.add_argument('--manual-voice','--network-only',dest='manual_voice',action='store_true',help='Stop board automatic listening after control is verified; keep IP forwarding')
     parser.add_argument('--stop',action='store_true')
     args=parser.parse_args()
     try:
@@ -164,8 +164,8 @@ def main():
             raise RuntimeError('已有朝夕供网会话，请保留原窗口；要切换模式，先使用停止入口结束原会话。')
         command=[sys.executable,str(HERE/'start.py'),'--port',port,
                  '--duration',str(args.duration),'--state-dir',str(args.state_dir)]
-        if args.auto_voice:command.append('--auto-voice')
-        print('已选择：'+('用户主动开启板端自动语音。' if args.auto_voice else '仅提供网络，自动监听保持关闭。'),flush=True)
+        command.append('--manual-voice' if args.manual_voice else '--auto-voice')
+        print('已选择：'+('联网后停止板端自动监听。' if args.manual_voice else '板端自动检测唤醒词。'),flush=True)
         print('正在建立电脑供网。请保留此窗口；结束时双击“停止朝夕语音.cmd”。',flush=True)
         return subprocess.call(command,cwd=HERE.parents[1])
     except (OSError,RuntimeError) as error:

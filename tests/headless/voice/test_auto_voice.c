@@ -7,14 +7,17 @@
 
 struct audio_playback {int active;};
 static struct audio_playback playback;
-static atomic_int cue_counts[8];
+static atomic_int cue_counts[9];
 static int tts_empty;
 static int tts_calls;
+static atomic_int block_greeting, greeting_entered, greeting_release;
+static int fail_greeting;
+static char last_tts_text[128];
 
 void voice_channel_auto_feedback(int event)
 {
     assert(!s_auto.capture && atomic_load(&capture.phase)==0);
-    assert(event>0 && event<8);atomic_fetch_add(&cue_counts[event],1);
+    assert(event>0 && event<9);atomic_fetch_add(&cue_counts[event],1);
     if(event==VOICE_AUTO_FEEDBACK_READY && atomic_load(&fake_input_pattern)==3 &&
        atomic_load(&reads)>100) {
         int unset=-1;
@@ -40,19 +43,27 @@ int voice_tts_speak_stream(const char *text,voice_tts_chunk_cb cb,void *arg)
 {
     assert(text && !s_auto.capture);
     tts_calls++;
+    snprintf(last_tts_text,sizeof(last_tts_text),"%s",text);
+    bool greeting=!strcmp(text,"你好");
+    if(greeting) {
+        atomic_store(&greeting_entered,1);
+        while(atomic_load(&block_greeting) && !atomic_load(&greeting_release))usleep(1000);
+        if(voice_channel_tts_stream_error())return -ECANCELED;
+        if(fail_greeting)return -EIO;
+    }
     char output_state[768];assert(voice_channel_auto_status(output_state,sizeof(output_state))==0);
     assert(strstr(output_state,"\"output_active\":true"));
     if(tts_empty)return 0;
     if(s_auto.enabled) {
         char state[512];voice_channel_auto_status(state,sizeof(state));
-        assert(strstr(state,"正在合成语音"));
+        assert(strstr(state,"正在合成语音") || (greeting && strstr(state,"正在播报唤醒应答")));
     }
     unsigned char pcm[640]={0};cb(pcm,sizeof(pcm),0,arg);
     if(s_auto.enabled) {
         char state[512];voice_channel_auto_status(state,sizeof(state));
         /* Enqueueing a small first fragment does not mean DMA has started.
          * The dedicated PCM consumer owns that state transition. */
-        assert(strstr(state,"正在合成语音") || strstr(state,"正在播放回答"));
+        assert(strstr(state,"正在合成语音") || strstr(state,"正在播放回答") || (greeting && strstr(state,"正在播报唤醒应答")));
     }
     usleep(20000);cb(NULL,0,1,arg);return 0;
 }
@@ -113,6 +124,22 @@ int AUTO_VOICE_TESTS_MAIN(void)
     wait_count(&reads,380);
     assert(atomic_load(&fake_asr_calls)==0);
     stop_auto();
+
+    /* Product announcements reserve the actual capture worker, while normal
+     * voice and repeated reservations cannot overlap the codec. */
+    reset_fixture();allow_bus=1;assert(voice_channel_auto_wake_set_enabled(true)==0);
+    assert(voice_channel_auto_start()==0);wait_count(&reads,100);
+    assert(voice_channel_auto_output_begin(true)==0);
+    assert(!s_auto.capture && s_auto.offering);
+    assert(voice_channel_auto_output_begin(true)==-EBUSY);
+    assert(voice_channel_speak_auto_owned("fixture announcement")==0);
+    voice_channel_auto_output_end(false);
+    assert(voice_channel_auto_news_consent(true)==0);
+    wait_count(&reads,160);
+    char consent_state[1024];voice_channel_auto_status(consent_state,sizeof(consent_state));
+    assert(strstr(consent_state,"等待新闻播放许可") && strstr(consent_state,"\"accepting_commands\":true"));
+    assert(voice_channel_auto_news_consent(false)==0);
+    stop_auto();assert(!s_auto.news_consent && !s_auto.offering);
 
     reset_fixture();allow_bus=1;atomic_store(&fake_input_pattern,1);
     assert(voice_channel_auto_start()==0);wait_count(&fake_bus_messages,1);
@@ -204,14 +231,18 @@ int AUTO_VOICE_TESTS_MAIN(void)
     assert(strstr(status,"\"awake\":false")&&strstr(status,"\"accepting_commands\":false"));stop_auto();
 
     reset_fixture();allow_bus=1;assert(voice_channel_auto_wake_set_enabled(true)==0);
-    fake_batch_text="你好，openvela";atomic_store(&fake_input_pattern,1);int tts_before=tts_calls;
+    fake_batch_text="你好，西西。";atomic_store(&fake_input_pattern,1);int tts_before=tts_calls;
     assert(voice_channel_auto_start()==0);wait_count(&fake_asr_calls,1);wait_count(&reads,250);
-    assert(!atomic_load(&fake_bus_messages)&&tts_calls==tts_before);
+    assert(!atomic_load(&fake_bus_messages)&&tts_calls==tts_before+1);
+    assert(!strcmp(last_tts_text,"你好"));
+    voice_channel_auto_status(status,sizeof(status));assert(strstr(status,"等待提问"));
     bool awake=false,wake_enabled=false;assert(voice_channel_auto_wake_get_state(&wake_enabled,&awake)==0&&wake_enabled&&awake);stop_auto();
 
     reset_fixture();allow_bus=1;assert(voice_channel_auto_wake_set_enabled(true)==0);
-    fake_batch_text="HeLLo，OPENVELA，一加一等于几";atomic_store(&fake_input_pattern,1);
+    tts_before=tts_calls;
+    fake_batch_text="HeLLo，XIXI，一加一等于几";atomic_store(&fake_input_pattern,1);
     assert(voice_channel_auto_start()==0);wait_count(&fake_bus_messages,1);
+    assert(tts_calls==tts_before+1 && !strcmp(last_tts_text,"你好"));
     assert(!strcmp(last_content,"一加一等于几")&&s_auto.awaiting&&s_auto.wake.busy);
     pthread_mutex_lock(&s_auto.lock);s_auto.wake.deadline_ms=(uint64_t)auto_now_ms()-1;pthread_mutex_unlock(&s_auto.lock);
     assert(voice_channel_auto_wake_get_state(NULL,&awake)==0&&awake); /* processing pauses expiry */
@@ -220,9 +251,35 @@ int AUTO_VOICE_TESTS_MAIN(void)
     stop_auto();
 
     reset_fixture();allow_bus=1;assert(voice_channel_auto_wake_set_enabled(true)==0);
-    fake_batch_text="你好，openvela，再见";atomic_store(&fake_input_pattern,1);
+    fake_batch_text="你好，xixi，再见";atomic_store(&fake_input_pattern,1);
     assert(voice_channel_auto_start()==0);wait_count(&fake_asr_calls,1);wait_count(&reads,250);
     assert(!atomic_load(&fake_bus_messages));assert(voice_channel_auto_wake_get_state(NULL,&awake)==0&&!awake);stop_auto();
+
+    /* Questions stay blocked until greeting playback finishes. Cancellation
+     * while cloud TTS is pending must not play late audio or dispatch text. */
+    reset_fixture();allow_bus=1;assert(voice_channel_auto_wake_set_enabled(true)==0);
+    fake_batch_text="你好，xixi，一加一等于几";atomic_store(&fake_input_pattern,1);
+    atomic_store(&greeting_entered,0);atomic_store(&greeting_release,0);atomic_store(&block_greeting,1);
+    assert(voice_channel_auto_start()==0);wait_count(&greeting_entered,1);
+    assert(!s_auto.capture && !atomic_load(&fake_bus_messages));
+    voice_channel_auto_status(status,sizeof(status));
+    assert(strstr(status,"正在播报唤醒应答") && strstr(status,"\"accepting_commands\":false"));
+    assert(voice_channel_auto_stop()==0);atomic_store(&greeting_release,1);
+    pthread_join(auto_test_thread,NULL);atomic_store(&block_greeting,0);
+    assert(!s_auto.running && !s_auto.capture && !playback.active && !atomic_load(&fake_bus_messages));
+    assert(opens==closes);
+
+    /* Failed greeting returns to the wake gate, with no question dispatched. */
+    reset_fixture();allow_bus=1;assert(voice_channel_auto_wake_set_enabled(true)==0);
+    fake_batch_text="你好，xixi，一加一等于几";atomic_store(&fake_input_pattern,1);
+    fail_greeting=1;
+    int wake_errors=atomic_load(&cue_counts[VOICE_AUTO_FEEDBACK_WAKE_ERROR]);
+    assert(voice_channel_auto_start()==0);wait_count(&reads,250);
+    assert(!atomic_load(&fake_bus_messages));
+    voice_channel_auto_status(status,sizeof(status));
+    assert(strstr(status,"\"awake\":false") && strstr(status,"等待唤醒词"));
+    assert(atomic_load(&cue_counts[VOICE_AUTO_FEEDBACK_WAKE_ERROR])==wake_errors+1);
+    stop_auto();fail_greeting=0;
 
     /* A short VAD trigger rejected before ASR must release busy while the
      * capture loop stays open, otherwise the idle window never expires. */
@@ -232,7 +289,7 @@ int AUTO_VOICE_TESTS_MAIN(void)
     assert(voice_channel_auto_start()==0);wait_count(&reads,75);
     pthread_mutex_lock(&s_auto.lock);
     char wake_command[80];
-    assert(voice_wake_process(&s_auto.wake,"你好，openvela",(uint64_t)auto_now_ms(),wake_command,sizeof(wake_command))==VOICE_WAKE_ONLY);
+    assert(voice_wake_process(&s_auto.wake,"你好，xixi",(uint64_t)auto_now_ms(),wake_command,sizeof(wake_command))==VOICE_WAKE_ONLY);
     pthread_mutex_unlock(&s_auto.lock);
     wait_count(&reads,200);
     pthread_mutex_lock(&s_auto.lock);
@@ -250,6 +307,6 @@ int AUTO_VOICE_TESTS_MAIN(void)
     assert(!s_auto.running&&!s_auto.enabled&&!s_auto.capture&&!atomic_load(&fake_bus_messages));
     char tiny[4];assert(voice_channel_auto_status(tiny,sizeof(tiny))==-ENOSPC);
     puts("auto voice passed: 1s continuation merged, 1.2s endpoint, oversized whole-turn and tail rejection, cue/capture exclusion, cancelled-ASR silence, generation-safe replies, timeout stops, true synthesis/playback stages, empty TTS failure");
-    puts("ASR wake worker passed: contest prefixes, bystander discarded, wake-only local cue/no TTS, stripped same-sentence command, pending-work pause and reply renewal, rejected short VAD releases busy and expires, sleep and actual stop");
+    puts("ASR wake worker passed: xixi prefixes, bystander discarded, wake-only spoken greeting, greeting-before-question, greeting cancellation/failure, stripped same-sentence command, pending-work pause and reply renewal, rejected short VAD releases busy and expires, sleep and actual stop");
     return 0;
 }

@@ -10,7 +10,7 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
-python tools\pc_link\launch.py %*
+python tools\pc_link\launch.py --manual-voice %*
 set "task_exit=%errorlevel%"
 echo.
 pause

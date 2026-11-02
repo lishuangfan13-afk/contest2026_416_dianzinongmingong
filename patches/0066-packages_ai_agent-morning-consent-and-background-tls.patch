@@ -1,0 +1,327 @@
+diff --git a/src/agent_main.c b/src/agent_main.c
+--- a/src/agent_main.c
++++ b/src/agent_main.c
+@@ -865,6 +865,14 @@
+     }
+ #endif
+ 
++#if defined(CONFIG_EXAMPLES_ZHAOXI) && defined(CONFIG_ZHAOXI_BES_AUDIO)
++    extern int zhaoxi_morning_start(void) __attribute__((weak));
++    if(zhaoxi_morning_start && !g_shutdown_requested) {
++        int rc=zhaoxi_morning_start();
++        BOOT_LOG_RC(&t0,"P6","morning service",rc);
++    }
++#endif
++
+     /* Block main thread until shutdown is requested */
+     while (!g_shutdown_requested) {
+         sleep(1);
+diff --git a/src/core/context_builder.c b/src/core/context_builder.c
+--- a/src/core/context_builder.c
++++ b/src/core/context_builder.c
+@@ -167,6 +167,14 @@
+     /* Bootstrap files */
+     off = append_file(buf, size, off, AGENT_SOUL_FILE, "Personality");
+     off = append_file(buf, size, off, AGENT_USER_FILE, "User Info");
++#ifdef CONFIG_EXAMPLES_ZHAOXI
++    extern int zhaoxi_morning_context(char *,size_t) __attribute__((weak));
++    if(zhaoxi_morning_context && off<size-1) {
++        int n=zhaoxi_morning_context(buf+off,size-off);
++        if(n>0)off+=strnlen(buf+off,size-off-1);
++    }
++#endif
++
+ 
+     /* Long-term memory — write directly into buf */
+     off = append_format(buf, size, off, "\n## Long-term Memory\n\n");
+diff --git a/src/infra/vela_tls.c b/src/infra/vela_tls.c
+--- a/src/infra/vela_tls.c
++++ b/src/infra/vela_tls.c
+@@ -133,6 +133,9 @@
+     mbedtls_ssl_config cfg;
+     mbedtls_net_context net;
+     mbedtls_ctr_drbg_context ctr_drbg;
++    int64_t request_deadline;
++    int (*request_cancel)(void *);
++    void *request_user;
+ } tls_ctx_t;
+ 
+ static void tls_ctx_free(tls_ctx_t* ctx)
+@@ -404,9 +407,42 @@
+ }
+ #endif
+ 
+-static int tls_ctx_connect(tls_ctx_t* ctx, const char* host, const char* port)
++static int64_t bounded_now_ms(void)
++{
++    struct timespec t;clock_gettime(CLOCK_MONOTONIC,&t);
++    return (int64_t)t.tv_sec*1000+t.tv_nsec/1000000;
++}
++static int bounded_socket_ready(tls_ctx_t *ctx,int option)
++{
++    if(ctx->request_cancel && ctx->request_cancel(ctx->request_user))return MBEDTLS_ERR_SSL_TIMEOUT;
++    int64_t left=ctx->request_deadline-bounded_now_ms();
++    if(left<=0)return MBEDTLS_ERR_SSL_TIMEOUT;
++    if(left>1000)left=1000;
++    struct timeval tv={.tv_sec=left/1000,.tv_usec=(left%1000)*1000};
++    return setsockopt(ctx->net.fd,SOL_SOCKET,option,&tv,sizeof(tv))?MBEDTLS_ERR_NET_RECV_FAILED:0;
++}
++static int bounded_recv(void *opaque,unsigned char *buf,size_t size)
++{
++    tls_ctx_t *ctx=opaque;int rc=bounded_socket_ready(ctx,SO_RCVTIMEO);if(rc)return rc;
++    rc=mbedtls_net_recv(&ctx->net,buf,size);
++    if(rc==MBEDTLS_ERR_NET_RECV_FAILED && (errno==EAGAIN || errno==EWOULDBLOCK))
++        return bounded_now_ms()>=ctx->request_deadline?MBEDTLS_ERR_SSL_TIMEOUT:MBEDTLS_ERR_SSL_WANT_READ;
++    return rc;
++}
++static int bounded_send(void *opaque,const unsigned char *buf,size_t size)
++{
++    tls_ctx_t *ctx=opaque;int rc=bounded_socket_ready(ctx,SO_SNDTIMEO);if(rc)return rc;
++    rc=mbedtls_net_send(&ctx->net,buf,size);
++    if(rc==MBEDTLS_ERR_NET_SEND_FAILED && (errno==EAGAIN || errno==EWOULDBLOCK))
++        return bounded_now_ms()>=ctx->request_deadline?MBEDTLS_ERR_SSL_TIMEOUT:MBEDTLS_ERR_SSL_WANT_WRITE;
++    return rc;
++}
++static int tls_ctx_connect_limited(tls_ctx_t* ctx,const char* host,const char* port,
++    unsigned budget,int (*cancel)(void *),void *user)
+ {
+     int ret;
++    ctx->request_deadline=budget?bounded_now_ms()+budget:0;
++    ctx->request_cancel=cancel;ctx->request_user=user;
+ 
+     mbedtls_ssl_init(&ctx->ssl);
+     mbedtls_ssl_config_init(&ctx->cfg);
+@@ -452,7 +488,7 @@
+ #endif
+ 
+     if (http_proxy_is_enabled()) {
+-        int tunnel_fd = proxy_open_tunnel(host, atoi(port), 30000);
++        int tunnel_fd = proxy_open_tunnel(host, atoi(port), budget?budget:30000);
+         if (tunnel_fd < 0) {
+             syslog(LOG_ERR, "[%s] proxy tunnel to %s:%s failed\n",
+                 TAG, host, port);
+@@ -463,7 +499,7 @@
+             TAG, tunnel_fd, host, port);
+     } else {
+ #ifdef CONFIG_ZHAOXI_BES_AUDIO
+-        ret = zhaoxi_tcp_connect(&ctx->net, host, port, 15000);
++        ret = zhaoxi_tcp_connect(&ctx->net, host, port, budget && budget<15000?budget:15000);
+ #else
+         ret = mbedtls_net_connect(&ctx->net, host, port, MBEDTLS_NET_PROTO_TCP);
+ #endif
+@@ -565,6 +601,10 @@
+ #endif
+         NULL);
+ 
++    if(budget) {
++        if(bounded_socket_ready(ctx,SO_RCVTIMEO))return VELA_TLS_ERR_TIMEOUT;
++        mbedtls_ssl_set_bio(&ctx->ssl,ctx,bounded_send,bounded_recv,NULL);
++    }
+     /* Handshake */
+     while ((ret = mbedtls_ssl_handshake(&ctx->ssl)) != 0) {
+         if (ret != MBEDTLS_ERR_SSL_WANT_READ && ret != MBEDTLS_ERR_SSL_WANT_WRITE) {
+@@ -590,6 +630,11 @@
+ }
+ 
+ /* ── HTTP/1.1 framing ────────────────────────────────────────── */
++
++static int tls_ctx_connect(tls_ctx_t *ctx,const char *host,const char *port)
++{
++    return tls_ctx_connect_limited(ctx,host,port,0,NULL,NULL);
++}
+ 
+ #ifdef CONFIG_ZHAOXI_BES_AUDIO
+ /* Counters describe plaintext accepted by TLS, not bytes acknowledged by the
+@@ -1294,6 +1339,27 @@
+     return ret;
+ }
+ 
++/* Dedicated bounded connection for background work. Normal ASR/TTS and LLM
++ * calls retain their existing timeout and connection behaviour. */
++int vela_https_post_json_bounded(const char *host,const char *port,const char *path,
++    const vela_header_t *headers,const char *body,char *out,size_t capacity,
++    unsigned budget,int (*cancel)(void *),void *user)
++{
++    if(!host || !port || !path || !body || !out || !capacity || budget<1000 || budget>60000)
++        return VELA_TLS_ERR_PROTOCOL;
++    out[0]=0;
++    vela_header_t merged[16]={{"Content-Type","application/json"}};unsigned count=1;
++    if(headers)for(;headers->name && count<15;headers++)merged[count++]=*headers;
++    merged[count]=(vela_header_t){NULL,NULL};
++    tls_ctx_t *ctx=calloc(1,sizeof(*ctx));if(!ctx)return VELA_TLS_ERR_OVERFLOW;
++    int rc=tls_ctx_connect_limited(ctx,host,port,budget,cancel,user);
++    if(!rc)rc=tls_write_request(ctx,"POST",host,path,merged,body,strlen(body));
++    if(!rc)rc=tls_read_response(ctx,out,capacity,NULL,NULL,false);
++    tls_ctx_free(ctx);free(ctx);
++    if(rc<0)out[0]=0;
++    return rc;
++}
++
+ int vela_https_get(const char* host, const char* port, const char* path,
+     char* resp_buf, size_t resp_cap)
+ {
+diff --git a/src/infra/vela_tls.h b/src/infra/vela_tls.h
+--- a/src/infra/vela_tls.h
++++ b/src/infra/vela_tls.h
+@@ -90,6 +90,12 @@
+                          const char *json_body,
+                          char *resp_buf, size_t resp_cap);
+ 
++/* Background POST with an absolute monotonic budget and cooperative cancel.
++ * DNS retains its configured resolver bound. Does not use a shared pool. */
++int vela_https_post_json_bounded(const char *host,const char *port,const char *path,
++    const vela_header_t *headers,const char *body,char *out,size_t capacity,
++    unsigned budget_ms,int (*cancel)(void *),void *user);
++
+ /**
+  * Incremental HTTP-200 body delivery. The callback receives transfer-decoded
+  * bytes with no NUL terminator; return 0 to continue or a negative error to
+diff --git a/src/voice/voice_channel.c b/src/voice/voice_channel.c
+--- a/src/voice/voice_channel.c
++++ b/src/voice/voice_channel.c
+@@ -249,7 +249,7 @@
+     pthread_mutex_t lock;
+     pthread_cond_t changed;
+     bool enabled, running, awaiting, tts_playing;
+-    bool wake_processing, greeting, wake_debug;
++    bool wake_processing, greeting, wake_debug, offering, news_consent;
+     voice_wake_t wake;
+     unsigned turn_generation;
+     char pending_id[32];
+@@ -388,7 +388,7 @@
+         s_auto.last_error=-ETIMEDOUT;
+         syslog(LOG_WARNING,"[voice_auto] 等待回答超时，自动监听停止\n");
+     }
+-    bool yes=s_auto.enabled && !s_auto.speakers && !s_auto.awaiting &&
++    bool yes=s_auto.enabled && !s_auto.speakers && !s_auto.awaiting && !s_auto.offering &&
+              auto_now_ms()>=s_auto.cooldown_until;
+     pthread_mutex_unlock(&s_auto.lock);
+     if(timed_out) {
+@@ -469,6 +469,38 @@
+     pthread_mutex_unlock(&s_auto.lock);
+ }
+ 
++extern int zhaoxi_morning_voice(const char *,bool) __attribute__((weak));
++int voice_channel_auto_output_begin(bool idle_only)
++{
++    pthread_mutex_lock(&s_auto.lock);
++    bool ready=s_auto.enabled && s_auto.running && !s_auto.offering && !s_auto.speakers && !s_auto.awaiting;
++    if(idle_only)ready=ready && s_auto.state==AUTO_LISTENING && !s_auto.news_consent &&
++        !voice_wake_poll(&s_auto.wake,(uint64_t)auto_now_ms());
++    if(!ready){pthread_mutex_unlock(&s_auto.lock);return -EBUSY;}
++    s_auto.offering=true;
++    if(s_auto.capture)audio_capture_abort(s_auto.capture);
++    while(s_auto.capture)pthread_cond_wait(&s_auto.changed,&s_auto.lock);
++    int rc=s_auto.enabled?0:-ECANCELED;
++    if(rc)s_auto.offering=false;
++    pthread_mutex_unlock(&s_auto.lock);return rc;
++}
++void voice_channel_auto_output_end(bool conversation)
++{
++    pthread_mutex_lock(&s_auto.lock);s_auto.offering=false;
++    if(conversation && s_auto.enabled && s_auto.wake.enabled) {
++        s_auto.wake.awake=true;
++        s_auto.wake.deadline_ms=(uint64_t)auto_now_ms()+VOICE_WAKE_WINDOW_MS;
++    }
++    auto_wake_sync_locked();pthread_cond_broadcast(&s_auto.changed);
++    pthread_mutex_unlock(&s_auto.lock);
++}
++int voice_channel_auto_news_consent(bool enabled)
++{
++    pthread_mutex_lock(&s_auto.lock);
++    int rc=enabled && !s_auto.enabled?-ECANCELED:0;
++    s_auto.news_consent=enabled && !rc;
++    pthread_mutex_unlock(&s_auto.lock);return rc;
++}
+ static void *auto_voice_worker(void *unused)
+ {
+     (void)unused;
+@@ -609,6 +641,9 @@
+             auto_set_state(AUTO_ERROR,result?result:-ENODATA);
+             auto_feedback(VOICE_AUTO_FEEDBACK_ASR_ERROR);usleep(500000);continue;}
+         if(!voice_auto_enabled() || agent_shutdown_requested())break;
++        if(zhaoxi_morning_voice && zhaoxi_morning_voice(text,false)>0) {
++            auto_wake_processing(false);ready_pending=false;auto_set_state(AUTO_LISTENING,0);continue;
++        }
+         char command[sizeof(text)];
+         pthread_mutex_lock(&s_auto.lock);
+         bool was_awake=voice_wake_poll(&s_auto.wake,(uint64_t)auto_now_ms());
+@@ -643,6 +678,9 @@
+             auto_set_state(AUTO_LISTENING,0);
+             continue;
+         }
++        if(zhaoxi_morning_voice && zhaoxi_morning_voice(command,true)>0) {
++            auto_wake_processing(false);ready_pending=false;auto_set_state(AUTO_LISTENING,0);continue;
++        }
+         if(!accepted_cue && !greet)auto_feedback(VOICE_AUTO_FEEDBACK_ACCEPTED);
+         agent_msg_t message={0};
+         strcpy(message.channel,AGENT_CHAN_VOICE);
+@@ -701,7 +739,7 @@
+ int voice_channel_auto_stop(void)
+ {
+     pthread_mutex_lock(&s_auto.lock);s_auto.enabled=false;s_auto.awaiting=false;
+-    s_auto.pending_id[0]=0;s_auto.last_error=0;s_auto.wake_debug=false;
++    s_auto.pending_id[0]=0;s_auto.last_error=0;s_auto.wake_debug=false;s_auto.news_consent=false;
+     s_auto.wake_processing=false;voice_wake_reset(&s_auto.wake);
+     if(s_auto.capture)audio_capture_abort(s_auto.capture);
+     pthread_cond_broadcast(&s_auto.changed);pthread_mutex_unlock(&s_auto.lock);return 0;
+@@ -744,11 +782,12 @@
+         else if(state==AUTO_LISTENING && s_auto.wake.enabled)
+             name=awake?"等待提问":"等待唤醒词";
+     }
++    if(s_auto.enabled && s_auto.news_consent && !s_auto.speakers && (state==AUTO_LISTENING || state==AUTO_RECORDING))name="等待新闻播放许可";
+     bool output_active=s_auto.speakers>0;
+     int written=snprintf(output,capacity,
+         "{\"enabled\":%s,\"running\":%s,\"accepting_speech\":%s,\"wake_enabled\":%s,\"awake\":%s,\"wake_phrase\":\"你好，夕夕 / Hello，xixi\",\"accepting_commands\":%s,\"output_active\":%s,\"output_playing\":%s,\"state\":\"%s\",\"noise\":%d,\"threshold\":%d,\"last_error\":%d,\"frames\":%u,\"utterances\":%u,\"asr_calls\":%u,\"rejected\":%u,\"last_pcm_bytes\":%zu}",
+         s_auto.enabled?"true":"false",s_auto.running?"true":"false",accepting?"true":"false",
+-        s_auto.wake.enabled?"true":"false",awake?"true":"false",(accepting && awake)?"true":"false",
++        s_auto.wake.enabled?"true":"false",awake?"true":"false",(accepting && (awake || s_auto.news_consent))?"true":"false",
+         output_active?"true":"false",(output_active && s_auto.tts_playing)?"true":"false",name,
+         s_auto.noise,s_auto.threshold,s_auto.last_error,s_auto.frames_seen,
+         s_auto.utterances,s_auto.asr_calls,s_auto.rejected,s_auto.last_pcm_bytes);
+@@ -757,6 +796,9 @@
+ }
+ #else
+ int voice_channel_auto_start(void){return -ENOSYS;}
++int voice_channel_auto_output_begin(bool idle_only){(void)idle_only;return -ENOSYS;}
++void voice_channel_auto_output_end(bool conversation){(void)conversation;}
++int voice_channel_auto_news_consent(bool enabled){(void)enabled;return -ENOSYS;}
+ int voice_channel_auto_stop(void){return -ENOSYS;}
+ int voice_channel_auto_wake_set_enabled(bool enabled){(void)enabled;return -ENOSYS;}
+ int voice_channel_auto_wake_debug_set_enabled(bool enabled){(void)enabled;return -ENOSYS;}
+@@ -1993,6 +2035,17 @@
+ }
+ #endif
+ 
++int voice_channel_speak_auto_owned(const char *text)
++{
++#ifdef CONFIG_ZHAOXI_BES_AUDIO
++    voice_auto_pause_for_tts();
++    int result=voice_channel_speak_impl(text,true);
++    voice_auto_resume_after_tts();return result;
++#else
++    (void)text;return -ENOSYS;
++#endif
++}
++
+ int voice_channel_speak(const char *text)
+ {
+ #ifdef CONFIG_ZHAOXI_BES_AUDIO
+diff --git a/src/voice/voice_channel.h b/src/voice/voice_channel.h
+--- a/src/voice/voice_channel.h
++++ b/src/voice/voice_channel.h
+@@ -97,6 +97,14 @@
+ /* Test ASR: read PCM file, recognize, print result. */
+ int voice_channel_test_asr(const char *pcm_path);
+ 
++/* Reserve capture exclusion for a product announcement / consented playlist.
++ * Caller must release every successful reservation, including error paths. */
++int voice_channel_auto_output_begin(bool idle_only);
++void voice_channel_auto_output_end(bool conversation);
++int voice_channel_auto_news_consent(bool enabled);
++int voice_channel_speak_auto_owned(const char *text);
++
+ #ifdef __cplusplus
+ }
+ #endif
++

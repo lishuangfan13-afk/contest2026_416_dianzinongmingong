@@ -7,6 +7,7 @@ MAINSRC = zhaoxi_main.c
 CSRCS += todo_store.c journal.c local_intent.c
 ifeq ($(CONFIG_ZHAOXI_BES_AUDIO),y)
 CSRCS += bes_audio.c bes_clock.c reminder.c drink.c dns_diag.c
+CSRCS += morning.c morning_store.c morning_net.c
 CSRCS += notifications/feishu_notify.c notifications/feishu_notify_sdk.c
 endif
 ifeq ($(CONFIG_ZHAOXI_MIMO_VOICE),y)

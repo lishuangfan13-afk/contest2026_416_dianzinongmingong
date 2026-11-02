@@ -12,10 +12,18 @@ import unittest
 from unittest.mock import patch
 
 from launch import active_sessions, choose_port, main as launch_main, process_running, stop_session
-from start import AutomaticVoice, AutoVoiceDisplay, ControlHealth, wait_for_agent_stop
+from start import NetworkClock, AutomaticVoice, AutoVoiceDisplay, ControlHealth, wait_for_agent_stop
 
 
 class AutomaticVoiceTests(unittest.TestCase):
+    def test_manual_mode_actively_stops_boot_listener_once(self):
+        calls=[]
+        def send(value,**kwargs):calls.append(value);return {'rc':0}
+        auto=AutomaticVoice(False,send=send,stop_when_disabled=True)
+        auto.start_once();auto.wait();auto.start_once()
+        self.assertEqual(calls,[{'action':'command','args':['auto','stop']}])
+        self.assertEqual(auto.result['auto_voice_state'],'stopped')
+
     def test_start_is_one_board_command_even_when_called_repeatedly(self):
         calls=[]
         def send(command,**options):
@@ -79,10 +87,18 @@ class AutomaticStatusTests(unittest.TestCase):
     def test_wake_mode_explains_when_a_command_can_be_given(self):
         display=AutoVoiceDisplay()
         waiting=self.display_state('等待说话',accepting_speech=True,wake_enabled=True,awake=False)
-        self.assertIn('请先说“你好，openvela”或“Hello，openvela”',display.message(waiting))
+        self.assertIn('请先说“你好，夕夕”或“Hello，xixi”',display.message(waiting))
         awake=self.display_state('等待说话',accepting_speech=True,wake_enabled=True,awake=True)
         self.assertIn('已唤醒',display.message(awake))
         self.assertIsNone(display.message(awake))
+
+    def test_boot_wake_stages_require_real_capture_before_prompt(self):
+        display=AutoVoiceDisplay()
+        for state in ['等待唤醒词','等待提问']:
+            text=display.message(self.display_state(state,accepting_speech=False))
+            self.assertIn('尚未确认',text)
+        text=display.message(self.display_state('正在播报唤醒应答',output_active=True))
+        self.assertIn('“你好”',text)
 
     def test_wake_disabled_retains_direct_conversation_prompt(self):
         display=AutoVoiceDisplay()
@@ -197,16 +213,25 @@ class LauncherTests(unittest.TestCase):
         ports=[SimpleNamespace(device=n,vid=0x0403,pid=0x6001) for n in ['COM3','COM7']]
         with self.assertRaises(RuntimeError):choose_port(ports)
 
-    def test_default_entry_only_provides_network(self):
+    def test_default_entry_keeps_automatic_wake_listening(self):
         with patch('sys.argv',['launch.py']),patch('launch.preflight',return_value='COM7'), \
              patch('launch.active_sessions',return_value=[]), \
              patch('launch.subprocess.call',return_value=0) as run, \
              contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(launch_main(),0)
         command=run.call_args.args[0]
-        self.assertNotIn('--auto-voice',command)
+        self.assertIn('--auto-voice',command)
         self.assertEqual(command[command.index('--port')+1],'COM7')
         self.assertNotIn('listen',command)
+
+    def test_explicit_manual_entry_requests_stop(self):
+        with patch('sys.argv',['launch.py','--manual-voice']),patch('launch.preflight',return_value='COM7'), \
+             patch('launch.active_sessions',return_value=[]), \
+             patch('launch.subprocess.call',return_value=0) as run, \
+             contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(launch_main(),0)
+        self.assertIn('--manual-voice',run.call_args.args[0])
+        self.assertNotIn('--auto-voice',run.call_args.args[0])
 
     def test_explicit_voice_entry_enables_board_automatic_voice(self):
         with patch('sys.argv',['launch.py','--auto-voice']),patch('launch.preflight',return_value='COM7'), \
@@ -259,6 +284,27 @@ class ShutdownProgressTests(unittest.TestCase):
             def read(self,_):now[0]+=5;return b''
         reply=wait_for_agent_stop(Port(),b'',timeout=20,clock=lambda:now[0],emit=lambda *a,**k:None)
         self.assertNotIn(b'Shutdown complete.',reply)
+
+
+class NetworkClockTests(unittest.TestCase):
+    def test_sync_once_per_confirmed_link_and_on_reconnect(self):
+        calls=[]
+        def send(value,**kwargs):calls.append(value);return {'rc':0,'epoch':value['epoch']}
+        clock=NetworkClock(send=send,epoch=lambda:1793574000)
+        clock.update(False);self.assertEqual(calls,[])
+        clock.update(True);clock.wait();clock.update(True)
+        self.assertEqual(len(calls),1)
+        clock.update(False);clock.update(True);clock.wait()
+        self.assertEqual(len(calls),2)
+        self.assertEqual(clock.result['news_clock_sync_state'],'confirmed')
+
+    def test_failure_does_not_claim_synced_or_spin(self):
+        now=[0];calls=[]
+        def send(value,**kwargs):calls.append(value);return {'rc':-1}
+        clock=NetworkClock(send=send,clock=lambda:now[0],epoch=lambda:1793574000)
+        clock.update(True);clock.wait();clock.update(True)
+        self.assertEqual(len(calls),1);self.assertEqual(clock.result['news_clock_sync_state'],'failed')
+        now[0]=61;clock.update(True);clock.wait();self.assertEqual(len(calls),2)
 
 
 if __name__=='__main__':unittest.main()

@@ -21,7 +21,7 @@ python tools/pc_link/launch.py --check-only
 ## 启动与结束
 
 1. 接好供电和 USB2UART 数据线，关闭其他串口终端。完整断电后，如板子尚未启动，按 POWER 约两秒。
-2. 双击 [仅共享网络.cmd](仅共享网络.cmd)，或在仓库根目录执行：
+2. 双击 [开始自动语音.cmd](开始自动语音.cmd)，或在仓库根目录执行：
 
    ```powershell
    python tools/pc_link/launch.py --port COM3
@@ -49,19 +49,21 @@ python tools/pc_link/control.py --time
 
 ## 自动语音体验
 
-在场人员主动选择 [开始自动语音.cmd](开始自动语音.cmd)，或使用：
+默认入口配合板端开机唤醒，也可明确使用：
 
 ```powershell
 python tools/pc_link/launch.py --auto-voice
 ```
 
-窗口确认可以说话后，先说“你好，openvela”或“Hello，openvela”，也可以紧接着说出需求。唤醒后可继续提问，空闲 60 秒会回到等待唤醒。板端采用声音检测和约 1.2 秒静音封句，识别、处理和播放期间暂停收音；等喇叭回答结束，再说下一句。
+窗口确认可以说话后，先说“你好，夕夕”或“Hello，xixi”，也可以紧接着说出需求。识别到唤醒词后先播报“你好”，播完再提问。唤醒后可继续提问，空闲 60 秒会回到等待唤醒。板端采用声音检测和约 1.2 秒静音封句，识别、处理和播放期间暂停收音；等喇叭回答结束，再说下一句。
 
-自动收音默认关闭。通过上述入口主动开启后，检测到的语句会发送给云端 ASR，再由板端检查唤醒前缀。`python tools/pc_link/control.py --cmd auto wake on` 可启用前缀检查，`--cmd auto wake off` 用于现场调试的自由对话，`python tools/pc_link/control.py --auto-status` 查询当前开关与完整收音状态；这些命令本身不会启动录音。完整使用规则见 [ASR 唤醒短语](../../docs/ASR唤醒短语.md)。
+源码补丁 0065 在 Agent 初始化后自动进入等待唤醒；2026-11-02 发布的 AP 镜像已包含本功能，烧录后生效。需要供网同时停止自动监听时，使用 `launch.py --manual-voice` 或 [仅共享网络.cmd](仅共享网络.cmd)，控制通道就绪后会实际发送 `auto stop`。自动监听开启后，检测到的语句会发送给云端 ASR，再由板端检查唤醒前缀。`python tools/pc_link/control.py --cmd auto wake on` 可启用前缀检查，`--cmd auto wake off` 用于现场调试的自由对话，`python tools/pc_link/control.py --auto-status` 查询当前开关与完整收音状态；这些命令本身不会启动录音。完整使用规则见 [ASR 唤醒短语](../../docs/ASR唤醒短语.md)。
 
 窗口会显示环境校准、等待说话、收音、识别、等待回答、合成与播放阶段。结束使用同一个停止入口。两种启动模式各管理一个会话，切换前先正常结束当前会话。
 
 ## 故障恢复
+
+晨间资讯的采集器随供网会话启动和关闭。首次设置人设与接口后，板端负责每日调度、缓存和播放许可，详见 [长期人设与晨间资讯](../../docs/长期人设与晨间资讯.md)。本版电脑会话时长上限仍为一小时，整夜供网另行处理。
 
 - 串口占用：关闭其他终端，确认使用 USB2UART 数据口及正确 COM 编号。
 - COM 已识别而板端静默：检查供电，按 POWER 启动板子；RESET 用于运行中的复位。

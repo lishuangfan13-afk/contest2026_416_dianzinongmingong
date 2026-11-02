@@ -21,6 +21,7 @@
 #ifdef CONFIG_ZHAOXI_BES_AUDIO
 #include "reminder.h"
 #include "drink.h"
+#include "morning.h"
 #include "notifications/feishu_notify.h"
 #include "infra/config_store.h"
 #include "dns_diag.h"
@@ -55,6 +56,8 @@ static int usage(void)
     puts("  zhaoxi stop   （请求停止 Agent，等待 Shutdown complete 后再更新资产）");
     puts("  zhaoxi listen start|stop");
 #ifdef CONFIG_ZHAOXI_BES_AUDIO
+    puts("  zhaoxi profile show | set <长期人设>");
+    puts("  zhaoxi news status | fetch | ask | play | endpoint <URL>");
     puts("  zhaoxi auto start|stop|status （启动一次，自动收音与回答）");
     puts("  zhaoxi auto wake on|off|status （ASR唤醒短语开关）");
     puts("  zhaoxi [--text] drink start [分钟] | stop | status （默认60分钟）");
@@ -242,7 +245,22 @@ int main(int argc, char **argv)
     }
 #endif
 #ifdef CONFIG_ZHAOXI_BES_AUDIO
+    if (!strcmp(argv[at], "news")) return zhaoxi_morning_command(argc-at+1,argv+at-1);
+    if (!strcmp(argv[at], "profile")) {
+        char profile[MORNING_PROFILE_MAX+1]={0};int rc=-EINVAL;
+        if(argc==at+2 && !strcmp(argv[at+1],"show")) {
+            rc=morning_profile_get(profile,sizeof(profile));if(!rc)puts(profile);
+        } else if(argc>at+2 && !strcmp(argv[at+1],"set")) {
+            rc=append_arguments(profile,sizeof(profile),argc,argv,at+2);
+            if(!rc)rc=zhaoxi_morning_set_profile(profile);
+        }
+        printf("PROFILE_RESULT rc=%d\n",rc);return rc?1:0;
+    }
     if (!strcmp(argv[at], "auto")) {
+        if (argc == 4 && !strcmp(argv[2], "debug")) {
+            if (strcmp(argv[3], "on") && strcmp(argv[3], "off")) return 1;
+            return voice_channel_auto_wake_debug_set_enabled(!strcmp(argv[3], "on")) ? 1 : 0;
+        }
         if (argc == 4 && !strcmp(argv[2], "wake")) {
             if (!strcmp(argv[3], "status")) {
                 bool enabled = false, awake = false;

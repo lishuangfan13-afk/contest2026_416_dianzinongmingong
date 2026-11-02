@@ -4,6 +4,7 @@
 #include "tools/tool_registry.h"
 #include "pc_link.h"
 #include "journal.h"
+#include "morning.h"
 #include "voice/voice_channel.h"
 #include <arpa/inet.h>
 #include <errno.h>
@@ -34,6 +35,27 @@ static cJSON *dispatch(cJSON *request, bool *ending)
         voice_channel_auto_stop();
         rc = 0; *ending = true;
         cJSON_AddBoolToObject(reply, "ending", true);
+    } else if(action && !strcmp(action,"sync-time")) {
+        cJSON *epoch=cJSON_GetObjectItem(request,"epoch");
+        if(cJSON_IsNumber(epoch) && epoch->valuedouble>=1735689600LL && epoch->valuedouble<=4102444799LL &&
+           epoch->valuedouble==(double)(int64_t)epoch->valuedouble) {
+            rc=zhaoxi_morning_sync_time((int64_t)epoch->valuedouble,"PC");
+            if(!rc)cJSON_AddNumberToObject(reply,"epoch",(double)time(NULL));
+        }
+    } else if(action && (!strcmp(action,"profile-get") || !strcmp(action,"profile-set"))) {
+        if(!strcmp(action,"profile-set"))rc=zhaoxi_morning_set_profile(cJSON_GetStringValue(cJSON_GetObjectItem(request,"text")));
+        else rc=0;
+        if(!rc){char profile[MORNING_PROFILE_MAX+1];rc=morning_profile_get(profile,sizeof(profile));if(!rc)cJSON_AddStringToObject(reply,"profile",profile);}
+    } else if(action && !strcmp(action,"news-status")) {
+        char text[1400];rc=zhaoxi_morning_status(text,sizeof(text));
+        cJSON *v=!rc?cJSON_Parse(text):NULL;if(v)cJSON_AddItemToObject(reply,"news",v);
+    } else if(action && !strcmp(action,"news-get")) {
+        struct morning_batch *batch=calloc(1,sizeof(*batch));char *text=malloc(MORNING_JSON_MAX),today[11];
+        rc=(!batch || !text)?-ENOMEM:morning_day((int64_t)time(NULL),today,NULL);
+        if(!rc)rc=morning_batch_load(today,batch);
+        if(!rc)rc=morning_batch_render(batch,text,MORNING_JSON_MAX);
+        cJSON *v=!rc?cJSON_Parse(text):NULL;if(v)cJSON_AddItemToObject(reply,"news",v);
+        free(batch);free(text);
     } else if (action && !strcmp(action, "auto-status")) {
         char status[1024] = {0};
         rc = voice_channel_auto_status(status, sizeof(status));
@@ -72,7 +94,7 @@ static cJSON *dispatch(cJSON *request, bool *ending)
             if (total > 1024) valid = false;
         }
         int op = valid && !strcmp(argv[1], "--text") ? 2 : 1;
-        const char *allowed[] = {"ask", "note", "todo", "remind", "drink", "notify", "listen", "auto", "say", "status", "test-speaker"};
+        const char *allowed[] = {"ask", "note", "todo", "remind", "drink", "notify", "listen", "auto", "say", "status", "test-speaker", "profile", "news"};
         bool permitted = false;
         if (valid && op <= count) {
             for (unsigned i = 0; i < sizeof(allowed) / sizeof(allowed[0]); i++)

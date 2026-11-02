@@ -1,0 +1,326 @@
+diff --git a/src/agent_main.c b/src/agent_main.c
+--- a/src/agent_main.c
++++ b/src/agent_main.c
+@@ -568,6 +568,9 @@
+ 
+ static int ai_agent_run(int argc, char* argv[])
+ {
++#if defined(CONFIG_EXAMPLES_ZHAOXI) && defined(CONFIG_ZHAOXI_BES_AUDIO)
++    int voice_init_result = -ENODEV;
++#endif
+     bool headless = argc == 2 && strcmp(argv[1], "--headless") == 0;
+     if (argc > 1 && !headless) {
+         printf("Usage: ai_agent [--headless]\n");
+@@ -725,6 +728,9 @@
+ #endif
+ 
+         rc = voice_channel_init();
++#if defined(CONFIG_EXAMPLES_ZHAOXI) && defined(CONFIG_ZHAOXI_BES_AUDIO)
++        voice_init_result = rc;
++#endif
+         BOOT_LOG_RC(&t0, "P3", "voice_channel_init", rc);
+ 
+ #ifdef CONFIG_AI_AGENT_WEIXIN
+@@ -849,6 +855,16 @@
+     syslog(LOG_INFO, "[%s] [boot +%ldms] AI Agent ready (headless=%d).\n",
+         TAG, boot_ms(&t0), headless);
+ 
++#if defined(CONFIG_EXAMPLES_ZHAOXI) && defined(CONFIG_ZHAOXI_BES_AUDIO)
++    /* Own the voice worker in this long-lived task group. A transient NSH
++     * command would take its pthreads down when the command returns. */
++    if (!voice_init_result && !g_shutdown_requested) {
++        int rc = voice_channel_auto_wake_set_enabled(true);
++        if (!rc) rc = voice_channel_auto_start();
++        BOOT_LOG_RC(&t0, "P6", "automatic wake listening", rc);
++    }
++#endif
++
+     /* Block main thread until shutdown is requested */
+     while (!g_shutdown_requested) {
+         sleep(1);
+diff --git a/src/voice/voice_channel.c b/src/voice/voice_channel.c
+--- a/src/voice/voice_channel.c
++++ b/src/voice/voice_channel.c
+@@ -220,6 +220,7 @@
+     voice_asr_stream_t* asr_stream; /* streaming ASR handle */
+     sem_t rec_ready; /* posted after capture start succeeds or fails */
+     int rec_start_result;
++    bool tts_wake_greeting; /* cancellation belongs to the active playback */
+     volatile int tts_abort; /* set to 1 to stop active TTS playback */
+     audio_playback_t* tts_pb; /* active TTS playback handle (or NULL) */
+     pthread_mutex_t speak_lock; /* serialize concurrent speak calls */
+@@ -243,12 +244,12 @@
+ #define AUTO_REPLY_TIMEOUT_MS 180000
+ 
+ enum auto_state { AUTO_OFF, AUTO_CALIBRATING, AUTO_LISTENING, AUTO_RECORDING,
+-                  AUTO_ASR, AUTO_REPLY, AUTO_PAUSED, AUTO_ERROR, AUTO_PLAYING, AUTO_TOO_LONG, AUTO_INTERRUPTED };
++                  AUTO_ASR, AUTO_REPLY, AUTO_PAUSED, AUTO_ERROR, AUTO_PLAYING, AUTO_TOO_LONG, AUTO_INTERRUPTED, AUTO_GREETING };
+ static struct {
+     pthread_mutex_t lock;
+     pthread_cond_t changed;
+     bool enabled, running, awaiting, tts_playing;
+-    bool wake_processing;
++    bool wake_processing, greeting, wake_debug;
+     voice_wake_t wake;
+     unsigned turn_generation;
+     char pending_id[32];
+@@ -262,6 +263,8 @@
+ } s_auto = {.lock=PTHREAD_MUTEX_INITIALIZER, .changed=PTHREAD_COND_INITIALIZER,
+             .wake=VOICE_WAKE_INITIALIZER};
+ 
++static int voice_auto_greet(void);
++
+ struct local_vad {
+     unsigned calibrated, consecutive, voiced, silent, frames;
+     int noise, threshold;
+@@ -338,8 +341,8 @@
+ {
+     static const char *names[]={"已停止","校准环境噪声","等待说话","正在聆听",
+         "正在识别","等待助手回答","正在合成语音，暂停聆听","语音异常，正在恢复",
+-        "正在播放回答，暂停聆听","语句过长，等待停顿","收音被打断，等待停顿"};
+-    return state>=AUTO_OFF && state<=AUTO_INTERRUPTED ? names[state] : "未知";
++        "正在播放回答，暂停聆听","语句过长，等待停顿","收音被打断，等待停顿","正在播报唤醒应答"};
++    return state>=AUTO_OFF && state<=AUTO_GREETING ? names[state] : "未知";
+ }
+ 
+ static void auto_set_state(enum auto_state state, int error)
+@@ -597,24 +600,50 @@
+         syslog(LOG_INFO,"[voice_auto] ASR done: %lldms rc=%d bytes=%zu\n",
+                (long long)(auto_now_ms()-asr_started),result,used);
+         if(!voice_auto_enabled() || agent_shutdown_requested())break;
++        pthread_mutex_lock(&s_auto.lock);
++        bool wake_debug=s_auto.wake_debug && s_auto.wake.enabled && !s_auto.wake.awake;
++        pthread_mutex_unlock(&s_auto.lock);
++        if(wake_debug)printf("WAKE_DIAG rc=%d text_bytes=%zu text=\"%.*s\"\n",
++                             result,strlen(text),160,text);
+         if(result || !text[0]){auto_wake_processing(false);
+             auto_set_state(AUTO_ERROR,result?result:-ENODATA);
+             auto_feedback(VOICE_AUTO_FEEDBACK_ASR_ERROR);usleep(500000);continue;}
+         if(!voice_auto_enabled() || agent_shutdown_requested())break;
+         char command[sizeof(text)];
+         pthread_mutex_lock(&s_auto.lock);
++        bool was_awake=voice_wake_poll(&s_auto.wake,(uint64_t)auto_now_ms());
+         voice_wake_result_t gate=voice_wake_process(&s_auto.wake,text,
+             (uint64_t)auto_now_ms(),command,sizeof(command));
++        bool greet=gate==VOICE_WAKE_ONLY ||
++            (gate==VOICE_WAKE_COMMAND && s_auto.wake.enabled && !was_awake);
++        s_auto.greeting=greet;
+         pthread_mutex_unlock(&s_auto.lock);
++        if(greet) {
++            auto_set_state(AUTO_GREETING,0);
++            /* Capture has already closed before ASR. Wait for the entire
++             * greeting playback before admitting any question. */
++            int greeting_result=voice_auto_greet();
++            pthread_mutex_lock(&s_auto.lock);
++            s_auto.greeting=false;
++            if(greeting_result)voice_wake_reset(&s_auto.wake);
++            pthread_mutex_unlock(&s_auto.lock);
++            if(!voice_auto_enabled() || agent_shutdown_requested())break;
++            if(greeting_result) {
++                auto_wake_processing(false);
++                auto_set_state(AUTO_ERROR,greeting_result);
++                auto_feedback(VOICE_AUTO_FEEDBACK_WAKE_ERROR);
++                ready_pending=false;
++                continue;
++            }
++        }
+         if(gate!=VOICE_WAKE_COMMAND) {
+             auto_wake_processing(false);
+             ready_pending=false;
+             if(gate==VOICE_WAKE_STOP) { voice_channel_auto_stop(); break; }
+-            if(gate==VOICE_WAKE_ONLY) auto_feedback(VOICE_AUTO_FEEDBACK_READY);
+             auto_set_state(AUTO_LISTENING,0);
+             continue;
+         }
+-        if(!accepted_cue)auto_feedback(VOICE_AUTO_FEEDBACK_ACCEPTED);
++        if(!accepted_cue && !greet)auto_feedback(VOICE_AUTO_FEEDBACK_ACCEPTED);
+         agent_msg_t message={0};
+         strcpy(message.channel,AGENT_CHAN_VOICE);
+         message.content=strdup(command);
+@@ -672,7 +701,7 @@
+ int voice_channel_auto_stop(void)
+ {
+     pthread_mutex_lock(&s_auto.lock);s_auto.enabled=false;s_auto.awaiting=false;
+-    s_auto.pending_id[0]=0;s_auto.last_error=0;
++    s_auto.pending_id[0]=0;s_auto.last_error=0;s_auto.wake_debug=false;
+     s_auto.wake_processing=false;voice_wake_reset(&s_auto.wake);
+     if(s_auto.capture)audio_capture_abort(s_auto.capture);
+     pthread_cond_broadcast(&s_auto.changed);pthread_mutex_unlock(&s_auto.lock);return 0;
+@@ -685,6 +714,11 @@
+     auto_wake_sync_locked();
+     pthread_mutex_unlock(&s_auto.lock);
+     return 0;
++}
++int voice_channel_auto_wake_debug_set_enabled(bool enabled)
++{
++    pthread_mutex_lock(&s_auto.lock);s_auto.wake_debug=enabled;
++    pthread_mutex_unlock(&s_auto.lock);return 0;
+ }
+ int voice_channel_auto_wake_get_state(bool *enabled,bool *awake)
+ {
+@@ -705,9 +739,14 @@
+     bool accepting=s_auto.enabled && s_auto.running && s_auto.capture &&
+         (state==AUTO_LISTENING || state==AUTO_RECORDING);
+     bool awake=s_auto.enabled && voice_wake_poll(&s_auto.wake,(uint64_t)auto_now_ms());
++    if(s_auto.enabled) {
++        if(s_auto.greeting)name=auto_state_name(AUTO_GREETING);
++        else if(state==AUTO_LISTENING && s_auto.wake.enabled)
++            name=awake?"等待提问":"等待唤醒词";
++    }
+     bool output_active=s_auto.speakers>0;
+     int written=snprintf(output,capacity,
+-        "{\"enabled\":%s,\"running\":%s,\"accepting_speech\":%s,\"wake_enabled\":%s,\"awake\":%s,\"wake_phrase\":\"你好，openvela / Hello，openvela\",\"accepting_commands\":%s,\"output_active\":%s,\"output_playing\":%s,\"state\":\"%s\",\"noise\":%d,\"threshold\":%d,\"last_error\":%d,\"frames\":%u,\"utterances\":%u,\"asr_calls\":%u,\"rejected\":%u,\"last_pcm_bytes\":%zu}",
++        "{\"enabled\":%s,\"running\":%s,\"accepting_speech\":%s,\"wake_enabled\":%s,\"awake\":%s,\"wake_phrase\":\"你好，夕夕 / Hello，xixi\",\"accepting_commands\":%s,\"output_active\":%s,\"output_playing\":%s,\"state\":\"%s\",\"noise\":%d,\"threshold\":%d,\"last_error\":%d,\"frames\":%u,\"utterances\":%u,\"asr_calls\":%u,\"rejected\":%u,\"last_pcm_bytes\":%zu}",
+         s_auto.enabled?"true":"false",s_auto.running?"true":"false",accepting?"true":"false",
+         s_auto.wake.enabled?"true":"false",awake?"true":"false",(accepting && awake)?"true":"false",
+         output_active?"true":"false",(output_active && s_auto.tts_playing)?"true":"false",name,
+@@ -720,6 +759,7 @@
+ int voice_channel_auto_start(void){return -ENOSYS;}
+ int voice_channel_auto_stop(void){return -ENOSYS;}
+ int voice_channel_auto_wake_set_enabled(bool enabled){(void)enabled;return -ENOSYS;}
++int voice_channel_auto_wake_debug_set_enabled(bool enabled){(void)enabled;return -ENOSYS;}
+ int voice_channel_auto_wake_get_state(bool *enabled,bool *awake)
+ {if(enabled)*enabled=false;if(awake)*awake=false;return -ENOSYS;}
+ int voice_channel_auto_status(char *output,size_t capacity)
+@@ -1082,7 +1122,14 @@
+     pthread_mutex_lock(&s_voice.lock);
+     int error = s_tts_playback_error ? s_tts_playback_error :
+                 s_voice.tts_abort ? -ECANCELED : 0;
++    bool greeting=s_voice.tts_wake_greeting;
+     pthread_mutex_unlock(&s_voice.lock);
++#ifdef CONFIG_ZHAOXI_BES_AUDIO
++    if(greeting && (!voice_auto_enabled() || agent_shutdown_requested()))
++        return -ECANCELED;
++#else
++    (void)greeting;
++#endif
+     return error;
+ }
+ 
+@@ -1792,12 +1839,16 @@
+     *w = '\0';
+ }
+ 
+-static int voice_channel_speak_impl(const char* text)
++static int voice_channel_speak_impl(const char* text, bool wake_greeting)
+ {
+     if (!text || text[0] == '\0') {
+         return -EINVAL;
+     }
+ 
++#ifdef CONFIG_ZHAOXI_BES_AUDIO
++    if(wake_greeting && (!voice_auto_enabled() || agent_shutdown_requested()))
++        return -ECANCELED;
++#endif
+     /* ── Serialize concurrent speak calls ── */
+     /* If another thread is already speaking, abort its TTS playback
+      * so we don't overlap media_player sessions (which causes the
+@@ -1811,6 +1862,12 @@
+     pthread_mutex_unlock(&s_voice.lock);
+ 
+     pthread_mutex_lock(&s_voice.speak_lock);
++#ifdef CONFIG_ZHAOXI_BES_AUDIO
++    if(wake_greeting && (!voice_auto_enabled() || agent_shutdown_requested())) {
++        pthread_mutex_unlock(&s_voice.speak_lock);
++        return -ECANCELED;
++    }
++#endif
+ 
+     /* ── AEC workaround: reject TTS while PTT is recording ── */
+     pthread_mutex_lock(&s_voice.lock);
+@@ -1872,6 +1929,7 @@
+     /* Register active playback so voice_channel_start() can abort it */
+     pthread_mutex_lock(&s_voice.lock);
+     s_voice.tts_abort = 0;
++    s_voice.tts_wake_greeting = wake_greeting;
+     s_voice.tts_pb = pb;
+     pthread_mutex_unlock(&s_voice.lock);
+ 
+@@ -1902,6 +1960,7 @@
+     /* Unregister active playback */
+     pthread_mutex_lock(&s_voice.lock);
+     s_voice.tts_pb = NULL;
++    s_voice.tts_wake_greeting = false;
+     s_voice.tts_abort = 0;
+     pthread_mutex_unlock(&s_voice.lock);
+ 
+@@ -1924,12 +1983,22 @@
+     return 0;
+ }
+ 
++#ifdef CONFIG_ZHAOXI_BES_AUDIO
++static int voice_auto_greet(void)
++{
++    voice_auto_pause_for_tts();
++    int result=voice_channel_speak_impl("你好",true);
++    voice_auto_resume_after_tts();
++    return result;
++}
++#endif
++
+ int voice_channel_speak(const char *text)
+ {
+ #ifdef CONFIG_ZHAOXI_BES_AUDIO
+     voice_auto_pause_for_tts();
+ #endif
+-    int result = voice_channel_speak_impl(text);
++    int result = voice_channel_speak_impl(text, false);
+ #ifdef CONFIG_ZHAOXI_BES_AUDIO
+     voice_auto_resume_after_tts();
+ #endif
+diff --git a/src/voice/voice_channel.h b/src/voice/voice_channel.h
+--- a/src/voice/voice_channel.h
++++ b/src/voice/voice_channel.h
+@@ -48,7 +48,8 @@
+     VOICE_AUTO_FEEDBACK_DISPATCH_ERROR=4,
+     VOICE_AUTO_FEEDBACK_READY=5,
+     VOICE_AUTO_FEEDBACK_ACCEPTED=6,
+-    VOICE_AUTO_FEEDBACK_TOO_LONG=7
++    VOICE_AUTO_FEEDBACK_TOO_LONG=7,
++    VOICE_AUTO_FEEDBACK_WAKE_ERROR=8
+ };
+ /* Optional weak product hook. Called with capture closed; may play a local
+  * bounded alert. It must not call cloud TTS or reenter automatic startup. */
+@@ -61,6 +62,8 @@
+  * still run when auto is enabled; only recognized prefixed/awake commands
+  * enter the assistant. It is not offline/low-power keyword spotting. */
+ int voice_channel_auto_wake_set_enabled(bool enabled);
++/* Opt-in console diagnosis of wake candidates; stop/reboot disables it. */
++int voice_channel_auto_wake_debug_set_enabled(bool enabled);
+ int voice_channel_auto_wake_get_state(bool *enabled, bool *awake);
+ 
+ 
+diff --git a/src/voice/voice_wake.c b/src/voice/voice_wake.c
+--- a/src/voice/voice_wake.c
++++ b/src/voice/voice_wake.c
+@@ -40,8 +40,8 @@
+ }
+ static const char *wake_prefix(const char *text)
+ {
+-    /* Match only the contest greeting at the start. Separators accommodate
+-     * ASR punctuation; an ASCII word suffix is never part of the phrase. */
++    /* Match the complete greeting/name at the start. Accept explicit ASR
++     * homophones of xixi, while preserving ASCII suffix boundaries. */
+     const char *name = consume(text, "你");
+     if (name) {
+         name = consume(name, "好");
+@@ -51,9 +51,16 @@
+         if (!name) return NULL;
+         name = skip_separators(name);
+     }
+-    const char *after = consume_ascii(name, "open");
+-    if (!after) return NULL;
+-    after = consume_ascii(skip_separators(after), "vela");
++    const char *after = consume_ascii(name, "xi");
++    if (after) after = consume_ascii(skip_separators(after), "xi");
++    if (!after) {
++        static const char *forms[] = {"夕夕", "西西", "希希", "嘻嘻", "熙熙",
++            "兮兮", "汐汐", "曦曦", "溪溪", "惜惜", "锡锡", "细细", "喜喜", "茜茜", NULL};
++        for (int i = 0; forms[i]; i++) {
++            size_t n = strlen(forms[i]);
++            if (!strncmp(name, forms[i], n)) { after = name + n; break; }
++        }
++    }
+     if (!after || ascii_word((unsigned char)*after)) return NULL;
+     return skip_separators(after);
+ }

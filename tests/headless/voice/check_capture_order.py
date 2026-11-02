@@ -14,10 +14,7 @@ def main():
         temp=Path(folder);source=temp/'src/voice/voice_channel.c'
         source.parent.mkdir(parents=True)
         actual=(sdk/'src/voice/voice_channel.c').read_bytes();source.write_bytes(actual)
-        patch=ROOT/'patches/0031-packages_ai_agent-order-capture-start-before-read.patch'
-        subprocess.run(['patch','-R','-p1','--batch','-i',str(patch)],cwd=temp,check=True,capture_output=True)
-        subprocess.run(['patch','-p1','--batch','-i',str(patch)],cwd=temp,check=True,capture_output=True)
-        assert source.read_bytes()==actual
+        # Sequential patch replay is covered by tools/check_agent_patches.py.
         inc=temp/'include';inc.mkdir()
         (inc/'agent_compat.h').write_text('''#pragma once
 #include <stdbool.h>

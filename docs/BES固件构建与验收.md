@@ -9,13 +9,13 @@
 | 开发板 | BES2800BP EVB，板级目录 `vendor/bes/boards/best1700_ep/aos_evb` |
 | 产品配置 | `apheadless`，匹配 `apaudio3` BSP 库 |
 | 镜像 | [nuttx_ap_headless.bin](../firmware/headless_pc_link/nuttx_ap_headless.bin) |
-| 镜像大小 | 1,355,720 字节 |
-| SHA256 | `8aa769552f24f0caffcc6822b30d0b30f3674c7642117f4b1ef8c7e7022f2f49` |
+| 镜像大小 | 1,362,288 字节 |
+| SHA256 | `0f4078aafd755bc0cf48d246c02736cbe5493bb05edcc6f4fe49884fd5474e64` |
 | AP 烧录地址 | `0x30190000` |
 | 持久数据目录 | `/emmc/zhaoxi` |
 | 来源与校验 | [固件 manifest](../firmware/headless_pc_link/nuttx_ap_headless.manifest.json) |
 
-BES 源码现已整合电脑 PPP、实际音频、MiMo ASR／增量 TTS、本地备忘与待办、明确中文指令、提醒调度、喝水任务、ASR 唤醒短语和固定目标飞书通知。EasyMatrix 作为独立显示终端，由电脑主机桥连接。本轮集成版已完成完整 AP 构建与烧录，发布固件和 manifest 成对更新。使用方式为电脑供网、文字业务与语音播报，开发与现场复核安排见 [首页当前状态](../README.md#当前演示与版本)。
+BES 源码现已整合电脑 PPP、实际音频、MiMo ASR／增量 TTS、本地备忘与待办、明确中文指令、提醒调度、喝水任务、开机唤醒、长期人设、晨间资讯和固定目标飞书通知。EasyMatrix 作为独立显示终端，由电脑主机桥连接。2026-11-02 发布固件和 manifest 已成对更新，完成 AP 烧录、人设与资讯重启保存、资讯同意／拒绝／复播实测，见 [本轮验收](2026-11-02唤醒与晨间资讯验收.md)。热点独立供网、持续在线资讯接口及真实七点无人值守仍待验证。
 
 ## 工作区与固定依赖
 
@@ -30,7 +30,7 @@ BES 源码现已整合电脑 PPP、实际音频、MiMo ASR／增量 TTS、本地
 | FatFs | `6e433f195f15e0f5d8a3b170f53694b9c4dc6f4b`，完整展开到 NuttX 的 FatFs 子目录 |
 | 已使用工具 | ARM GCC 13.4.0、CMake 3.22.1、Ninja 1.10.1，Linux／WSL |
 
-[来源清单](../configs/bes_headless.sources.json) 记录每个 BSP 库、FatFs 及其他依赖的路径和校验值。`vendor_bes_local_commit` 来自本地工作区，复现时需要按清单准备对应库和 vendor 修改；公开 vendor 基线与所用补丁见 [补丁说明](../patches/README.md)。
+[来源清单](../configs/bes_headless.sources.json) 记录每个 BSP 库、FatFs 及其他依赖的路径和校验值。`vendor_bes_local_commit` 来自原本地工作区。已核对：公开 vendor 基线 `36465377d944a575ce8a0c7ba45259f5c6c61ea8` 的 `configs/ap` 三份库与该清单哈希完全一致；复制配置为 `apaudio3`，将 board/chip 库后缀 `_ap` 改为 `_apaudio3` 后仍逐个校验；公开 vendor 基线与所用补丁见 [补丁说明](../patches/README.md)。
 
 ## 集成与完整构建
 
@@ -56,6 +56,17 @@ BES 源码现已整合电脑 PPP、实际音频、MiMo ASR／增量 TTS、本地
      --output firmware/headless_pc_link
    ```
 
+已有成功构建目录后，普通 C 代码修改使用增量入口，保留已有对象，不运行 `resetconfig`：
+
+```bash
+python3 tools/build_bes_headless.py \
+  --workspace /path/to/openvela \
+  --output /path/to/candidate \
+  --incremental
+```
+
+修改 defconfig、板级配置或首次建立工作区时使用上面的完整配置入口。`--stage-only` 只重新封装，不能替代修改源码后的编译。
+
 脚本检查 BSP 库和 FatFs，安装 [完整 defconfig](../configs/bes_headless.defconfig)，完成 `resetconfig`、CMake、编译和链接。随后检查生成的 ROMFS，确认后台入口为 `ai_agent --headless &`，持久挂载配置保留现有数据。
 
 封装阶段依据 ELF 中的 `pmu_open` 定位已验证的 NTC 指令，检查原值后应用产品调整，并核对 BES 尾部 AP 地址，生成 BIN 与 manifest。维护已有构建、只需重新封装时使用：
@@ -67,7 +78,7 @@ python3 tools/build_bes_headless.py \
   --stage-only
 ```
 
-`--stage-only` 使用已经完成的构建。修改代码或配置后，先完成完整构建；修改 `.ap` 启动包含文件后要更新顶层启动文件，脚本已处理这一关系。`firmware/headless` 保留历史 R10，当前电脑供网镜像写入 `firmware/headless_pc_link`。
+`--stage-only` 使用已经完成的构建。修改普通代码后先增量编译，修改配置后重新配置和编译；修改 `.ap` 启动包含文件后要更新顶层启动文件，完整配置入口已处理这一关系。`firmware/headless` 保留历史 R10，当前电脑供网镜像写入 `firmware/headless_pc_link`。
 
 ## 烧录与安装
 

@@ -93,6 +93,10 @@ class AutoVoiceDisplay:
             else:
                 messages={
                     '校准环境噪声':'正在校准环境噪声，请稍等。',
+                    '等待新闻播放许可':'新闻已准备好，请说“播放”或“暂不播放”；60秒无回应将保留内容并返回等待唤醒。',
+                    '等待唤醒词':'正在检测唤醒词，请说“你好，夕夕”。',
+                    '等待提问':'可以向开发板提问。',
+                    '正在播报唤醒应答':'开发板正在播报“你好”，播完后可以提问。',
                     '等待说话':'正在等待你说话，可以直接对板子提问。',
                     '正在聆听':'正在收音；说完后自然停顿，板子会自动处理。',
                     '正在识别':'正在识别本轮语音，当前暂停收音；请等回答结束后再说下一句。',
@@ -105,21 +109,21 @@ class AutoVoiceDisplay:
                     '语音异常，正在恢复':'本次语音处理失败，板子正在恢复。两短音表示本次失败，随后重新等待说话。'
                 }
                 text=messages.get(state,'板端语音状态：'+str(state))
-                if state in ['等待说话','正在聆听'] and accepting is True and voice.get('wake_enabled') is True:
-                    text=('正在等待唤醒；请先说“你好，openvela”或“Hello，openvela”，也可以接着说出问题。' if voice.get('awake') is False else
+                if state in ['等待说话','等待唤醒词','等待提问','正在聆听'] and accepting is True and voice.get('wake_enabled') is True:
+                    text=('正在等待唤醒；请先说“你好，夕夕”或“Hello，xixi”，也可以接着说出问题。' if voice.get('awake') is False else
                           '朝夕已唤醒，可以直接说下一句；安静一分钟后回到等待唤醒。')
-                if state in ['等待说话','正在聆听'] and accepting is not True:
+                if state in ['等待说话','等待唤醒词','等待提问','正在聆听'] and accepting is not True:
                     text=('板端正在恢复收音，尚未确认可以接收下一句话，请稍等。' if accepting is False else
                           '板端报告正在等待你说话；当前固件尚未提供实际收音确认。')
                 if code:text+=' 错误码：'+str(code)+'。'
         if key!=self.previous:
             self.previous=key;self.entered=self.clock();self.next_wait=15
             return text
-        if not error and enabled and running and state in ['正在识别','等待助手回答','正在合成语音，暂停聆听']:
+        if not error and enabled and running and state in ['正在识别','等待助手回答','正在合成语音，暂停聆听','正在播报唤醒应答']:
             elapsed=self.clock()-self.entered
             if elapsed>=self.next_wait:
                 self.next_wait=elapsed+30
-                return '当前'+{'正在识别':'语音识别','等待助手回答':'助手回答','正在合成语音，暂停聆听':'语音合成'}[state]+ \
+                return '当前'+{'正在识别':'语音识别','等待助手回答':'助手回答','正在合成语音，暂停聆听':'语音合成','正在播报唤醒应答':'唤醒问候'}[state]+ \
                     '阶段已等待约 '+str(int(elapsed))+' 秒，仍在处理；当前暂停收音。'
         return None
 
@@ -134,23 +138,51 @@ def write_status(path,value):
             if attempt==5:raise
             time.sleep(.01)
 
+class NetworkClock:
+    """Renew board UTC on each confirmed connection without blocking UART relay."""
+    def __init__(self,send=request,clock=time.monotonic,epoch=time.time):
+        self.send=send;self.clock=clock;self.epoch=epoch;self.online=False
+        self.thread=None;self.retry=0;self.result={'news_clock_sync_state':'waiting-network'}
+
+    def update(self,online):
+        if not online:
+            self.online=False
+            return
+        if self.thread and self.thread.is_alive():return
+        if self.online and self.result['news_clock_sync_state']=='confirmed':return
+        if self.online and self.clock()<self.retry:return
+        self.online=True;self.retry=self.clock()+60
+        self.result={'news_clock_sync_state':'syncing'}
+        def run():
+            try:
+                now=int(self.epoch());reply=self.send({'action':'sync-time','epoch':now},timeout=8)
+                good=reply.get('rc')==0 and isinstance(reply.get('epoch'),(int,float)) and abs(reply['epoch']-now)<=3
+                self.result={'news_clock_sync_state':'confirmed' if good else 'failed'}
+            except Exception:
+                self.result={'news_clock_sync_state':'failed'}
+        self.thread=threading.Thread(target=run,daemon=True);self.thread.start()
+
+    def wait(self):
+        if self.thread:self.thread.join(12)
+
+
 class AutomaticVoice:
     """Request the board's own automatic loop once; never record on the PC."""
-    def __init__(self,enabled,send=request):
-        self.enabled=enabled;self.send=send;self.thread=None
-        self.result={'auto_voice_state':'waiting-network' if enabled else 'disabled',
+    def __init__(self,enabled,send=request,stop_when_disabled=False):
+        self.enabled=enabled;self.stop_when_disabled=stop_when_disabled;self.send=send;self.thread=None
+        self.result={'auto_voice_state':'waiting-network' if enabled or stop_when_disabled else 'disabled',
                      'auto_voice_rc':None,'auto_voice_error':None}
 
     def start_once(self):
-        if not self.enabled or self.thread is not None:return
+        if (not self.enabled and not self.stop_when_disabled) or self.thread is not None:return
         self.result={'auto_voice_state':'starting','auto_voice_rc':None,'auto_voice_error':None}
         def run():
             try:
-                reply=self.send({'action':'command','args':['auto','start']},timeout=8)
+                reply=self.send({'action':'command','args':['auto','start' if self.enabled else 'stop']},timeout=8)
                 rc=reply.get('rc')
-                self.result={'auto_voice_state':'started' if rc==0 else 'failed',
+                self.result={'auto_voice_state':('started' if self.enabled else 'stopped') if rc==0 else 'failed',
                              'auto_voice_rc':rc,
-                             'auto_voice_error':None if rc==0 else 'Board auto start returned rc='+str(rc)}
+                             'auto_voice_error':None if rc==0 else 'Board auto voice policy returned rc='+str(rc)}
             except Exception as error:
                 self.result={'auto_voice_state':'failed','auto_voice_rc':None,'auto_voice_error':str(error)}
         self.thread=threading.Thread(target=run,daemon=True);self.thread.start()
@@ -390,7 +422,10 @@ def main():
     parser.add_argument('--port',default='COM3')
     parser.add_argument('--duration',type=int,default=3600,help='Session limit, 60..3600 seconds')
     parser.add_argument('--state-dir',type=Path,default=Path(__file__).resolve().parents[2]/'out/pc_link')
-    parser.add_argument('--auto-voice',action='store_true',help='Enable the board automatic voice loop once after control is verified')
+    mode=parser.add_mutually_exclusive_group()
+    mode.add_argument('--auto-voice',dest='auto_voice',action='store_true',help='Keep automatic wake listening enabled (default)')
+    mode.add_argument('--manual-voice','--network-only',dest='auto_voice',action='store_false',help='Stop board automatic listening after control is verified')
+    parser.set_defaults(auto_voice=True)
     args=parser.parse_args()
     if os.name!='nt' or not 60<=args.duration<=3600:parser.error('Use Windows and a duration of 60..3600 seconds')
     root=args.state_dir.resolve()/datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -407,7 +442,8 @@ def main():
             return request(value,timeout=timeout)
     worker=None;stderr=None;serial_log=None;closer=None
     health=ControlHealth(probe=serialized_request)
-    automatic=AutomaticVoice(args.auto_voice,send=serialized_request);voice_display=AutoVoiceDisplay()
+    automatic=AutomaticVoice(args.auto_voice,send=serialized_request,stop_when_disabled=True);voice_display=AutoVoiceDisplay()
+    network_clock=NetworkClock(send=serialized_request)
     metrics={'gateway_to_uart_bytes':0,'uart_to_gateway_bytes':0,
              'last_gateway_data':None,'last_uart_data':None,'uart_write_pending':False}
     status={'phase':'starting','port':args.port,'ready':False,'forwarder_pid':os.getpid(),
@@ -498,9 +534,11 @@ def main():
                 announced=True;previous_network_ready=None;update()
                 print('PPP_UPLINK_READY: board command channel available',flush=True)
                 print('Control with: python tools/pc_link/control.py --cmd ...',flush=True)
+            network_clock.update(status['ready'])
+            status.update(network_clock.result)
             if status['ready']:automatic.start_once()
             status.update(automatic.result)
-            if status['auto_voice_state']=='started':health.enable_voice_status()
+            if status['auto_voice_state'] in ['started','stopped']:health.enable_voice_status()
             status.update(health.voice_snapshot())
             voice=status.get('auto_voice_board_status') or {}
             status['usable_for_automatic_voice']=bool(status['ready'] and status['auto_status_confirmed'] and
@@ -509,9 +547,11 @@ def main():
             if status['auto_voice_state']!=last_voice_state:
                 last_voice_state=status['auto_voice_state'];update()
                 if last_voice_state=='starting':
-                    print('网络控制已确认，正在请求开发板启动自动语音循环……',flush=True)
+                    print('网络控制已确认，正在设置开发板自动监听状态……',flush=True)
                 elif last_voice_state=='started':
                     print('板端已接受自动语音启动，正在确认实时状态。两短音表示本次失败后重新等待。',flush=True)
+                elif last_voice_state=='stopped':
+                    print('开发板已接受停止自动监听请求，电脑继续供网。',flush=True)
                 elif last_voice_state=='failed':
                     print('自动语音未能启动：'+str(status['auto_voice_error'])+'。供网仍保留用于排查。',flush=True)
             message=voice_display.message(status) if args.auto_voice else None
@@ -591,6 +631,7 @@ def main():
         if serial_log:cleanup('Close serial log',serial_log.close)
         cleanup('Wait for control probe',health.wait)
         cleanup('Wait for automatic voice start request',automatic.wait)
+        cleanup('Wait for network clock request',network_clock.wait)
         if closer:cleanup('Wait for quit request',lambda:closer.join(25))
         if worker:
             def stop_gateway():
