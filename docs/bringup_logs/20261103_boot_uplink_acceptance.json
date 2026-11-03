@@ -9,9 +9,10 @@
     "local_prompt_fluency": "User confirmed fluent; choose 3069 ms vs PCM 3040 ms, success 1152-1153 ms vs PCM 1120 ms",
     "wireless_final_image": ["label=2", "UPLINK_TIME rc=0", "UPLINK_PROBE method=sntp rc=0", "UPLINK_CONNECT mode=2 attempt=1 rc=0", "LOCAL_PROMPT id=uplink_ok rc=0", "UPLINK_BOOT_DONE rc=0", "automatic voice running, accepting_speech, waiting wake"],
     "wired_final_image": ["PPP IPCP and command channel connected", "computer UTC verified over PPP", "UPLINK_TIME rc=0", "UPLINK_PROBE method=sntp rc=0", "UPLINK_CONNECT mode=1 attempt=1 rc=0", "LOCAL_PROMPT id=uplink_ok rc=0", "UPLINK_BOOT_DONE rc=0", "automatic voice running, accepting_speech, waiting wake"],
-    "wired_without_pc_recovery": "Before console/SNTP-only fixes: wired label=1, connect rc=-101, local failure, local question, wifi label=2, attempt=2 rc=0, local success, boot done",
+    "wired_without_pc_recovery": "Repeated on final image: wired label=1 score=0.01713, connect rc=-101, local failure 996ms, local question, wifi label=2 score=0.01545, SNTP rc=0, attempt=2 rc=0, local success 1152ms, boot done rc=0, automatic wake ready",
     "wired_normal_stop": "board rc=0; complete cleanup marker; serial close and receiver stop confirmed; WSL gateway cleanup confirmed; watcher stopped; NSH restored",
     "windows_logon_task": "Current-user InteractiveToken / LeastPrivilege task installed and read back; immediate start reached waiting-choice with serial open; normal stop confirmed cleanup",
+    "cancel_while_selecting_final_image": "Initial UPLINK_LISTEN confirmed; normal zhaoxi stop; complete Agent exit confirmed in 375 ms",
     "model_retention": "wired=3 wifi=3 calibrated=1 validation=7 ready=1; no re-recording or export",
     "data_retention": "Final configuration, persona and both archived news JSON hashes equal pre-audio-fix snapshot; temporary uplink_mode=pc reverted to wifi by final selection",
     "privacy": "5 runtime secret values checked against all changed/untracked deliverable files; zero matches"
@@ -19,7 +20,7 @@
   "regressions": [
     "PC tools: 110 unittest cases passed",
     "Boot startup: 28 unittest cases passed including real Scheduler normalization fixtures",
-    "Headless boot attach/startup discovery passed (before extra normalization fixture)",
+    "Headless boot attach/startup discovery: 43 unittest cases passed, including extra normalization fixture",
     "Actual C keyword classifier, model/audio IO and uplink flow sanitizer tests passed",
     "Actual C console/readline ownership: product, no hook, partial hook, no echo; Werror and UBSan",
     "Actual C SNTP: spurious readiness/EAGAIN/EINTR, shared deadline, cancellation, valid and invalid NTP, fcntl/setup/IO cleanup; Werror and UBSan",
