@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 #include "morning.h"
 #include "notifications/notify_service.h"
+#include "uplink_boot.h"
 #ifdef CONFIG_ZHAOXI_MIMO_VOICE
 #include "local_prompts.h"
 #endif
@@ -252,6 +253,10 @@ static int play_batch_owned(struct morning_batch *b,unsigned offset)
 }
 static void announce_boot_network(int64_t now)
 {
+    if(zhaoxi_uplink_boot_used()) {
+        pthread_mutex_lock(&state.lock);state.boot_network_announced=true;state.boot_network_error=0;
+        pthread_mutex_unlock(&state.lock);return;
+    }
     pthread_mutex_lock(&state.lock);
     bool due=!state.boot_network_announced && now>=state.next_network_notice;
     pthread_mutex_unlock(&state.lock);

@@ -18,7 +18,11 @@ from configure_uplink import Nsh, read_config, require_stopped
 PROMPTS = {'hello': '你好',
            'news_ready': '有新的资讯，需要播放吗？请说播放，或暂不播放。',
            'network_error': '网络暂时不可用，请稍后再试。',
-           'network_connected': '联网成功'}
+           'network_connected': '联网成功',
+           'uplink_choose': '选择有线连接还是无线连接',
+           'uplink_ok': '连接成功', 'uplink_fail': '连接失败',
+           'learn_wired': '请说有线连接', 'learn_wifi': '请说无线连接',
+           'learn_unknown': '请说一段其他的话'}
 HOSTS = {'api.xiaomimimo.com', 'token-plan-cn.xiaomimimo.com',
          'token-plan-sgp.xiaomimimo.com', 'token-plan-ams.xiaomimimo.com'}
 

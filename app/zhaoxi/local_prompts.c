@@ -16,7 +16,11 @@
 #define MAX_PCM 480000u
 static const struct {const char *id, *text;} prompts[] = {
     {"hello", "你好"}, {"news_ready", ZHAOXI_NEWS_PROMPT},
-    {"network_error", ZHAOXI_NETWORK_PROMPT}, {"network_connected", ZHAOXI_CONNECTED_PROMPT}
+    {"network_error", ZHAOXI_NETWORK_PROMPT}, {"network_connected", ZHAOXI_CONNECTED_PROMPT},
+    {"uplink_choose", "选择有线连接还是无线连接"},
+    {"uplink_ok", "连接成功"}, {"uplink_fail", "连接失败"},
+    {"learn_wired", "请说有线连接"}, {"learn_wifi", "请说无线连接"},
+    {"learn_unknown", "请说一段其他的话"}
 };
 const char *zhaoxi_prompt_text(const char *id)
 {

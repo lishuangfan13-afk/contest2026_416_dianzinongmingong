@@ -91,7 +91,9 @@ class RelayTests(unittest.TestCase):
         sink=Sink();errors=[];stop=threading.Event();closing=threading.Event();closing.set()
         metrics={'gateway_to_uart_bytes':0,'uart_to_gateway_bytes':0,
                  'last_gateway_data':None,'last_uart_data':None,'uart_write_pending':False}
-        with patch('start.time.sleep',side_effect=AssertionError('relay must not insert fixed delays')):
+        ticks=iter(index*.001 for index in range(2*len(payload)+10))
+        with patch('start.time.sleep',side_effect=AssertionError('relay must not insert fixed delays')), \
+             patch('start.time.monotonic',side_effect=lambda:next(ticks)):
             relay_inbound(Link(),sink,stop,errors,metrics,expected_close=closing)
         self.assertEqual(sink.received,payload)
         self.assertEqual(errors,[]);self.assertTrue(stop.is_set())
@@ -526,6 +528,7 @@ class StartupCleanupTests(unittest.TestCase):
             def close(self):closed.set()
         class Gateway:
             def __init__(self):self.stdout=io.BytesIO(b'PPP_SERVER_READY\nPPP_SERVER_CLEANED\n')
+            def poll(self):return None
             def wait(self,*a):return 0
         def request(value,**options):
             self.assertEqual(value,{'action':'quit'})
@@ -573,6 +576,7 @@ class StartupCleanupTests(unittest.TestCase):
                     def close(self):operations.append('link-close')
                 class Gateway:
                     def __init__(self):self.stdout=io.BytesIO(b'PPP_SERVER_READY\nPPP_SERVER_CLEANED\n')
+                    def poll(self):return None
                     def wait(self,*args):return 0
                 with tempfile.TemporaryDirectory() as temp:
                     with patch('sys.argv',['start.py','--auto-voice','--duration','60','--state-dir',temp]), \
@@ -619,6 +623,7 @@ class StartupCleanupTests(unittest.TestCase):
             def close(self):pass
         class Gateway:
             def __init__(self):self.stdout=io.BytesIO(b'PPP_SERVER_READY\nPPP_SERVER_CLEANED\n')
+            def poll(self):return None
             def wait(self,*args):return 0
         with tempfile.TemporaryDirectory() as temp:
             with patch('sys.argv',['start.py','--duration','60','--state-dir',temp]), \

@@ -3,6 +3,7 @@ if(CONFIG_EXAMPLES_ZHAOXI)
   if(CONFIG_ZHAOXI_BES_AUDIO)
     list(APPEND ZHAOXI_SRCS bes_audio.c bes_clock.c reminder.c drink.c dns_diag.c
          morning.c morning_store.c morning_net.c profile_intent.c wake_audio_diag.c
+         uplink_keywords.c uplink_voice.c uplink_flow.c uplink_boot.c
          notifications/feishu_notify.c notifications/feishu_notify_sdk.c
          notifications/notify_queue.c notifications/notify_service.c notifications/notify_intent.c)
   endif()
@@ -10,7 +11,7 @@ if(CONFIG_EXAMPLES_ZHAOXI)
     list(APPEND ZHAOXI_SRCS mimo_voice.c mimo_sse.c local_prompts.c prompt_receive.c)
   endif()
   if(CONFIG_NETUTILS_PPPD)
-    list(APPEND ZHAOXI_SRCS pc_link.c pc_control.c)
+    list(APPEND ZHAOXI_SRCS pc_link.c pc_control.c console_lease.c)
   endif()
   nuttx_add_application(
     NAME zhaoxi

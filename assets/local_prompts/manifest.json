@@ -24,6 +24,42 @@
       "file": "network_connected.zxp",
       "size": 46104,
       "sha256": "f0679a06c73b8be7d25e64b6ff86554946f0911a2df8e7ec1f99708c1e4cf2c9"
+    },
+    "uplink_choose": {
+      "text": "选择有线连接还是无线连接",
+      "file": "uplink_choose.zxp",
+      "size": 145944,
+      "sha256": "1f730372eb6046a24d8168d8c8f746c5238dd9647a3beedb067cd02ce7c0b82f"
+    },
+    "uplink_ok": {
+      "text": "连接成功",
+      "file": "uplink_ok.zxp",
+      "size": 53784,
+      "sha256": "17467e47db63afc8e646369953443d243a2e2935db94cbdd816afab74ef884a0"
+    },
+    "uplink_fail": {
+      "text": "连接失败",
+      "file": "uplink_fail.zxp",
+      "size": 46104,
+      "sha256": "02d9dec5147ee0d51bb432da799e26194cb1dc7d30dd0cad626abad812175d57"
+    },
+    "learn_wired": {
+      "text": "请说有线连接",
+      "file": "learn_wired.zxp",
+      "size": 107544,
+      "sha256": "8fc167fe60948cafb49da5c29296911bdc8a1150c9378ebe8687c0226a17d75d"
+    },
+    "learn_wifi": {
+      "text": "请说无线连接",
+      "file": "learn_wifi.zxp",
+      "size": 76824,
+      "sha256": "1ff17bfd32424a8b8938e9fc60fd6426173d1d746faac223246d5c5e8ce4cd4e"
+    },
+    "learn_unknown": {
+      "text": "请说一段其他的话",
+      "file": "learn_unknown.zxp",
+      "size": 76824,
+      "sha256": "768f796f46bdfc294a1292a7ca19f74afc7d12b1c9bd3e5e832cdd5384d24052"
     }
   }
 }

@@ -1,0 +1,48 @@
+--- a/src/agent_main.c
++++ b/src/agent_main.c
+@@ -167,6 +167,8 @@
+ 
+ /* Product defaults to a PC-provided uplink. Read once per Agent instance:
+  * only an exact explicit "wifi" opts into potentially blocking BSP RPCs. */
++static bool s_pc_owned_boot;
++
+ static bool headless_auto_wifi_enabled(void)
+ {
+     char mode[16] = {0};
+@@ -752,6 +754,17 @@
+ 
+     /* ── Phase 5: Network — async, does NOT block ready ────── */
+ 
++#if defined(CONFIG_EXAMPLES_ZHAOXI) && defined(CONFIG_ZHAOXI_BES_AUDIO)
++    /* Local choice completes before network watcher/ASR/cron can start.
++     * The wired bridge may borrow this initialized bus while we wait. */
++    extern int zhaoxi_uplink_boot_dialog(bool) __attribute__((weak));
++    if(zhaoxi_uplink_boot_dialog) {
++        int rc=zhaoxi_uplink_boot_dialog(s_pc_owned_boot);
++        BOOT_LOG_RC(&t0,"P4","local uplink selection",rc);
++        if(rc){agent_request_shutdown();goto shutdown;}
++    }
++#endif
++
+     /* Kick off WiFi reconnect and start outbound dispatch immediately.
+      * Network-dependent services (feishu, agent, ws, node) are started
+      * inside the network_watch thread once the link comes up. */
+@@ -879,6 +892,10 @@
+     }
+ 
+ shutdown:
++#if defined(CONFIG_EXAMPLES_ZHAOXI) && defined(CONFIG_ZHAOXI_BES_AUDIO)
++    extern void zhaoxi_uplink_boot_stop(void) __attribute__((weak));
++    if(zhaoxi_uplink_boot_stop)zhaoxi_uplink_boot_stop();
++#endif
+     syslog(LOG_INFO, "[%s] Shutdown requested — stopping services...\n", TAG);
+ 
+     /* Freeze the scheduler while the bus can still accept its in-flight
+@@ -970,6 +987,7 @@
+         printf("Agent is already running or stopping; wait for its exit log.\n");
+         return ERROR;
+     }
++    s_pc_owned_boot=owner!=0;
+ #endif
+     int result = ai_agent_run(argc, argv);
+ #ifdef CONFIG_EXAMPLES_ZHAOXI

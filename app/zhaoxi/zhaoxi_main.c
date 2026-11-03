@@ -28,6 +28,8 @@
 #include "notifications/feishu_notify.h"
 #include "notifications/notify_service.h"
 #include "wake_audio_diag.h"
+#include "uplink_boot.h"
+#include "uplink_voice.h"
 #include "infra/config_store.h"
 #include "dns_diag.h"
 #include "voice/audio_playback.h"
@@ -73,6 +75,7 @@ static int usage(void)
 #endif
 #ifdef CONFIG_ZHAOXI_BES_AUDIO
     puts("  zhaoxi test-speaker   （两秒本机提示音，不需要网络）");
+    puts("  zhaoxi uplink-voice status|learn wired|learn wifi|calibrate|validate wired|validate wifi|validate unknown|test|reset");
 #endif
     puts("  zhaoxi say <文本>    （直接测试语音合成与播放）");
 #ifdef CONFIG_ZHAOXI_MIMO_VOICE
@@ -258,7 +261,7 @@ int main(int argc, char **argv)
 #ifdef CONFIG_ZHAOXI_MIMO_VOICE
     if(!strcmp(argv[at],"prompt")) {
         if(argc==3 && !strcmp(argv[2],"status")) {
-            char status[256];int rc=zhaoxi_prompt_status(status,sizeof(status));
+            char status[1024];int rc=zhaoxi_prompt_status(status,sizeof(status));
             if(!rc)fputs(status,stdout);return rc?1:0;
         }
         if(argc==4 && !strcmp(argv[2],"play") && message_bus_is_ready()) {
@@ -286,6 +289,10 @@ int main(int argc, char **argv)
     }
 #endif
 #ifdef CONFIG_ZHAOXI_BES_AUDIO
+    if(!strcmp(argv[at],"uplink-voice"))return uplink_voice_command(argc-at,argv+at)?1:0;
+    if(!strcmp(argv[at],"uplink-status")) {
+        char state[240];int rc=zhaoxi_uplink_boot_status(state,sizeof(state));if(!rc)puts(state);return rc?1:0;
+    }
     if(!strcmp(argv[at],"--wake-audio"))
         return argc==at+2 && !zhaoxi_wake_audio_command(argv[at+1])?0:1;
     if (!strcmp(argv[at], "--asr-probe")) {

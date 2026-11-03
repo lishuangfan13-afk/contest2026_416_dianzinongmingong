@@ -1,0 +1,255 @@
+--- a/system/readline/readline_fd.c
++++ b/system/readline/readline_fd.c
+@@ -29,6 +29,9 @@
+ #include <errno.h>
+ #include <assert.h>
+ #include <termios.h>
++#include <stdbool.h>
++#include <poll.h>
++#include <time.h>
+ 
+ #include "system/readline.h"
+ #include "readline.h"
+@@ -50,6 +53,44 @@
+  * Private Functions
+  ****************************************************************************/
+ 
++/* Product hooks are a pair. Without both, including on non-product builds,
++ * preserve the original blocking read/write behavior. begin returns 0 for an
++ * unrelated fd, 1 with the console gate held, or a negative errno. The product
++ * recognizes /dev/console, not every isatty fd. No product header dependency.
++ */
++
++extern int zhaoxi_console_readline_begin(int fd) __attribute__((weak));
++extern void zhaoxi_console_readline_end(void) __attribute__((weak));
++
++static int readline_console_begin(int fd, bool wait)
++{
++  int ret;
++
++  if (!zhaoxi_console_readline_begin || !zhaoxi_console_readline_end)
++    {
++      return 0;
++    }
++
++  for (;;)
++    {
++      ret = zhaoxi_console_readline_begin(fd);
++      if (ret != -EAGAIN || !wait)
++        {
++          return ret;
++        }
++
++      /* PPP owns the console: wait without reading or echoing. A release
++       * resumes readline within 100 ms (plus normal scheduler latency).
++       */
++
++      struct timespec pause = {0, 100000000L};
++      if (nanosleep(&pause, NULL) < 0 && errno != EINTR)
++        {
++          return -errno;
++        }
++    }
++}
++
+ /****************************************************************************
+  * Name: readline_getc
+  ****************************************************************************/
+@@ -58,7 +99,7 @@
+ {
+   FAR struct readline_s *priv = (FAR struct readline_s *)vtbl;
+   char buffer;
+-  ssize_t nread;
++  ssize_t nread = -1;
+ 
+   DEBUGASSERT(priv);
+ 
+@@ -68,9 +109,61 @@
+ 
+   do
+     {
+-      /* Read one character from the incoming stream */
+-
+-      nread = read(priv->infd, &buffer, 1);
++      int gate = readline_console_begin(priv->infd, true);
++      if (gate < 0)
++        {
++          errno = -gate;
++          return EOF;
++        }
++
++      if (gate == 1)
++        {
++          struct pollfd pfd = {priv->infd, POLLIN, 0};
++          int ready = poll(&pfd, 1, 50);
++          int saved = errno;
++
++          if (ready == 0)
++            {
++              zhaoxi_console_readline_end();
++              continue;
++            }
++
++          if (ready < 0)
++            {
++              zhaoxi_console_readline_end();
++              if (saved == EINTR)
++                {
++                  continue;
++                }
++
++              errno = saved;
++              return EOF;
++            }
++
++          if ((pfd.revents & POLLNVAL) != 0 ||
++              (pfd.revents & (POLLIN | POLLHUP)) == 0)
++            {
++              zhaoxi_console_readline_end();
++              errno = (pfd.revents & POLLNVAL) != 0 ? EBADF : EIO;
++              return EOF;
++            }
++
++          /* Hold the gate over BOTH poll and read. PPP cannot claim between
++           * readiness and the one-byte read. HUP is read to preserve EOF.
++           * The console driver must honor readiness for a one-byte read.
++           */
++
++          nread = read(priv->infd, &buffer, 1);
++          saved = errno;
++          zhaoxi_console_readline_end();
++          errno = saved;
++        }
++      else
++        {
++          /* No product hook, or not /dev/console: original blocking read. */
++
++          nread = read(priv->infd, &buffer, 1);
++        }
+ 
+       /* Check for end-of-file. */
+ 
+@@ -125,6 +218,29 @@
+       return;
+     }
+ 
++  /* A character read just before claim may reach echo after claim. Drop
++   * that echo; never emit a delayed shell byte into a PPP frame. Poll output
++   * without waiting so console TX backpressure cannot pin the gate.
++   */
++
++  int gate = readline_console_begin(priv->outfd, false);
++  if (gate < 0)
++    {
++      return;
++    }
++
++  if (gate == 1)
++    {
++      struct pollfd pfd = {priv->outfd, POLLOUT, 0};
++      if (poll(&pfd, 1, 0) > 0 && (pfd.revents & POLLOUT) != 0)
++        {
++          write(priv->outfd, &buffer, 1);
++        }
++
++      zhaoxi_console_readline_end();
++      return;
++    }
++
+   /* Loop until we successfully write a character (or until an unexpected
+    * error occurs).
+    */
+@@ -161,6 +277,28 @@
+ 
+   if (priv->outfd < 0)
+     {
++      return;
++    }
++
++  /* Probe once to retain the original bulk write on unrelated streams. On
++   * console, use guarded one-byte writes so the gate never covers an
++   * arbitrarily long buffered echo. A lease suppresses the whole echo.
++   */
++
++  int gate = readline_console_begin(priv->outfd, false);
++  if (gate < 0)
++    {
++      return;
++    }
++
++  if (gate == 1)
++    {
++      zhaoxi_console_readline_end();
++      for (size_t i = 0; i < buflen; i++)
++        {
++          readline_putc(vtbl, buffer[i]);
++        }
++
+       return;
+     }
+ 
+@@ -209,10 +347,21 @@
+   struct termios oldcfg;
+   struct termios cfg;
+   ssize_t ret;
+-
+-  if (isatty(infd))
+-    {
+-      tcgetattr(infd, &cfg);
++  bool changed = false;
++  int gate = readline_console_begin(infd, true);
++
++  if (gate < 0)
++    {
++      errno = -gate;
++      return EOF;
++    }
++
++  /* Termios entry/exit participate too: a newly entered readline must not
++   * overwrite PPP raw mode, and an EOF cleanup must wait for TTY restoration.
++   */
++
++  if (isatty(infd) && tcgetattr(infd, &cfg) == 0)
++    {
+       oldcfg = cfg;
+ #ifdef CONFIG_READLINE_ECHO
+       cfg.c_lflag &= ~ECHO;
+@@ -220,8 +369,13 @@
+       cfg.c_lflag &= ~ICANON;
+       if (cfg.c_lflag != oldcfg.c_lflag)
+         {
+-          tcsetattr(infd, TCSANOW, &cfg);
+-        }
++          changed = tcsetattr(infd, TCSANOW, &cfg) == 0;
++        }
++    }
++
++  if (gate == 1)
++    {
++      zhaoxi_console_readline_end();
+     }
+ 
+   /* Set up the vtbl structure */
+@@ -239,9 +393,20 @@
+ 
+   ret = readline_common(&vtbl.vtbl, buf, buflen);
+ 
+-  if (isatty(infd) && (cfg.c_lflag != oldcfg.c_lflag))
+-    {
++  if (changed)
++    {
++      gate = readline_console_begin(infd, true);
++      if (gate < 0)
++        {
++          errno = -gate;
++          return EOF;
++        }
++
+       tcsetattr(infd, TCSANOW, &oldcfg);
++      if (gate == 1)
++        {
++          zhaoxi_console_readline_end();
++        }
+     }
+ 
+   return ret;

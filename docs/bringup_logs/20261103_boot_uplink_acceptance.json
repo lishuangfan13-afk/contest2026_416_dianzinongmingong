@@ -1,0 +1,39 @@
+{
+  "date": "2026-11-03",
+  "board": "BES2800BP / best1700 AP",
+  "flash_address": "0x30190000",
+  "final_image": "firmware/boot_choice/nuttx_ap_headless.bin",
+  "evidence_scope": "Public events and state only; personal speech features, credentials and private serial logs excluded",
+  "passed": {
+    "unknown_and_cadence_final_image": "Live unrelated phrase label=0 at 13.765s, continued listening without network; short noise and silence rejected; question completion at 9.109s and 47.781s (38.672s apart); then wifi label=2 and full boot rc=0",
+    "local_prompt_fluency": "User confirmed fluent; choose 3069 ms vs PCM 3040 ms, success 1152-1153 ms vs PCM 1120 ms",
+    "wireless_final_image": ["label=2", "UPLINK_TIME rc=0", "UPLINK_PROBE method=sntp rc=0", "UPLINK_CONNECT mode=2 attempt=1 rc=0", "LOCAL_PROMPT id=uplink_ok rc=0", "UPLINK_BOOT_DONE rc=0", "automatic voice running, accepting_speech, waiting wake"],
+    "wired_final_image": ["PPP IPCP and command channel connected", "computer UTC verified over PPP", "UPLINK_TIME rc=0", "UPLINK_PROBE method=sntp rc=0", "UPLINK_CONNECT mode=1 attempt=1 rc=0", "LOCAL_PROMPT id=uplink_ok rc=0", "UPLINK_BOOT_DONE rc=0", "automatic voice running, accepting_speech, waiting wake"],
+    "wired_without_pc_recovery": "Before console/SNTP-only fixes: wired label=1, connect rc=-101, local failure, local question, wifi label=2, attempt=2 rc=0, local success, boot done",
+    "wired_normal_stop": "board rc=0; complete cleanup marker; serial close and receiver stop confirmed; WSL gateway cleanup confirmed; watcher stopped; NSH restored",
+    "windows_logon_task": "Current-user InteractiveToken / LeastPrivilege task installed and read back; immediate start reached waiting-choice with serial open; normal stop confirmed cleanup",
+    "model_retention": "wired=3 wifi=3 calibrated=1 validation=7 ready=1; no re-recording or export",
+    "data_retention": "Final configuration, persona and both archived news JSON hashes equal pre-audio-fix snapshot; temporary uplink_mode=pc reverted to wifi by final selection",
+    "privacy": "5 runtime secret values checked against all changed/untracked deliverable files; zero matches"
+  },
+  "regressions": [
+    "PC tools: 110 unittest cases passed",
+    "Boot startup: 28 unittest cases passed including real Scheduler normalization fixtures",
+    "Headless boot attach/startup discovery passed (before extra normalization fixture)",
+    "Actual C keyword classifier, model/audio IO and uplink flow sanitizer tests passed",
+    "Actual C console/readline ownership: product, no hook, partial hook, no echo; Werror and UBSan",
+    "Actual C SNTP: spurious readiness/EAGAIN/EINTR, shared deadline, cancellation, valid and invalid NTP, fcntl/setup/IO cleanup; Werror and UBSan",
+    "Actual C control server: absolute receive/send deadline and stop/link loss checks passed",
+    "Morning runtime and today/yesterday news playback regressions passed",
+    "Actual PPP lifecycle, buffered receive, ACCM negotiation, CRC and atomic UART frame transmission sanitizer regressions passed on Git-backed apps mirror",
+    "SDK patch series replay and source mirror comparison passed"
+  ],
+  "not_claimed": [
+    "Real Windows logout/login trigger (immediate task start was tested)",
+    "Long-running unattended sessions or real 07:00 schedule",
+    "Live hotspot-unavailable failure/recovery on the final image",
+    "General speaker-independent Chinese ASR accuracy"
+  ],
+  "known_limit": "Wi-Fi association still uses existing synchronous BES driver calls; SNTP socket I/O has a shared three-second budget after resolver/setup, not a three-second whole DNS+SNTP guarantee.",
+  "hardware_functional_acceptance_complete": false
+}

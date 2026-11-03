@@ -250,10 +250,27 @@ int morning_sntp(int64_t *epoch)
     freeaddrinfo(addresses);
     unsigned char request[48]={0},reply[48];request[0]=0x23;
     if(!rc && agent_secure_random(request+40,8))rc=-EIO;
-    if(!rc && send(fd,request,sizeof(request),0)!=(ssize_t)sizeof(request))rc=-EIO;
-    if(!rc)rc=wait_fd(fd,POLLIN,ticks()+3000);
+    int flags=!rc?fcntl(fd,F_GETFL,0):-1;
+    if(!rc && (flags<0 || fcntl(fd,F_SETFL,flags|O_NONBLOCK)<0))rc=-errno;
+    int64_t deadline=ticks()+3000;
+    ssize_t got=-1;
+    while(!rc) {
+        rc=wait_fd(fd,POLLOUT,deadline);if(rc)break;
+        got=send(fd,request,sizeof(request),0);
+        if(got<0 && (errno==EINTR || errno==EAGAIN || errno==EWOULDBLOCK))continue;
+        if(got!=(ssize_t)sizeof(request))rc=got<0?-errno:-EIO;
+        break;
+    }
+    while(!rc) {
+        rc=wait_fd(fd,POLLIN,deadline);if(rc)break;
+        /* Readiness may be consumed/spurious on PPP. Never block past the
+         * absolute SNTP budget after poll says readable. */
+        got=recv(fd,reply,sizeof(reply),0);
+        if(got<0 && (errno==EINTR || errno==EAGAIN || errno==EWOULDBLOCK))continue;
+        if(got<0)rc=-errno;
+        break;
+    }
     if(!rc) {
-        ssize_t got=recv(fd,reply,sizeof(reply),0);
         if(got!=48 || (reply[0]&7)!=4 || (reply[0]>>6)==3 || reply[1]<1 || reply[1]>15 || memcmp(reply+24,request+40,8))rc=-EPROTO;
         else {uint32_t seconds;memcpy(&seconds,reply+40,4);int64_t value=(int64_t)ntohl(seconds)-2208988800LL;if(value<1735689600LL)value+=INT64_C(4294967296);char day[11];if(morning_day(value,day,NULL))rc=-ERANGE;else *epoch=value;}
     }

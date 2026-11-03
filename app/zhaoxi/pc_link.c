@@ -2,6 +2,7 @@
 /* Bounded PPP proof: native board DNS/TLS over the existing USB-UART cable.
  * The computer forwards IP; it does not replace the board's model client. */
 #include "pc_link.h"
+#include "console_lease.h"
 #include "infra/config_store.h"
 #include "infra/vela_tls.h"
 #include "cJSON.h"
@@ -32,9 +33,13 @@
 static atomic_bool stopping = ATOMIC_VAR_INIT(true);
 static atomic_bool worker_alive = ATOMIC_VAR_INIT(false);
 static atomic_bool ipv4_ready = ATOMIC_VAR_INIT(false);
+static atomic_bool link_ready = ATOMIC_VAR_INIT(false);
 extern int zhaoxi_pc_control(void);
+extern int zhaoxi_pc_boot_control(void);
 bool zhaoxi_pc_link_stopping(void) { return atomic_load(&stopping); }
 bool zhaoxi_pc_link_alive(void) { return atomic_load(&worker_alive); }
+bool zhaoxi_pc_link_ready(void) { return atomic_load(&link_ready); }
+void zhaoxi_pc_link_request_stop(void) { atomic_store(&stopping,true); }
 void zhaoxi_pc_link_ipv4_ready(void) { atomic_store(&ipv4_ready, true); }
 static void *run_ppp(void *arg)
 {
@@ -82,13 +87,12 @@ static int stop_session_agent(uint64_t owner, unsigned budget_ms, cJSON *report)
     return result;
 }
 
-int zhaoxi_pc_link(unsigned seconds)
+static int pc_link_run(unsigned seconds,bool serving,bool persistent)
 {
-    bool serving = seconds == 0;
-    if (serving) seconds = 120;
     if (seconds < 45 || seconds > 600) return -EINVAL;
     bool expected = true;
     if (!atomic_compare_exchange_strong(&stopping, &expected, false)) return -EBUSY;
+    atomic_store(&link_ready,false);
     uint64_t session_owner = 0;
     struct saved_dns saved = {0};
     if (dns_foreach_nameserver(save_dns, &saved) < 0) { atomic_store(&stopping, true); return -EIO; }
@@ -100,16 +104,18 @@ int zhaoxi_pc_link(unsigned seconds)
     cJSON_AddBoolToObject(report, "board_native_tls", true);
     cJSON_AddNumberToObject(report, "negotiation_budget_seconds", seconds);
     cJSON_AddBoolToObject(report, "serving", serving);
+    int lease_rc=zhaoxi_console_claim();
+    if(lease_rc){cJSON_Delete(report);atomic_store(&stopping,true);return lease_rc;}
     int tty = open("/dev/console", O_RDWR | O_NONBLOCK);
     struct termios previous = {0};
     bool raw_saved = tty >= 0 && ioctl(tty, TCGETS, (unsigned long)&previous) == 0;
-    if (!raw_saved) { if (tty >= 0) close(tty); cJSON_Delete(report); atomic_store(&stopping, true); return -ENOTTY; }
+    if (!raw_saved) { if (tty >= 0) close(tty); zhaoxi_console_release();cJSON_Delete(report); atomic_store(&stopping, true); return -ENOTTY; }
     struct termios raw = previous;
     raw.c_iflag = 0; raw.c_oflag = 0; raw.c_lflag = 0;
     cJSON_AddNumberToObject(report, "previous_tty_lflag", previous.c_lflag);
     cJSON_AddNumberToObject(report, "previous_tty_iflag", previous.c_iflag);
     if (ioctl(tty, TCSETS, (unsigned long)&raw)) {
-        close(tty); cJSON_Delete(report); atomic_store(&stopping, true); return -errno;
+        int error=-errno;close(tty);zhaoxi_console_release();cJSON_Delete(report);atomic_store(&stopping,true);return error;
     }
     printf("PC_LINK starting %u seconds; console temporarily carries PPP.\n", seconds);
     fflush(stdout);
@@ -122,6 +128,7 @@ int zhaoxi_pc_link(unsigned seconds)
     int result = pthread_create(&worker, &attr, run_ppp, &settings);
     pthread_attr_destroy(&attr);
     int fd = -1; bool route0 = false, route1 = false, dns_changed = false;
+    bool cleanup_ok = true;
     if (result) { atomic_store(&worker_alive, false); result = -result; goto finish; }
     struct in_addr address = {0};
     unsigned waited = 0;
@@ -208,7 +215,8 @@ int zhaoxi_pc_link(unsigned seconds)
         }
         cJSON_AddBoolToObject(report, "agent_started_by_link",
                               agent_instance_is_owned(session_owner));
-        result = zhaoxi_pc_control(); goto stop;
+        atomic_store(&link_ready,true);
+        result = persistent?zhaoxi_pc_boot_control():zhaoxi_pc_control(); goto stop;
     }
     char key[128] = {0};
     if (claw_config_get("api_key", key, sizeof(key)) || !key[0]) { result = -EACCES; goto stop; }
@@ -229,16 +237,19 @@ int zhaoxi_pc_link(unsigned seconds)
     result = http == 200 && content ? 0 : -EIO;
     cJSON_Delete(body); free(response);
 stop:
+    atomic_store(&link_ready,false);
     if (serving) voice_channel_auto_stop();
     /* Do not remove a healthy PPP link first: net_watch could enter a
      * synchronous BES reconnect and never reach the shutdown flag again. */
     int shutdown_result = stop_session_agent(session_owner, 45000, report);
-    if (shutdown_result && !result) result = shutdown_result;
+    if (shutdown_result) {cleanup_ok=false;if(!result)result=shutdown_result;}
     atomic_store(&stopping, true);
-    pthread_join(worker, NULL);
-    if (route0) route_half(fd, 0, false);
-    if (route1) route_half(fd, 1, false);
-    if (fd >= 0) close(fd);
+    int joined = pthread_join(worker, NULL);
+    cJSON_AddNumberToObject(report, "ppp_join_rc", joined);
+    if (joined) cleanup_ok=false;
+    if (route0) {int removed=route_half(fd,0,false);cJSON_AddNumberToObject(report,"route0_remove_rc",removed);if(removed)cleanup_ok=false;}
+    if (route1) {int removed=route_half(fd,1,false);cJSON_AddNumberToObject(report,"route1_remove_rc",removed);if(removed)cleanup_ok=false;}
+    if (fd >= 0 && close(fd)) cleanup_ok=false;
     if (dns_changed) {
         int restored = dns_default_nameserver();
         for (int i = 0; i < saved.count; i++) {
@@ -246,13 +257,20 @@ stop:
             if (rc) restored = rc;
         }
         cJSON_AddNumberToObject(report, "dns_restore_rc", restored);
+        if(restored)cleanup_ok=false;
     }
 finish:
     atomic_store(&ipv4_ready, false);
     atomic_store(&stopping, true); setlogmask(old_mask);
     int restored_tty = ioctl(tty, TCSETS, (unsigned long)&previous);
     cJSON_AddNumberToObject(report, "tty_restore_rc", restored_tty);
-    close(tty);
+    int closed_tty=close(tty);
+    if(restored_tty || closed_tty)cleanup_ok=false;
+    /* Never re-enable shell reads over a live PPP worker or raw console. */
+    int lease_release_rc=(!restored_tty && !atomic_load(&worker_alive))?zhaoxi_console_release():-EBUSY;
+    if(lease_release_rc)cleanup_ok=false;
+    cJSON_AddNumberToObject(report,"console_release_rc",lease_release_rc);
+    cJSON_AddBoolToObject(report,"cleanup_confirmed",cleanup_ok);
     cJSON_AddNumberToObject(report, "result", result);
     char *output = cJSON_PrintUnformatted(report);
     if (output) {
@@ -261,6 +279,12 @@ finish:
         free(output);
     }
     cJSON_Delete(report);
-    printf("\nPC_LINK finished rc=%d; result /tmp/pc_link_result.json; console restored.\n", result);
+    printf("\nPC_LINK_CLEANUP confirmed=%d\n",cleanup_ok);
+    printf("PC_LINK finished rc=%d; result /tmp/pc_link_result.json; console restored.\n", result);
+    fflush(stdout);
     return result;
 }
+int zhaoxi_pc_link(unsigned seconds)
+{return pc_link_run(seconds?seconds:120,seconds==0,false);}
+int zhaoxi_pc_link_boot(void)
+{return pc_link_run(60,true,true);}

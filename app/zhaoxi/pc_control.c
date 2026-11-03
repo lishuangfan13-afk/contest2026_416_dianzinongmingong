@@ -8,13 +8,14 @@
 #include "voice/voice_channel.h"
 #include <arpa/inet.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <poll.h>
+#include <stdint.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
-#include <sys/time.h>
 #include <time.h>
 #include <unistd.h>
 #include <netutils/netlib.h>
@@ -107,7 +108,99 @@ static cJSON *dispatch(cJSON *request, bool *ending)
     return reply;
 }
 
-int zhaoxi_pc_control(void)
+/* Each complete request/reply gets five seconds, regardless of byte progress.
+ * Nonblocking I/O keeps readiness races from exceeding the 100 ms stop slice. */
+#define PC_CONTROL_IO_MS 5000
+#define PC_CONTROL_POLL_MS 100
+
+static int64_t pc_control_now_ms(void)
+{
+    struct timespec now;
+    if (clock_gettime(CLOCK_MONOTONIC, &now)) return -1;
+    return (int64_t)now.tv_sec * 1000 + now.tv_nsec / 1000000;
+}
+
+static int pc_control_link_status(void)
+{
+    if (zhaoxi_pc_link_stopping()) return -ECANCELED;
+    if (!zhaoxi_pc_link_alive()) return -ENETDOWN;
+    return 0;
+}
+
+static int pc_control_wait(int fd, short events, int64_t deadline)
+{
+    for (;;) {
+        int rc = pc_control_link_status();
+        if (rc) return rc;
+        int64_t now = pc_control_now_ms();
+        if (now < 0) return -EIO;
+        if (now >= deadline) return -ETIMEDOUT;
+        int timeout = (int)(deadline - now);
+        if (timeout > PC_CONTROL_POLL_MS) timeout = PC_CONTROL_POLL_MS;
+        struct pollfd waiter = {.fd = fd, .events = events};
+        rc = poll(&waiter, 1, timeout);
+        if (rc < 0) {
+            if (errno == EINTR) continue;
+            return -errno;
+        }
+        if (!rc) continue;
+        /* poll may have consumed the remaining budget or observed a stop. */
+        rc = pc_control_link_status();
+        if (rc) return rc;
+        now = pc_control_now_ms();
+        if (now < 0) return -EIO;
+        if (now >= deadline) return -ETIMEDOUT;
+        if (waiter.revents & POLLNVAL) return -EBADF;
+        if (waiter.revents & events) return 0;
+        if (waiter.revents & (POLLERR | POLLHUP)) return -ECONNRESET;
+    }
+}
+
+static int pc_control_receive(int fd, char *input, size_t capacity)
+{
+    int64_t now = pc_control_now_ms();
+    if (now < 0) return -EIO;
+    int64_t deadline = now + PC_CONTROL_IO_MS;
+    size_t used = 0;
+    while (used < capacity - 1) {
+        int rc = pc_control_wait(fd, POLLIN, deadline);
+        if (rc) return rc;
+        ssize_t got = recv(fd, input + used, capacity - 1 - used, 0);
+        if (got < 0) {
+            if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) continue;
+            return -errno;
+        }
+        if (!got) return -ECONNRESET;
+        used += (size_t)got;
+        char *newline = memchr(input, '\n', used);
+        if (newline) { *newline = 0; return 0; }
+    }
+    return -EMSGSIZE;
+}
+
+static int pc_control_send(int fd, const char *output)
+{
+    int64_t now = pc_control_now_ms();
+    if (now < 0) return -EIO;
+    int64_t deadline = now + PC_CONTROL_IO_MS;
+    size_t size = strlen(output), sent = 0;
+    /* Include the framing newline in the same absolute send deadline. */
+    while (sent <= size) {
+        int rc = pc_control_wait(fd, POLLOUT, deadline);
+        if (rc) return rc;
+        ssize_t n = sent < size ? send(fd, output + sent, size - sent, 0) :
+                                 send(fd, "\n", 1, 0);
+        if (n < 0) {
+            if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) continue;
+            return -errno;
+        }
+        if (!n) return -ECONNRESET;
+        sent += (size_t)n;
+    }
+    return 0;
+}
+
+static int pc_control_run(bool persistent)
 {
     int listener = socket(AF_INET, SOCK_STREAM, 0);
     if (listener < 0) return -errno;
@@ -121,50 +214,47 @@ int zhaoxi_pc_control(void)
     bool ending = false;
     struct timespec started, now; clock_gettime(CLOCK_MONOTONIC, &started);
     while (!ending) {
+        if(zhaoxi_pc_link_stopping()){close(listener);return -ECANCELED;}
         uint8_t flags = 0;
         if (!zhaoxi_pc_link_alive() || netlib_getifstatus("ppp0", &flags) ||
             (flags & (IFF_UP | IFF_RUNNING)) != (IFF_UP | IFF_RUNNING)) {
             close(listener); return -ENETDOWN;
         }
         clock_gettime(CLOCK_MONOTONIC, &now);
-        if (now.tv_sec - started.tv_sec >= 3600) break;
+        if (!persistent && now.tv_sec - started.tv_sec >= 3600) break;
         struct pollfd waiter = {.fd = listener, .events = POLLIN};
-        if (poll(&waiter, 1, 1000) <= 0) continue;
+        if (poll(&waiter, 1, PC_CONTROL_POLL_MS) <= 0) continue;
         struct sockaddr_in peer; socklen_t length = sizeof(peer);
         int fd = accept(listener, (struct sockaddr *)&peer, &length);
         if (fd < 0) continue;
         struct in_addr computer; inet_pton(AF_INET, "10.254.42.1", &computer);
         if (peer.sin_addr.s_addr != computer.s_addr) { close(fd); continue; }
-        struct timeval timeout = {.tv_sec = 5};
-        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
-        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
-        char input[2048]; size_t used = 0;
-        while (used < sizeof(input) - 1) {
-            int got = recv(fd, input + used, sizeof(input) - 1 - used, 0);
-            if (got <= 0) break;
-            used += got;
-            if (memchr(input, '\n', used)) break;
+        int fd_flags = fcntl(fd, F_GETFL, 0);
+        if (fd_flags < 0 || fcntl(fd, F_SETFL, fd_flags | O_NONBLOCK) < 0) {
+            close(fd); continue;
         }
-        input[used] = 0;
-        char *newline = strchr(input, '\n');
-        if (newline) *newline = 0;
-        cJSON *request = newline ? cJSON_Parse(input) : NULL;
+        char input[2048];
+        int io_rc = pc_control_receive(fd, input, sizeof(input));
+        if (!io_rc) io_rc = pc_control_link_status();
+        cJSON *request = !io_rc ? cJSON_Parse(input) : NULL;
         cJSON *reply = request ? dispatch(request, &ending) : NULL;
         char *output = reply ? cJSON_PrintUnformatted(reply) : NULL;
+        bool reply_sent = false;
         if (output) {
-            size_t size = strlen(output), sent = 0;
-            while (sent < size) {
-                int n = send(fd, output + sent, size - sent, 0);
-                if (n <= 0) break;
-                sent += n;
-            }
-            send(fd, "\n", 1, 0); free(output);
+            io_rc = pc_control_send(fd, output);
+            reply_sent = !io_rc;
+            free(output);
         }
         cJSON_Delete(reply); cJSON_Delete(request); close(fd);
-        /* Let the queued quit reply and TCP close reach the attached computer
+        if (io_rc == -ECANCELED || io_rc == -ENETDOWN) {
+            close(listener); return io_rc;
+        }
+        /* Let the complete quit reply and TCP close reach the attached computer
          * before the caller removes the interface carrying that connection. */
-        if (ending) usleep(250000);
+        if (ending && reply_sent) usleep(250000);
     }
     close(listener);
     return 0;
 }
+int zhaoxi_pc_control(void){return pc_control_run(false);}
+int zhaoxi_pc_boot_control(void){return pc_control_run(true);}
