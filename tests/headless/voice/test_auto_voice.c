@@ -13,6 +13,15 @@ static int tts_calls;
 static atomic_int block_greeting, greeting_entered, greeting_release;
 static int fail_greeting;
 static char last_tts_text[128];
+static atomic_int product_reply,product_replied;
+int zhaoxi_morning_voice(const char *text,bool gated)
+{
+    (void)text;
+    if(!gated || !atomic_load(&product_reply))return 0;
+    assert(!voice_channel_auto_output_begin(false)); /* Same ASR worker owns this result. */
+    assert(!voice_channel_speak_auto_owned("fixture product reply"));
+    voice_channel_auto_output_end(true);atomic_fetch_add(&product_replied,1);return 1;
+}
 
 void voice_channel_auto_feedback(int event)
 {
@@ -189,10 +198,14 @@ int AUTO_VOICE_TESTS_MAIN(void)
     atomic_store(&block_asr,1);
     int cues_before=atomic_load(&cue_counts[VOICE_AUTO_FEEDBACK_ASR_ERROR]);
     assert(voice_channel_auto_start()==0);wait_count(&fake_asr_calls,1);
+    assert(voice_channel_auto_output_begin(false)==-EBUSY); /* Foreign worker cannot overlap ASR. */
     assert(voice_channel_auto_stop()==0);atomic_store(&asr_release,1);
     pthread_join(auto_test_thread,NULL);
     assert(!s_auto.running && !s_auto.capture && atomic_load(&fake_bus_messages)==0);
     assert(atomic_load(&cue_counts[VOICE_AUTO_FEEDBACK_ASR_ERROR])==cues_before);
+    reset_fixture();allow_bus=1;atomic_store(&fake_input_pattern,1);atomic_store(&product_reply,1);
+    assert(!voice_channel_auto_start());wait_count(&product_replied,1);
+    assert(!atomic_load(&fake_bus_messages));stop_auto();atomic_store(&product_reply,0);
 
     /* Timeouts stop the automatic loop; a cancelled ID cannot release a later
      * turn even if its model/outbound operation finishes after restart. */

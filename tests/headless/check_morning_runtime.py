@@ -13,13 +13,14 @@ with tempfile.TemporaryDirectory(prefix='zhaoxi-morning-runtime-') as temp:
 bool agent_shutdown_requested(void);
 int agent_task_create(void *(*f)(void *),const char *,int,void *,int);
 ''')
-    exe=Path(temp)/'test'
-    subprocess.run(['gcc','-std=gnu11','-g','-O1','-Wall','-Wextra','-Werror','-Wno-misleading-indentation',
+    for fixture in ('test_morning_runtime','test_news_playback'):
+        exe=Path(temp)/fixture
+        subprocess.run(['gcc','-std=gnu11','-g','-O1','-Wall','-Wextra','-Werror','-Wno-misleading-indentation',
                     '-fsanitize=address,undefined','-fno-sanitize-recover=all','-fno-omit-frame-pointer','-pthread',
                     '-I'+str(inc),'-I'+str(ROOT/'tests/headless/include'),'-I'+str(ROOT/'app/zhaoxi'),
                     '-I'+str(a.sdk/'src'),'-I'+str(a.cjson),
-                    '-DAGENT_DATA_DIR="'+str(Path(temp)/'data')+'"',
+                    '-DAGENT_DATA_DIR="'+str(Path(temp)/fixture)+'-data"',
                     '-DMORNING_SOURCE="'+str(ROOT/'app/zhaoxi/morning.c')+'"',
-                    str(ROOT/'tests/headless/test_morning_runtime.c'),str(ROOT/'app/zhaoxi/morning_store.c'),str(ROOT/'app/zhaoxi/profile_intent.c'),
+                    str(ROOT/'tests/headless'/(fixture+'.c')),str(ROOT/'app/zhaoxi/morning_store.c'),str(ROOT/'app/zhaoxi/profile_intent.c'),
                     str(a.sdk/'src/voice/voice_wake.c'),str(a.cjson/'cJSON.c'),'-lm','-o',str(exe)],check=True)
-    subprocess.run([str(exe)],check=True,timeout=30)
+        subprocess.run([str(exe)],check=True,timeout=30)

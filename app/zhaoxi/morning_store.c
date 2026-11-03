@@ -282,6 +282,25 @@ int morning_batch_publish(const struct morning_batch *batch)
     else if(rc==-ENOENT)rc=save_locked(batch);
     pthread_mutex_unlock(&storage_lock);free(old);return rc;
 }
+int morning_batch_refresh(const struct morning_batch *batch)
+{
+    if(!batch || batch->count>MORNING_ITEMS_MAX)return -EINVAL;
+    struct morning_batch *old=calloc(1,sizeof(*old));if(!old)return -ENOMEM;
+    pthread_mutex_lock(&storage_lock);int rc=load_locked(batch->date,old);
+    if(rc==-ENOENT)rc=save_locked(batch);
+    else if(!rc) {
+        unsigned before=old->count;
+        for(unsigned i=0;i<batch->count && old->count<MORNING_ITEMS_MAX;i++) {
+            bool duplicate=false;
+            for(unsigned j=0;j<old->count;j++)if(!strcmp(old->items[j].id,batch->items[i].id)){duplicate=true;break;}
+            if(!duplicate)old->items[old->count++]=batch->items[i];
+        }
+        if(old->count!=before) {
+            old->asked=false;old->declined=false;fingerprint(old);rc=save_locked(old);
+        }
+    }
+    pthread_mutex_unlock(&storage_lock);free(old);return rc;
+}
 int morning_batch_prune(int64_t now)
 {
     char cutoff[11];if(morning_day(now-30*86400,cutoff,NULL))return -EINVAL;
@@ -315,13 +334,42 @@ static int clean_speech(const char *text,char *clean,size_t cap)
     }
     return 0;
 }
-bool morning_play_request(const char *text)
+static bool consume(const char **text,const char *part)
 {
-    char clean[128];if(clean_speech(text,clean,sizeof(clean)))return false;
-    const char *phrases[]={"播放今天的新闻","播放今天新闻","播放新闻","播报今天的新闻",NULL};
-    for(int i=0;phrases[i];i++)if(!strcmp(clean,phrases[i]))return true;
-    return false;
+    size_t n=strlen(part);if(strncmp(*text,part,n))return false;*text+=n;return true;
 }
+static bool consume_one(const char **text,const char *const *parts)
+{for(unsigned i=0;parts[i];i++)if(consume(text,parts[i]))return true;return false;}
+int morning_play_day_request(const char *text)
+{
+    char clean[256];if(clean_speech(text,clean,sizeof(clean)))return -1;
+    /* Only these bounded request grammars execute. Never search arbitrary
+     * prose for keywords: negatives and explanations must not start audio. */
+    char compact[256];size_t used=0;
+    for(size_t i=0;clean[i];i++)if(!strchr(" \t\r\n",(unsigned char)clean[i]))compact[used++]=clean[i];
+    compact[used]=0;const char *p=compact;
+    const char *const prefixes[]={"请帮我","麻烦帮我","能不能帮我","可以帮我","能帮我","帮我","麻烦你","请你","请",NULL};
+    consume_one(&p,prefixes);
+    bool inverted=consume(&p,"把");
+    const char *const wants[]={"我想听","我要听","我想收听","我想","给我",NULL};
+    bool wanted=!inverted && consume_one(&p,wants);
+    const char *const verbs[]={"重新播放","再播放","播放","播报","播一下","读一下","读一读","念一下","讲一下","听一下","听听","收听","放一下","放","听","播",NULL};
+    bool verb=!inverted && consume_one(&p,verbs);
+    if(!inverted && !wanted && !verb)return -1;
+    consume(&p,"一下");
+    int day=0;
+    if(consume(&p,"昨天") || consume(&p,"昨日"))day=1;
+    else {(void)(consume(&p,"今天") || consume(&p,"今日"));}
+    consume(&p,"的");
+    const char *const nouns[]={"新闻资讯","新闻简报","新闻","资讯","晨报","简报",NULL};
+    if(!consume_one(&p,nouns))return -1;
+    if(inverted && !consume_one(&p,verbs))return -1;
+    if(inverted)consume(&p,"一下");
+    const char *const suffixes[]={"给我听","给我","听一下","吧","好吗","可以吗",NULL};
+    consume_one(&p,suffixes);
+    return *p?-1:day;
+}
+bool morning_play_request(const char *text){return morning_play_day_request(text)>=0;}
 int morning_consent_parse(const char *text)
 {
     char clean[128];if(clean_speech(text,clean,sizeof(clean)))return 0;

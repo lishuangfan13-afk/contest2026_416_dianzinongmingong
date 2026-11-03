@@ -45,7 +45,7 @@ static int request_cancel(void *unused)
 static int stream_cancel(void *unused)
 {(void)unused;return agent_shutdown_requested() || voice_channel_tts_stream_error();}
 
-static cJSON *request(cJSON *body, size_t capacity, const char *phase)
+static cJSON *request(cJSON *body, size_t capacity, const char *phase,unsigned budget)
 {
     int64_t started = monotonic_ms();
     char key[128] = {0}, host[128] = {0};
@@ -57,7 +57,7 @@ static cJSON *request(cJSON *body, size_t capacity, const char *phase)
     }
     vela_header_t headers[] = {{"api-key", key}, {NULL, NULL}};
     int status = vela_https_post_json_bounded(host, "443", "/v1/chat/completions", headers,
-                                      payload, response, capacity,60000,request_cancel,NULL);
+                                      payload, response, capacity,budget,request_cancel,NULL);
     free(payload);
     cJSON *result = status == 200 ? cJSON_Parse(response) : NULL;
     printf("MIMOVOICE http=%d parsed=%d phase=%s elapsed_ms=%lld\n",
@@ -79,6 +79,12 @@ static int recognize(const unsigned char *pcm, size_t length, char *out, size_t 
 {
     if (!pcm || !length || length % 2 || length > 960000 || !out || !capacity) return -EINVAL;
     out[0] = 0;
+    int64_t started=monotonic_ms();unsigned voiced=0,peak=0;
+    for(size_t frame=0;frame+320<=length/2;frame+=320) {
+        uint64_t sum=0;
+        for(size_t i=frame;i<frame+320;i++){int16_t sample;memcpy(&sample,pcm+i*2,2);int v=sample;unsigned magnitude=(unsigned)(v<0?-v:v);sum+=magnitude;if(magnitude>peak)peak=magnitude;}
+        if(sum/320>=300)voiced++;
+    }
     unsigned char *wav = calloc(1, length + 44);
     size_t b64cap = 4 * ((length + 46) / 3) + 1;
     char *encoded = malloc(b64cap + 22);
@@ -102,11 +108,21 @@ static int recognize(const unsigned char *pcm, size_t length, char *out, size_t 
     cJSON_AddStringToObject(cJSON_AddObjectToObject(audio, "input_audio"), "data", encoded);
     free(encoded);
     cJSON_AddStringToObject(cJSON_AddObjectToObject(body, "asr_options"), "language", "zh");
-    printf("MIMOVOICE phase=asr begin audio_ms=%lu\n", (unsigned long)(length / 32));
-    cJSON *result = request(body, 16384, "asr"); cJSON_Delete(body);
-    if (!result) return -EIO;
+    printf("MIMOVOICE phase=asr begin audio_ms=%lu voiced_frames=%u peak=%u\n", (unsigned long)(length / 32),voiced,peak);
+    cJSON *result = request(body, 16384, "asr",20000);
+    if (!result){cJSON_Delete(body);return -EIO;}
     const char *text = cJSON_GetStringValue(cJSON_GetObjectItem(message(result), "content"));
-    rc = !text ? -EIO : strlen(text) >= capacity ? -ENOSPC : 0;
+    /* An empty transcript is not network success or proof of silence. Only
+     * retry a valid, non-quiet clip once, inside a shared 25-second budget. */
+    int64_t remaining=25000-(monotonic_ms()-started);
+    if(text && !text[0] && voiced>=8 && peak>=600 && remaining>=5000 && !agent_shutdown_requested()) {
+        cJSON_Delete(result);
+        printf("MIMOVOICE phase=asr retry=empty-text budget_ms=%lld\n",(long long)remaining);
+        result=request(body,16384,"asr",(unsigned)remaining);
+        text=cJSON_GetStringValue(cJSON_GetObjectItem(message(result),"content"));
+    }
+    cJSON_Delete(body);
+    rc = !text ? -EIO : !text[0]?-ENODATA:strlen(text) >= capacity ? -ENOSPC : 0;
     if (!rc) strcpy(out, text);
     cJSON_Delete(result);
     return rc;
@@ -125,7 +141,7 @@ static int fetch_speech(const char *text, unsigned char **pcm, size_t *length)
     cJSON_AddStringToObject(audio, "format", "pcm16");
     cJSON_AddStringToObject(audio, "voice", "mimo_default");
     printf("MIMOVOICE phase=tts begin text_bytes=%lu\n", (unsigned long)strlen(text));
-    cJSON *result = request(body, 4 * 1024 * 1024, "tts"); cJSON_Delete(body);
+    cJSON *result = request(body, 4 * 1024 * 1024, "tts",60000); cJSON_Delete(body);
     if (!result) return -EIO;
     const char *encoded = cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetObjectItem(message(result), "audio"), "data"));
     int rc = -EIO;

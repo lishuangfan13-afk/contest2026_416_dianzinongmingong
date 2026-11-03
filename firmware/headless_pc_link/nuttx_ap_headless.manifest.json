@@ -1,7 +1,7 @@
 {
   "image": "nuttx_ap_headless.bin",
-  "size": 1370912,
-  "sha256": "565b643297d63b467a766504bcc9955259158bdac1ae66ba58ee07e09b2e39a6",
+  "size": 1374416,
+  "sha256": "8e731fb62d72ed2a81c5a20ecd4c623ff4c130e4589aef6989134d58726af6fa",
   "flash_address": "0x30190000",
   "ntc_patch": {
     "offset": 18364,
@@ -32,12 +32,12 @@
     "app/zhaoxi/local_prompts.h": "03b776717e91769079eeee7811aec53083a8c7ff8daca7017370895aaf674d9a",
     "app/zhaoxi/mimo_sse.c": "758758ec217157c8ebef9e5c5289de803a4605200cfee0db0a11931f806e2d4c",
     "app/zhaoxi/mimo_sse.h": "9e3cb8428fe971264a5ac2548d450d1a7b018c857f2269480b21295131b30cd7",
-    "app/zhaoxi/mimo_voice.c": "c793e58de18cec5cb87c34f0c5eae1db5cd701cfd441ccaaf2f55f6a3ce3f4b1",
-    "app/zhaoxi/morning.c": "77e1eb306a742af224a45452928855235d0eaaa6fa0049de4fe3bab4231de14f",
-    "app/zhaoxi/morning.h": "2a443dac6ea5748318ba29446f725d573c92f7b08e68ed6e9077c50f5043b843",
+    "app/zhaoxi/mimo_voice.c": "1c42e788b3f0ab133d18fab02503e4ea8eb05bc4a2e8d2177bb4d8910e9d86cf",
+    "app/zhaoxi/morning.c": "803c8bcfde36d3a6b5a862abf2735bfcffad3c09b7d6528a75b6951e7e3204f6",
+    "app/zhaoxi/morning.h": "04eb424649abdd461b6611842d146cd4a4a53d4ef8bcfee2c1d38f37f0139d72",
     "app/zhaoxi/morning_net.c": "e4dcf43a5b9f6f4865d27924dda351d981d26d7aae6aa6cc2a3d0fde4bb0f322",
     "app/zhaoxi/morning_net.h": "b6e7d51285a479cec50023cbff2a92570c36cf1a57d8e317544042bb63f278ca",
-    "app/zhaoxi/morning_store.c": "d21f68a64411ea4384896932d2358b73bf2d5d5f3978accf7048eaa608f2e4a8",
+    "app/zhaoxi/morning_store.c": "d390f6345240eab69f38e3e99356ffe56297db30e8344c5aeab30395ca13cabf",
     "app/zhaoxi/notifications/feishu_notify.c": "6fc97b24ce3c8dbf1afc6e02957a8c22fd6065fa1ec230fdbed2e616e60274b6",
     "app/zhaoxi/notifications/feishu_notify.h": "3c0d9ba8de6b4b5cea15e571048148054f2bc2281a7a61b202c8ec1377564a0a",
     "app/zhaoxi/notifications/feishu_notify_sdk.c": "091d3c98915d56f75856848e777d7457fd5c747f90987e64b8cb48cfce62df57",
@@ -51,7 +51,7 @@
     "app/zhaoxi/reminder.h": "62d77798f4ea7f8938da805f571cda0fd0c3aef365106d3b82fa57ac9252674d",
     "app/zhaoxi/todo_store.c": "bc41c9d872bc025d9d58644f7644357250bc0cce2cc5f42a1e776cbaf8938781",
     "app/zhaoxi/todo_store.h": "c9e678b442d4f37493cf455eab69e0abae9755416e8baf2e145038d300bb9d20",
-    "app/zhaoxi/zhaoxi_main.c": "bde611395e6202e6dad9f67c3372e7b6953e16849fd23d2d38e87a757621e2a1"
+    "app/zhaoxi/zhaoxi_main.c": "49594cf8cc8a496d4129ff56256ee3d5b86cfe5941d329a3bb4c793a9e383af5"
   },
   "patches": {
     "0008-packages_ai_agent-headless-entry.patch": "ea6c16a65a42b0e0df8a699eafaeb1843f9e032b781e7dd572a36a15ddb02314",
@@ -114,6 +114,7 @@
     "0065-packages_ai_agent-boot-wake-greeting.patch": "9ff2cde05bad80e5c1a0c5d452b12f9964164031db51381f744019376dfd6ceb",
     "0066-packages_ai_agent-morning-consent-and-background-tls.patch": "c9182c74bc99341fdb6f5cad79264f0bf95c6e147fe92df715b2ddeda03ca449",
     "0067-packages_ai_agent-bounded-speech-and-wifi-tx-diagnostics.patch": "d3a5bd539e4e128da3896c83f7df19f25187161774c0e1632e428c4b91f98b6b",
-    "0068-packages_ai_agent-bounded-public-feed-get.patch": "d88516207a67ca0f84defdb085418c390a7fdc94d1befad5a819f2552bbd94da"
+    "0068-packages_ai_agent-bounded-public-feed-get.patch": "d88516207a67ca0f84defdb085418c390a7fdc94d1befad5a819f2552bbd94da",
+    "0069-packages_ai_agent-news-output-arbitration-and-connect-retry.patch": "1d5f04ba7af01e5ca8170180a0e44dee19b98604aec8d164f7189e52b1061767"
   }
 }

@@ -1,0 +1,179 @@
+diff --git a/src/voice/voice_channel.c b/src/voice/voice_channel.c
+--- a/src/voice/voice_channel.c
++++ b/src/voice/voice_channel.c
+@@ -250,6 +250,8 @@
+     pthread_cond_t changed;
+     bool enabled, running, awaiting, tts_playing;
+     bool wake_processing, greeting, wake_debug, offering, news_consent;
++    bool worker_valid;
++    pthread_t worker_id;
+     voice_wake_t wake;
+     unsigned turn_generation;
+     char pending_id[32];
+@@ -473,14 +475,19 @@
+ int voice_channel_auto_output_begin(bool idle_only)
+ {
+     pthread_mutex_lock(&s_auto.lock);
+-    bool ready=s_auto.enabled && s_auto.running && !s_auto.offering && !s_auto.speakers && !s_auto.awaiting;
++    bool self=s_auto.worker_valid && pthread_equal(pthread_self(),s_auto.worker_id);
++    bool ready=s_auto.enabled && s_auto.running && !s_auto.offering && !s_auto.speakers && !s_auto.awaiting &&
++        (!s_auto.wake_processing || self);
+     if(idle_only)ready=ready && s_auto.state==AUTO_LISTENING && !s_auto.news_consent &&
+         !voice_wake_poll(&s_auto.wake,(uint64_t)auto_now_ms());
+     if(!ready){pthread_mutex_unlock(&s_auto.lock);return -EBUSY;}
+     s_auto.offering=true;
+     if(s_auto.capture)audio_capture_abort(s_auto.capture);
+-    while(s_auto.capture)pthread_cond_wait(&s_auto.changed,&s_auto.lock);
+-    int rc=s_auto.enabled?0:-ECANCELED;
++    struct timespec until;clock_gettime(CLOCK_REALTIME,&until);until.tv_sec+=5;
++    int wait_rc=0;
++    while(s_auto.capture && s_auto.enabled && !wait_rc)
++        wait_rc=pthread_cond_timedwait(&s_auto.changed,&s_auto.lock,&until);
++    int rc=!s_auto.enabled?-ECANCELED:wait_rc?-wait_rc:0;
+     if(rc)s_auto.offering=false;
+     pthread_mutex_unlock(&s_auto.lock);return rc;
+ }
+@@ -504,6 +511,7 @@
+ static void *auto_voice_worker(void *unused)
+ {
+     (void)unused;
++    pthread_mutex_lock(&s_auto.lock);s_auto.worker_id=pthread_self();s_auto.worker_valid=true;pthread_mutex_unlock(&s_auto.lock);
+     unsigned char *pcm=malloc(AGENT_VOICE_PCM_BUF_SIZE);
+     unsigned char *pre=malloc(AUTO_PRE_FRAMES*AUTO_FRAME_BYTES);
+     if(!pcm || !pre){free(pcm);free(pre);auto_set_state(AUTO_ERROR,-ENOMEM);goto finished;}
+@@ -633,7 +641,7 @@
+                (long long)(auto_now_ms()-asr_started),result,used);
+         if(!voice_auto_enabled() || agent_shutdown_requested())break;
+         pthread_mutex_lock(&s_auto.lock);
+-        bool wake_debug=s_auto.wake_debug && s_auto.wake.enabled && !s_auto.wake.awake;
++        bool wake_debug=s_auto.wake_debug;
+         pthread_mutex_unlock(&s_auto.lock);
+         if(wake_debug)printf("WAKE_DIAG rc=%d text_bytes=%zu text=\"%.*s\"\n",
+                              result,strlen(text),160,text);
+@@ -706,6 +714,7 @@
+ finished:
+     auto_capture_close();
+     pthread_mutex_lock(&s_auto.lock);
++    s_auto.worker_valid=false;
+     s_auto.state=AUTO_OFF;
+     if(s_auto.last_error!=-ETIMEDOUT)s_auto.last_error=0;
+     s_auto.pending_id[0]=0;
+diff --git a/src/infra/vela_tls.c b/src/infra/vela_tls.c
+--- a/src/infra/vela_tls.c
++++ b/src/infra/vela_tls.c
+@@ -1406,6 +1406,22 @@
+ 
+ /* Dedicated bounded connection for background work. Normal ASR/TTS and LLM
+  * calls retain their existing timeout and connection behaviour. */
++static int tls_connect_retry(tls_ctx_t *ctx,const char *host,const char *port,
++    unsigned budget,int (*cancel)(void *),void *user)
++{
++    /* Retry connection establishment only: no HTTP body or PCM has yet been
++     * sent. Both attempts share the original 15-second connection budget. */
++    unsigned total=budget<15000?budget:15000;
++    int64_t end=bounded_now_ms()+total;
++    int rc=tls_ctx_connect_limited(ctx,host,port,total>8000?8000:total,cancel,user);
++    int64_t left=end-bounded_now_ms();
++    if(rc && (rc==VELA_TLS_ERR_CONNECT || rc==VELA_TLS_ERR_HANDSHAKE || rc==VELA_TLS_ERR_TIMEOUT) &&
++       left>=1000 && (!cancel || !cancel(user))) {
++        ctx->abortive_close=true;tls_ctx_free(ctx);memset(ctx,0,sizeof(*ctx));
++        rc=tls_ctx_connect_limited(ctx,host,port,(unsigned)left,cancel,user);
++    }
++    return rc;
++}
+ int vela_https_post_json_bounded(const char *host,const char *port,const char *path,
+     const vela_header_t *headers,const char *body,char *out,size_t capacity,
+     unsigned budget,int (*cancel)(void *),void *user)
+@@ -1418,7 +1434,7 @@
+     merged[count]=(vela_header_t){NULL,NULL};
+     tls_ctx_t *ctx=calloc(1,sizeof(*ctx));if(!ctx)return VELA_TLS_ERR_OVERFLOW;
+     int64_t end=bounded_now_ms()+budget;
+-    int rc=tls_ctx_connect_limited(ctx,host,port,budget<15000?budget:15000,cancel,user);
++    int rc=tls_connect_retry(ctx,host,port,budget,cancel,user);
+     if(!rc)ctx->request_deadline=end;
+     if(!rc)rc=tls_write_request(ctx,"POST",host,path,merged,body,strlen(body));
+     if(!rc)rc=tls_read_response(ctx,out,capacity,NULL,NULL,false);
+@@ -1443,7 +1459,7 @@
+     out[0]=0;
+     tls_ctx_t *ctx=calloc(1,sizeof(*ctx));if(!ctx)return VELA_TLS_ERR_OVERFLOW;
+     int64_t end=bounded_now_ms()+budget;
+-    int rc=tls_ctx_connect_limited(ctx,host,port,budget<15000?budget:15000,cancel,user);
++    int rc=tls_connect_retry(ctx,host,port,budget,cancel,user);
+     if(!rc)ctx->request_deadline=end;
+     vela_header_t headers[]={{"Accept","application/json"},{"Accept-Encoding","identity"},{NULL,NULL}};
+     if(!rc)rc=tls_write_request(ctx,"GET",host,path,headers,NULL,0);
+@@ -1499,7 +1515,7 @@
+     tls_ctx_t *ctx = calloc(1, sizeof(*ctx));
+     if (!ctx) return VELA_TLS_ERR_OVERFLOW;
+     int64_t end=budget?bounded_now_ms()+budget:0;
+-    int result = budget ? tls_ctx_connect_limited(ctx,host,port,budget<15000?budget:15000,cancel,cancel_user) :
++    int result = budget ? tls_connect_retry(ctx,host,port,budget,cancel,cancel_user) :
+         tls_ctx_connect(ctx, host, port);
+     if(!result && budget)ctx->request_deadline=end;
+     if (!result) result = tls_write_request(ctx, "POST", host, path, merged,
+diff --git a/src/infra/network_manager.c b/src/infra/network_manager.c
+--- a/src/infra/network_manager.c
++++ b/src/infra/network_manager.c
+@@ -21,6 +21,7 @@
+ #include <ifaddrs.h>
+ #include <net/if.h>
+ #include <netinet/in.h>
++#include <pthread.h>
+ #include <string.h>
+ #include <sys/socket.h>
+ #include <sys/types.h>
+@@ -30,6 +31,34 @@
+ static const char* TAG = "netmgr";
+ 
+ static char s_ip_str[INET_ADDRSTRLEN] = "0.0.0.0";
++
++/* ZHAOXI_WIFI_AWAKE_BEGIN */
++#ifdef CONFIG_ZHAOXI_BES_AUDIO
++extern int wapi_set_power_save(int sock,const char *ifname,bool on);
++static pthread_mutex_t s_wifi_awake_lock=PTHREAD_MUTEX_INITIALIZER;
++static uint32_t s_wifi_awake_address;
++static int64_t s_wifi_awake_next;
++static void zhaoxi_wifi_awake(const char *ifname,uint32_t address)
++{
++    if(ifname && strcmp(ifname,"wlan0"))return;
++    if(pthread_mutex_trylock(&s_wifi_awake_lock))return;
++    if(!ifname || !address){s_wifi_awake_address=0;s_wifi_awake_next=0;}
++    else {
++        struct timespec ts;clock_gettime(CLOCK_MONOTONIC,&ts);
++        int64_t now=(int64_t)ts.tv_sec*1000+ts.tv_nsec/1000000;
++        if(address!=s_wifi_awake_address || now>=s_wifi_awake_next) {
++            int fd=socket(AF_INET,SOCK_DGRAM,0),rc=-1;
++            if(fd>=0){rc=wapi_set_power_save(fd,ifname,false);close(fd);}
++            /* Reapply after a reconnect/IP change, and periodically in case
++             * the driver reset its setting during a fast reassociation. */
++            s_wifi_awake_address=address;s_wifi_awake_next=now+(rc?30000:60000);
++            syslog(rc?LOG_WARNING:LOG_INFO,"[%s] WIFI_POWER_SAVE off rc=%d\n",TAG,rc);
++        }
++    }
++    pthread_mutex_unlock(&s_wifi_awake_lock);
++}
++#endif
++/* ZHAOXI_WIFI_AWAKE_END */
+ 
+ bool network_is_connected(void)
+ {
+@@ -64,6 +93,9 @@
+             if (addr == 0)
+                 continue;
+ 
++#ifdef CONFIG_ZHAOXI_BES_AUDIO
++            zhaoxi_wifi_awake(ifa->ifa_name,addr);
++#endif
+             inet_ntop(AF_INET, &sin->sin_addr, s_ip_str, sizeof(s_ip_str));
+             syslog(LOG_INFO, "[%s] Found iface %s addr %s\n", TAG,
+                 ifa->ifa_name ? ifa->ifa_name : "?", s_ip_str);
+@@ -73,6 +105,9 @@
+         freeifaddrs(ifa_list);
+     }
+ 
++#ifdef CONFIG_ZHAOXI_BES_AUDIO
++    zhaoxi_wifi_awake(NULL,0);
++#endif
+     return false;
+ }
+ 

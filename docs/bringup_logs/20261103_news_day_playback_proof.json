@@ -1,0 +1,93 @@
+{
+  "date": "2026-11-03",
+  "feature": "Natural today/yesterday news playback; refreshing cache and stable voice/network scheduling",
+  "firmware": {
+    "sha256": "8e731fb62d72ed2a81c5a20ecd4c623ff4c130e4589aef6989134d58726af6fa",
+    "size": 1374416,
+    "flash_address": "0x30190000",
+    "incremental_build_tasks": [
+      31,
+      11
+    ],
+    "full_rebuild": false,
+    "downloader_exit": 0,
+    "manual_reset_required": false
+  },
+  "human_acceptance": {
+    "wake_greeting_heard": true,
+    "today_news_heard_complete": true,
+    "yesterday_news_heard_complete": true,
+    "network": "direct 5GHz WPA2 phone hotspot; computer PPP stopped",
+    "today_recognized_command": "播放一下今天的新闻。",
+    "yesterday_recognized_command": "播放一下昨天的新闻。",
+    "today_date": "2026-11-03",
+    "today_items": 3,
+    "today_pcm_bytes": [
+      1121280,
+      829440,
+      837120
+    ],
+    "yesterday_date": "2026-11-02",
+    "yesterday_items": 1,
+    "yesterday_pcm_bytes": 929280,
+    "audio_received_equals_played": true,
+    "accepted_image_sha256": "911c480b1b20f2008ac1831124ded5c2fa9fbee17c2f334dba3499cf5ea2eb31",
+    "final_image_delta": "Only SDK Wi-Fi keep-awake automation; application sources byte-identical to accepted image"
+  },
+  "final_image_boot_checks": {
+    "hotspot_reconnected": true,
+    "SNTP_synced": true,
+    "boot_network_notice": true,
+    "wifi_power_save_auto_disabled": true,
+    "periodic_policy_success_observed": true,
+    "automatic_capture_ready": true,
+    "dialog_asleep_at_end": true
+  },
+  "validation": {
+    "python_tests": 25,
+    "sdk_patches": 54,
+    "sdk_replay": "passed",
+    "build_source_comparison": "passed",
+    "actual_C_checks": [
+      "storage/date/refresh/consent state machine",
+      "today/yesterday and negative intent",
+      "retry recovery and partial-playback resume",
+      "ASR/background ownership and same-thread replies",
+      "real MiMo request/ASR empty-text retry bounds",
+      "TLS pre-request-only retry and private I/O diagnostics",
+      "SSE/base64 streaming",
+      "Wi-Fi boot/reconnect policy, rate limits, socket cleanup and PPP/SoftAP exclusion"
+    ],
+    "native_sanitizers": [
+      "address",
+      "undefined"
+    ],
+    "real_0700_unattended": "not observed"
+  },
+  "persistence": {
+    "persona_preserved": true,
+    "original_hotspot_config_preserved": true,
+    "yesterday_archive_preserved": true,
+    "today_played_items": 3,
+    "private_values_checked": 3,
+    "secret_matches": 0
+  },
+  "cloud": {
+    "repository": "yuk1-r/contest2026_416_dianzinongmingong",
+    "branch": "dev-ai-contest-2026",
+    "commit": "8eb433c435c43afb0f55b5f7395dd3e574b6cb3e",
+    "files": [
+      "tools/morning_feed.py",
+      "tools/export_morning_feed.py",
+      "tools/publish_morning_feed.py",
+      ".github/workflows/morning-feed.yml"
+    ],
+    "feed_url": "https://yuk1-r.github.io/contest2026_416_dianzinongmingong/candidates.json",
+    "published_branch": "news-site"
+  },
+  "cloud_actions_run": 41598262101,
+  "cloud_actions_conclusion": "success",
+  "pages_build": "built",
+  "dsh_delegation": "RSS/Atom and source-cap implementation; 10 checks executed by primary agent",
+  "release_bin_updated": true
+}

@@ -18,7 +18,7 @@ typedef struct {mbedtls_net_context net;ssl_t ssl;int64_t request_deadline;
     int (*request_cancel)(void *);void *request_user;bool abortive_close;} tls_ctx_t;
 typedef struct {mbedtls_net_context *net;int64_t deadline;} tls_stream_bio_t;
 static struct {int64_t now,end;unsigned dial_budget,dials,frees,writes,reads;
-    int dial_error,read_error,cancel;bool last_abort,get;} f;
+    int dial_error,read_error,cancel;unsigned fail_dials;bool last_abort,get;} f;
 static int64_t bounded_now_ms(void){return f.now;}
 static int64_t tls_stream_now_ms(void){return f.now;}
 static int cancelled(void *arg){assert(arg==&f);return f.cancel;}
@@ -28,7 +28,7 @@ static int tls_ctx_connect_limited(tls_ctx_t *ctx,const char *host,const char *p
     assert(!strcmp(host,"example.invalid") && !strcmp(port,"443"));
     f.dials++;f.dial_budget=budget;f.now+=200;
     ctx->request_cancel=cancel;ctx->request_user=user;ctx->request_deadline=f.now+budget;
-    return f.dial_error?f.dial_error:(cancel && cancel(user))?VELA_TLS_ERR_TIMEOUT:0;
+    return f.dial_error && (!f.fail_dials || f.dials<=f.fail_dials)?f.dial_error:(cancel && cancel(user))?VELA_TLS_ERR_TIMEOUT:0;
 }
 static int tls_ctx_connect(tls_ctx_t *ctx,const char *host,const char *port)
 {int rc=tls_ctx_connect_limited(ctx,host,port,0,NULL,NULL);ctx->request_deadline=0;return rc;}
@@ -111,7 +111,7 @@ int main(void)
     char out[16];unsigned delivered=0;
     reset(15000);f.get=true;
     assert(vela_https_get_bounded("example.invalid","443","/test",out,sizeof(out),15000,cancelled,&f)==200);
-    assert(f.dial_budget==15000 && f.dials==1 && f.frees==1 && f.writes==1 && f.reads==1);
+    assert(f.dial_budget==8000 && f.dials==1 && f.frees==1 && f.writes==1 && f.reads==1);
     reset(2000);f.get=true;f.read_error=VELA_TLS_ERR_TIMEOUT;
     assert(vela_https_get_bounded("example.invalid","443","/test",out,sizeof(out),2000,cancelled,&f)==VELA_TLS_ERR_TIMEOUT);
     assert(!out[0] && f.last_abort && f.frees==1);
@@ -120,7 +120,7 @@ int main(void)
     assert(!f.writes && f.frees==1);
     assert(vela_https_get_bounded("example.invalid","443","/test",out,sizeof(out),0,cancelled,&f)<0);
     reset(60000);assert(vela_https_post_json_bounded("example.invalid","443","/test",NULL,"{}",out,sizeof(out),60000,cancelled,&f)==200);
-    assert(f.dial_budget==15000 && f.dials==1 && f.frees==1 && f.writes==1 && f.reads==1);
+    assert(f.dial_budget==8000 && f.dials==1 && f.frees==1 && f.writes==1 && f.reads==1);
     reset(2000);f.read_error=VELA_TLS_ERR_TIMEOUT;
     assert(vela_https_post_json_bounded("example.invalid","443","/test",NULL,"{}",out,sizeof(out),2000,cancelled,&f)==VELA_TLS_ERR_TIMEOUT);
     assert(!out[0] && f.dial_budget==2000 && f.frees==1 && f.last_abort);
@@ -129,11 +129,21 @@ int main(void)
     assert(!f.writes && !f.reads && f.frees==1 && f.last_abort);
     reset(180000);
     assert(vela_https_post_json_stream_bounded("example.invalid","443","/test",NULL,"{}",deliver,&delivered,180000,cancelled,&f)==200);
-    assert(f.dial_budget==15000 && f.frees==1 && delivered==1);
+    assert(f.dial_budget==8000 && f.frees==1 && delivered==1);
     reset(500);assert(vela_https_post_json_stream_bounded("example.invalid","443","/test",NULL,"{}",deliver,&delivered,500,cancelled,&f)==VELA_TLS_ERR_PROTOCOL);
     assert(!f.dials && !f.frees);
     reset(0);assert(vela_https_post_json_stream("example.invalid","443","/test",NULL,"{}",deliver,&delivered)==200);
     assert(!f.dial_budget && f.frees==1 && delivered==2);
+    reset(60000);f.dial_error=VELA_TLS_ERR_HANDSHAKE;f.fail_dials=1;
+    assert(vela_https_post_json_bounded("example.invalid","443","/test",NULL,"{}",out,sizeof(out),60000,cancelled,&f)==200);
+    assert(f.dials==2 && f.frees==2 && f.writes==1 && f.reads==1 && f.dial_budget==14800);
+    reset(60000);f.read_error=VELA_TLS_ERR_READ;
+    assert(vela_https_post_json_bounded("example.invalid","443","/test",NULL,"{}",out,sizeof(out),60000,cancelled,&f)==VELA_TLS_ERR_READ);
+    assert(f.dials==1 && f.writes==1 && f.frees==1); /* No replay after sending a request. */
+    reset(180000);f.dial_error=VELA_TLS_ERR_HANDSHAKE;
+    unsigned before=delivered;
+    assert(vela_https_post_json_stream_bounded("example.invalid","443","/test",NULL,"{}",deliver,&delivered,180000,cancelled,&f)==VELA_TLS_ERR_HANDSHAKE);
+    assert(f.dials==2 && f.frees==2 && f.writes==0 && delivered==before);
     mode="wifi";buffer="8192";wifi_up=true;errno=EINTR;
     zhaoxi_apply_wifi_tx_buffer(42);assert(changes==1 && actual==8192 && errno==EINTR);
     ppp_up=true;zhaoxi_apply_wifi_tx_buffer(42);assert(changes==1);ppp_up=false;

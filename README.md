@@ -113,7 +113,7 @@ python tools/pc_link/control.py --reminders
 
 ## 当前演示与版本
 
-2026-11-03 版已增量构建、免按 RESET 烧录并完成热点语音、本地问候、开机联网播报、语音人设取消／确认／恢复实测。个人 fork 的 Actions / Pages 资讯服务已上线，实板下载、保存及跨日去重通过；当天唯一候选昨日已播，因此没有伪造新推送。七点边界已有测试时钟检查，真实七点无人值守观察仍待进行。此前的 [晨报许可／拒绝／复播验收](docs/2026-11-02唤醒与晨间资讯验收.md)、37 项核心业务和 10 次完整启停记录保留；电脑 PPP 会话上限仍为一小时。BES 当前版本以 [AP manifest](firmware/headless_pc_link/nuttx_ap_headless.manifest.json) 为准，安装与检查见 [构建说明](docs/BES固件构建与验收.md)。
+2026-11-03 当前版本已增量构建并免按 RESET 烧录。手机热点下，用户已确认“播放一下今天的新闻”和“播放昨天的新闻”均完整播报；本地入口支持常见说法，今天无内容时主动抓取，昨天读取真实归档。空缓存刷新、失败恢复、断点补播及 ASR／后台输出互斥均有回归检查。最后固化 STA 省电关闭策略，并验证重启后自动连接热点、SNTP 校时和策略应用，人设、热点配置及新闻归档保留，见 [本轮验收](docs/bringup_logs/20261103_news_day_playback_proof.json)。个人 fork 的 Actions / Pages 采集修补已上线。真实七点无人值守观察仍待进行。使用见 [本地语音与独立资讯](docs/本地语音与独立资讯.md)，镜像与哈希以 [AP manifest](firmware/headless_pc_link/nuttx_ap_headless.manifest.json) 为准，安装见 [构建说明](docs/BES固件构建与验收.md)。
 
 ## 源码与文档
 

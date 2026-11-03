@@ -25,10 +25,14 @@ int morning_batch_load(const char *date, struct morning_batch *out);
 int morning_batch_render(const struct morning_batch *batch, char *out, size_t cap);
 int morning_batch_save(const struct morning_batch *batch);
 int morning_batch_publish(const struct morning_batch *batch);
+/* Refresh appends new IDs, preserving existing items and playback progress. */
+int morning_batch_refresh(const struct morning_batch *batch);
 int morning_item_seen(const char *id, const char *today);
 int morning_batch_prune(int64_t now);
 int morning_consent_parse(const char *text); /* +1 yes, -1 no, 0 unclear */
 bool morning_play_request(const char *text);
+/* -1: not a playback request; 0: today; 1: yesterday. */
+int morning_play_day_request(const char *text);
 bool morning_due(int64_t epoch, bool prepared); /* 06:55 prefetch, catch up before 22:00 */
 /* Runtime hooks, owned by the long-lived Agent task group. */
 int zhaoxi_morning_start(void);

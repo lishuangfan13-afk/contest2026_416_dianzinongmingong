@@ -14,6 +14,8 @@
 static atomic_int shutting_down, enabled, context_on, outputs, prompts, stories, resumed;
 static atomic_int fail_output, blocked_output, output_entered;
 static atomic_int online, user_busy, boot_messages;
+static atomic_int fetch_calls,fetch_error,reserve_busy,empty_summary;
+static char last_spoken[2048];
 static int64_t wall=1793574000LL;
 static pthread_t worker;
 static time_t fixture_time(time_t *out){if(out)*out=(time_t)wall;return (time_t)wall;}
@@ -38,22 +40,24 @@ int claw_config_set(const char *key,const char *value){(void)key;(void)value;ret
 int morning_endpoint_valid(const char *s){return s?0:-EINVAL;}
 int morning_sntp(int64_t *epoch){*epoch=wall;return 0;}
 int morning_fetch_candidates(const char *url,const char *profile,int64_t now,char *out,size_t cap)
-{(void)url;(void)profile;(void)now;snprintf(out,cap,"{}");return 0;}
+{(void)url;(void)profile;(void)now;atomic_fetch_add(&fetch_calls,1);snprintf(out,cap,"{}");return atomic_load(&fetch_error);}
 int morning_summarize(const char *profile,const char *candidates,int64_t now,char *out,size_t cap)
 {
     (void)profile;(void)candidates;
+    if(atomic_load(&empty_summary)){snprintf(out,cap,"{\"schema\":1,\"items\":[]}");return 0;}
     snprintf(out,cap,"{\"schema\":1,\"items\":[{\"id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"title\":\"测试资料\",\"source\":\"Test fixture\",\"url\":\"https://example.org/test\",\"published_at\":%lld,\"summary\":\"仅用于许可状态机测试，不是真实新闻。\",\"relevance\":\"用于验证。\"}]}",(long long)(now-60));return 0;
 }
 int voice_channel_auto_status(char *out,size_t cap)
 {snprintf(out,cap,"{\"enabled\":%s,\"running\":%s}",atomic_load(&enabled)?"true":"false",atomic_load(&enabled)?"true":"false");return 0;}
 int voice_channel_auto_output_begin(bool idle_only)
-{if((idle_only && atomic_load(&user_busy)) || !atomic_load(&enabled) || atomic_exchange(&outputs,1))return -EBUSY;return 0;}
+{if(atomic_load(&reserve_busy) || (idle_only && atomic_load(&user_busy)) || !atomic_load(&enabled) || atomic_exchange(&outputs,1))return -EBUSY;return 0;}
 void voice_channel_auto_output_end(bool conversation)
 {assert(atomic_exchange(&outputs,0));if(conversation)atomic_fetch_add(&resumed,1);}
 int voice_channel_auto_news_consent(bool on){atomic_store(&context_on,on && atomic_load(&enabled));return 0;}
 int voice_channel_speak_auto_owned(const char *text)
 {
     assert(atomic_load(&outputs));
+    snprintf(last_spoken,sizeof(last_spoken),"%s",text);
     if(!strcmp(text,"联网成功"))atomic_fetch_add(&boot_messages,1);
     else if(strstr(text,"需要播放吗"))atomic_fetch_add(&prompts,1);else atomic_fetch_add(&stories,1);
     atomic_store(&output_entered,1);

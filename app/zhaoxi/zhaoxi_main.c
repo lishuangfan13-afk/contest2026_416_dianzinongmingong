@@ -62,6 +62,7 @@ static int usage(void)
 #ifdef CONFIG_ZHAOXI_BES_AUDIO
     puts("  zhaoxi profile show | set <长期人设>");
     puts("  zhaoxi news status | fetch | ask | play | endpoint <URL>");
+    puts("  zhaoxi news play today|yesterday （重播今天或昨天保存的新闻）");
     puts("  zhaoxi auto start|stop|status （启动一次，自动收音与回答）");
     puts("  zhaoxi auto wake on|off|status （ASR唤醒短语开关）");
     puts("  zhaoxi [--text] drink start [分钟] | stop | status （默认60分钟）");

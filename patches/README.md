@@ -70,6 +70,7 @@ BSP 库、FatFs 和依赖的准确路径、提交及 SHA256 见 [来源清单](.
 | 0066 | 晨间任务生命周期、批次许可的语音入口与音频互斥、可取消且有总时限的独立后台 TLS、当天资讯的对话定位 |
 | 0067 | 语音 JSON／SSE 全流程预算与取消、失败请求立即释放 TCP 队列、显式 Wi-Fi 模式下可选发送队列／TLS 记录／TCP MSS 对照配置 |
 | 0068 | 独立的可取消 HTTPS GET，限定连接与完整请求预算，供公开资讯静态 JSON 下载使用 |
+| 0069 | 新闻输出避让 ASR、同线程确认播报与有界采集退出；诊断覆盖唤醒后文本；建连前重试共享 15 秒预算；BES STA 开机及重连自动关闭 Wi-Fi 省电并定时维持，PPP/SoftAP 不受影响 |
 
 在 `packages/ai_agent` 中逐个执行 `git apply --check /path/to/patch`，检查成功后再执行 `git apply /path/to/patch`。完整顺序以 [check_agent_patches.py](../tools/check_agent_patches.py) 的 `SERIES` 为准。
 

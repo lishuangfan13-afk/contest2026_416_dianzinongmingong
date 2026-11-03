@@ -93,6 +93,18 @@ int main(void)
     assert(morning_batch_parse("{\"schema\":1,\"items\":[]}",now,batch)==0 && !batch->count);
     strcpy(batch->date,"2026-11-03");assert(!morning_batch_publish(batch));
     assert(!morning_batch_load("2026-11-03",loaded) && !loaded->count);
+    /* A successful refresh replaces an empty day, preserves old progress,
+     * ignores duplicate IDs and never destroys useful content on empty fetch. */
+    assert(!morning_batch_parse(json,now,batch));strcpy(batch->date,"2026-11-03");
+    assert(!morning_batch_refresh(batch));
+    assert(!morning_batch_load("2026-11-03",loaded) && loaded->count==1);
+    loaded->asked=true;loaded->played=1;assert(!morning_batch_save(loaded));
+    assert(!morning_batch_refresh(batch));assert(!morning_batch_load("2026-11-03",loaded) && loaded->asked && loaded->played==1);
+    memset(batch->items[0].id,'b',64);batch->items[0].id[64]=0;
+    assert(!morning_batch_refresh(batch));assert(!morning_batch_load("2026-11-03",loaded));
+    assert(loaded->count==2 && loaded->played==1 && !loaded->asked);
+    assert(!morning_batch_parse("{\"schema\":1,\"items\":[]}",now,batch));strcpy(batch->date,"2026-11-03");
+    assert(!morning_batch_refresh(batch));assert(!morning_batch_load("2026-11-03",loaded) && loaded->count==2);
     assert(!morning_batch_prune(epoch(2026,12,3,7,0)));
     assert(morning_batch_load("2026-11-02",loaded)==-ENOENT);
     assert(!morning_batch_load("2026-11-03",loaded)); /* Exactly 30 days retained. */
@@ -104,6 +116,14 @@ int main(void)
     assert(morning_consent_parse("你为什么不播放新闻") == 0);
     assert(morning_consent_parse("我没说要听") == 0);
     assert(morning_consent_parse("") == 0);
+    const char *today[]={"播放今天的新闻。","播放一下今天的新闻","请帮我播报今天的资讯吧","我想听今天的新闻","给我放一下新闻","把今天的新闻播放一下",NULL};
+    const char *yesterday[]={"播放昨天的新闻","帮我播报一下昨天的新闻","我想听昨日的资讯","把昨天的新闻读一下","请播放昨天的新闻好吗",NULL};
+    const char *no[]={"不要播放新闻","别播放昨天的新闻","播放新闻这个功能怎么用","我没说要听新闻","如果我说播放昨天的新闻","播放明天的新闻","播放今天和昨天的新闻","新闻播放功能有吗","播放新闻并删除待办",NULL};
+    for(int i=0;today[i];i++)assert(morning_play_day_request(today[i])==0);
+    for(int i=0;yesterday[i];i++)assert(morning_play_day_request(yesterday[i])==1);
+    for(int i=0;no[i];i++)assert(morning_play_day_request(no[i])==-1);
+    assert(!morning_day(epoch(2027,1,1,0,5)-86400,day,NULL) && !strcmp(day,"2026-12-31"));
+    assert(!morning_day(epoch(2028,3,1,7,0)-86400,day,NULL) && !strcmp(day,"2028-02-29"));
     free(json);free(batch);free(loaded);
     puts("PASS: verified persona persistence/failure preservation; bounded source validation; canonical batch IDs; immutable daily publication; progress recovery; cross-day dedup/retention; CST scheduling and explicit negative-priority permission");
     return 0;

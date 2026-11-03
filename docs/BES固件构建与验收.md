@@ -9,8 +9,8 @@
 | 开发板 | BES2800BP EVB，板级目录 `vendor/bes/boards/best1700_ep/aos_evb` |
 | 产品配置 | `apheadless`，匹配 `apaudio3` BSP 库 |
 | 镜像 | [nuttx_ap_headless.bin](../firmware/headless_pc_link/nuttx_ap_headless.bin) |
-| 镜像大小 | 1,370,912 字节 |
-| SHA256 | `565b643297d63b467a766504bcc9955259158bdac1ae66ba58ee07e09b2e39a6` |
+| 镜像大小 | 1,374,416 字节 |
+| SHA256 | `8e731fb62d72ed2a81c5a20ecd4c623ff4c130e4589aef6989134d58726af6fa` |
 | AP 烧录地址 | `0x30190000` |
 | 持久数据目录 | `/emmc/zhaoxi` |
 | 来源与校验 | [固件 manifest](../firmware/headless_pc_link/nuttx_ap_headless.manifest.json) |
