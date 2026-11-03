@@ -22,5 +22,6 @@ int agent_task_create(void *(*f)(void *),const char *,int,void *,int);
                     '-DAGENT_DATA_DIR="'+str(Path(temp)/fixture)+'-data"',
                     '-DMORNING_SOURCE="'+str(ROOT/'app/zhaoxi/morning.c')+'"',
                     str(ROOT/'tests/headless'/(fixture+'.c')),str(ROOT/'app/zhaoxi/morning_store.c'),str(ROOT/'app/zhaoxi/profile_intent.c'),
+                    str(ROOT/'app/zhaoxi/notifications/notify_intent.c'),str(ROOT/'tests/headless/notifications/morning_notify_stubs.c'),
                     str(a.sdk/'src/voice/voice_wake.c'),str(a.cjson/'cJSON.c'),'-lm','-o',str(exe)],check=True)
         subprocess.run([str(exe)],check=True,timeout=30)

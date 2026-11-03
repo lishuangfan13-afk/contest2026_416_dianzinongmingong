@@ -8,7 +8,9 @@ CSRCS += todo_store.c journal.c local_intent.c
 ifeq ($(CONFIG_ZHAOXI_BES_AUDIO),y)
 CSRCS += bes_audio.c bes_clock.c reminder.c drink.c dns_diag.c
 CSRCS += morning.c morning_store.c morning_net.c profile_intent.c
+CSRCS += wake_audio_diag.c
 CSRCS += notifications/feishu_notify.c notifications/feishu_notify_sdk.c
+CSRCS += notifications/notify_queue.c notifications/notify_service.c notifications/notify_intent.c
 endif
 ifeq ($(CONFIG_ZHAOXI_MIMO_VOICE),y)
 CSRCS += mimo_voice.c mimo_sse.c local_prompts.c prompt_receive.c

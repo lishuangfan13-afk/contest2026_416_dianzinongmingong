@@ -1,0 +1,62 @@
+--- a/src/voice/voice_wake.c
++++ b/src/voice/voice_wake.c
+@@ -51,15 +51,18 @@
+         if (!name) return NULL;
+         name = skip_separators(name);
+     }
+-    const char *after = consume_ascii(name, "xi");
+-    if (after) after = consume_ascii(skip_separators(after), "xi");
+-    if (!after) {
+-        static const char *forms[] = {"夕夕", "西西", "希希", "嘻嘻", "熙熙",
+-            "兮兮", "汐汐", "曦曦", "溪溪", "惜惜", "锡锡", "细细", "喜喜", "茜茜", NULL};
+-        for (int i = 0; forms[i]; i++) {
+-            size_t n = strlen(forms[i]);
+-            if (!strncmp(name, forms[i], n)) { after = name + n; break; }
++    const char *after = name;
++    static const char *syllables[] = {"夕", "西", "希", "嘻", "熙", "兮", "汐",
++        "曦", "溪", "惜", "锡", "细", "喜", "茜", NULL};
++    /* ASR can mix homophones (e.g. 希西), Chinese and Latin spelling, or
++     * insert separators between syllables. Require exactly two xi syllables. */
++    for (int syllable = 0; syllable < 2 && after; syllable++) {
++        const char *next = consume_ascii(after, "xi");
++        if (!next) for (int i = 0; syllables[i]; i++) {
++            size_t n = strlen(syllables[i]);
++            if (!strncmp(after, syllables[i], n)) {next = after + n;break;}
+         }
++        after = next && syllable==0 ? skip_separators(next) : next;
+     }
+     if (!after || ascii_word((unsigned char)*after)) return NULL;
+     return skip_separators(after);
+--- a/src/voice/voice_channel.c
++++ b/src/voice/voice_channel.c
+@@ -290,7 +290,20 @@
+     pthread_mutex_unlock(&s_voice.speak_lock);
+ }
+ 
+-static void auto_feedback(int event) { auto_feedback_for(event,NULL); }
++static int64_t auto_now_ms(void);
++static void auto_feedback(int event)
++{
++    if(event==VOICE_AUTO_FEEDBACK_ASR_ERROR || event==VOICE_AUTO_FEEDBACK_TOO_LONG ||
++       event==VOICE_AUTO_FEEDBACK_CAPTURE_ERROR) {
++        pthread_mutex_lock(&s_auto.lock);
++        bool sleeping=s_auto.wake.enabled && !voice_wake_poll(&s_auto.wake,(uint64_t)auto_now_ms()) && !s_auto.news_consent;
++        pthread_mutex_unlock(&s_auto.lock);
++        /* Incidental noise/cloud failures before wake must not generate a
++         * speaker cue that can itself be captured as the next utterance. */
++        if(sleeping)return;
++    }
++    auto_feedback_for(event,NULL);
++}
+ 
+ static int64_t auto_now_ms(void)
+ {
+@@ -645,6 +658,8 @@
+         pthread_mutex_unlock(&s_auto.lock);
+         if(wake_debug)printf("WAKE_DIAG rc=%d text_bytes=%zu text=\"%.*s\"\n",
+                              result,strlen(text),160,text);
++        if(wake_debug)printf("WAKE_AUDIO audio_ms=%zu noise=%d threshold=%d voiced_ms=%u trailing_ms=%u\n",
++                             used/32,vad.noise,vad.threshold,vad.voiced*20,vad.silent*20);
+         if(result || !text[0]){auto_wake_processing(false);
+             auto_set_state(AUTO_ERROR,result?result:-ENODATA);
+             auto_feedback(VOICE_AUTO_FEEDBACK_ASR_ERROR);usleep(500000);continue;}

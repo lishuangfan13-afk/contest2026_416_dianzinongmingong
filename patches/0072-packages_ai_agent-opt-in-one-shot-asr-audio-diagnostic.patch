@@ -1,0 +1,11 @@
+--- a/src/voice/voice_channel.c
++++ b/src/voice/voice_channel.c
+@@ -649,6 +649,8 @@
+         s_auto.last_pcm_bytes=used;pthread_mutex_unlock(&s_auto.lock);
+         char text[512]={0};
+         int64_t asr_started=auto_now_ms();
++        extern void zhaoxi_wake_audio_capture(const void *,size_t) __attribute__((weak));
++        if(zhaoxi_wake_audio_capture)zhaoxi_wake_audio_capture(pcm,used);
+         result=voice_asr_recognize(pcm,used,text,sizeof(text));
+         syslog(LOG_INFO,"[voice_auto] ASR done: %lldms rc=%d bytes=%zu\n",
+                (long long)(auto_now_ms()-asr_started),result,used);

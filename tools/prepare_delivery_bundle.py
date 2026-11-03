@@ -68,6 +68,10 @@ def secret_scan(files, source):
     config = json.loads(source.read_text(encoding='utf-8'))
     values = set()
     def collect(value, key=''):
+        # This is an enum describing the recipient ID, not the ID itself.
+        # Do not mistake generic OpenAPI type names in source/docs for a leak.
+        if key == '.feishu_notify_receive_id_type' and value in ('open_id','chat_id','user_id'):
+            return
         if isinstance(value, dict):
             for child_key, child in value.items():
                 collect(child, key+'.'+str(child_key))

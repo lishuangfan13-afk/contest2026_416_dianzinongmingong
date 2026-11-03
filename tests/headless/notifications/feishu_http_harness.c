@@ -13,9 +13,19 @@
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <unistd.h>
+#include <stdbool.h>
 
 static const char *scenario;
 static int loopback_port, calls;
+bool agent_shutdown_requested(void){return !strcmp(scenario,"shutdown");}
+int vela_https_post_json_bounded(const char *host,const char *port,const char *path,
+    const vela_header_t *headers,const char *body,char *out,size_t capacity,
+    unsigned budget_ms,int (*cancel)(void *),void *user)
+{
+    if(!budget_ms || budget_ms>30000 || !cancel)abort();
+    if(cancel(user))return -ECANCELED;
+    return vela_https_post_json(host,port,path,headers,body,out,capacity);
+}
 
 int claw_config_get(const char *key, char *out, size_t capacity)
 {

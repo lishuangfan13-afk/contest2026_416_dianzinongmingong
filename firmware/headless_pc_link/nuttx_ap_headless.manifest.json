@@ -1,7 +1,7 @@
 {
   "image": "nuttx_ap_headless.bin",
-  "size": 1374416,
-  "sha256": "8e731fb62d72ed2a81c5a20ecd4c623ff4c130e4589aef6989134d58726af6fa",
+  "size": 1380360,
+  "sha256": "ab5084eec58ad2e9b166a18c61f537466ad924e5a1963824ba2d9569844c58a6",
   "flash_address": "0x30190000",
   "ntc_patch": {
     "offset": 18364,
@@ -13,10 +13,10 @@
   "credentials_source": "runtime device config, not build options",
   "hardware_functional_acceptance_complete": false,
   "app_sources": {
-    "app/zhaoxi/CMakeLists.txt": "40b06c6d74710fe0c85d186ffa032fd6890d0e4eab1b0d9ac0c8d36988c1d0c0",
+    "app/zhaoxi/CMakeLists.txt": "e6f9093f5ee0b6c8bce48af337e518b359fddc662069f4bf50b78247b0871ebd",
     "app/zhaoxi/Kconfig": "18b7407180279284da6177f1b058976da8efa116001d0ede103ff127ae0a9c5c",
     "app/zhaoxi/Make.defs": "4b383b583ca2cac953df60dafcd5eee42ae1a1e52e448f085110960d7b006a93",
-    "app/zhaoxi/Makefile": "264a6b0e605c6f5b02db7c44938924412b927921b16b6897d467ec8348229736",
+    "app/zhaoxi/Makefile": "df2edcaf44c19a68c9509b7b7d56f42bcf1b4d1aa6318b27527957a37f29e360",
     "app/zhaoxi/README.md": "52e12a80d3a3aef9c133f8f7aefd6522c3b07ffb2559f6b81b4a502463c46e75",
     "app/zhaoxi/bes_audio.c": "eb78ab181375bcb5890d959ffb7dea4b829b45d0f679092951aa86c6ccf45756",
     "app/zhaoxi/bes_clock.c": "381ed18aa3e544e9791dff9e9415c38590a011582d50b66b7c9dc6f7a9a2cc4b",
@@ -33,14 +33,19 @@
     "app/zhaoxi/mimo_sse.c": "758758ec217157c8ebef9e5c5289de803a4605200cfee0db0a11931f806e2d4c",
     "app/zhaoxi/mimo_sse.h": "9e3cb8428fe971264a5ac2548d450d1a7b018c857f2269480b21295131b30cd7",
     "app/zhaoxi/mimo_voice.c": "1c42e788b3f0ab133d18fab02503e4ea8eb05bc4a2e8d2177bb4d8910e9d86cf",
-    "app/zhaoxi/morning.c": "803c8bcfde36d3a6b5a862abf2735bfcffad3c09b7d6528a75b6951e7e3204f6",
+    "app/zhaoxi/morning.c": "61b9aa600804d73be5b2db9222190ce414f834884a80fb180a78841d5b6166f5",
     "app/zhaoxi/morning.h": "04eb424649abdd461b6611842d146cd4a4a53d4ef8bcfee2c1d38f37f0139d72",
     "app/zhaoxi/morning_net.c": "e4dcf43a5b9f6f4865d27924dda351d981d26d7aae6aa6cc2a3d0fde4bb0f322",
     "app/zhaoxi/morning_net.h": "b6e7d51285a479cec50023cbff2a92570c36cf1a57d8e317544042bb63f278ca",
     "app/zhaoxi/morning_store.c": "d390f6345240eab69f38e3e99356ffe56297db30e8344c5aeab30395ca13cabf",
     "app/zhaoxi/notifications/feishu_notify.c": "6fc97b24ce3c8dbf1afc6e02957a8c22fd6065fa1ec230fdbed2e616e60274b6",
-    "app/zhaoxi/notifications/feishu_notify.h": "3c0d9ba8de6b4b5cea15e571048148054f2bc2281a7a61b202c8ec1377564a0a",
-    "app/zhaoxi/notifications/feishu_notify_sdk.c": "091d3c98915d56f75856848e777d7457fd5c747f90987e64b8cb48cfce62df57",
+    "app/zhaoxi/notifications/feishu_notify.h": "bb161f60a7bcc043fd52f982a0d9f137cfbb6ec4c5d1ae07d23af8e0338a0a4e",
+    "app/zhaoxi/notifications/feishu_notify_sdk.c": "04829b59528132d63cae1ce604dc8ebd8de508c71b9a080f9b1aa296ee918e92",
+    "app/zhaoxi/notifications/notify_intent.c": "b358edac9d3dc13c55876127efa5c6186dd29a7208e128b2dc5f23406eb589a7",
+    "app/zhaoxi/notifications/notify_queue.c": "fedfd3d97f68205bd6d64ef3298bda90d3efbf664be649e02daab86f93f19867",
+    "app/zhaoxi/notifications/notify_queue.h": "7bb003b782a89b13790ce9938fc2859550dae60e17d03160b3777a15818c0097",
+    "app/zhaoxi/notifications/notify_service.c": "8a3974ce064cd97fcd221861e8fe0805a2cc3cf7dd6cbf48c8e6e2b929991ab7",
+    "app/zhaoxi/notifications/notify_service.h": "0a5bef9f42450d4af20753bbd8f0b82ee1ce41800a918f6cf9479212a4bbfd0a",
     "app/zhaoxi/pc_control.c": "b0e7eed0fb9e2e56dde16dce6dcdc25e6554b130662d3f41e222f21cc2652452",
     "app/zhaoxi/pc_link.c": "7cb1b358c085f1fd2480610ec65a5be9820fa21fcdbcdc28448c6cf9e0c769b4",
     "app/zhaoxi/pc_link.h": "b904efc2e217f751a9c6496f74f3e600cd6fcd20f270ba6491c8f7ac5a6d9ccc",
@@ -51,7 +56,9 @@
     "app/zhaoxi/reminder.h": "62d77798f4ea7f8938da805f571cda0fd0c3aef365106d3b82fa57ac9252674d",
     "app/zhaoxi/todo_store.c": "bc41c9d872bc025d9d58644f7644357250bc0cce2cc5f42a1e776cbaf8938781",
     "app/zhaoxi/todo_store.h": "c9e678b442d4f37493cf455eab69e0abae9755416e8baf2e145038d300bb9d20",
-    "app/zhaoxi/zhaoxi_main.c": "49594cf8cc8a496d4129ff56256ee3d5b86cfe5941d329a3bb4c793a9e383af5"
+    "app/zhaoxi/wake_audio_diag.c": "626cdba63bbea3693a66dcfc23840a51120638369ccb59aef32eee99ebb7d88a",
+    "app/zhaoxi/wake_audio_diag.h": "c675e45951cdbb3dfdc7ed2e85bedff74290be91c7b22854f5f7236f8ab4f67d",
+    "app/zhaoxi/zhaoxi_main.c": "8275ba26a292828513c5c8d8024b10a3f6793509d994685348205538eca48234"
   },
   "patches": {
     "0008-packages_ai_agent-headless-entry.patch": "ea6c16a65a42b0e0df8a699eafaeb1843f9e032b781e7dd572a36a15ddb02314",
@@ -115,6 +122,9 @@
     "0066-packages_ai_agent-morning-consent-and-background-tls.patch": "c9182c74bc99341fdb6f5cad79264f0bf95c6e147fe92df715b2ddeda03ca449",
     "0067-packages_ai_agent-bounded-speech-and-wifi-tx-diagnostics.patch": "d3a5bd539e4e128da3896c83f7df19f25187161774c0e1632e428c4b91f98b6b",
     "0068-packages_ai_agent-bounded-public-feed-get.patch": "d88516207a67ca0f84defdb085418c390a7fdc94d1befad5a819f2552bbd94da",
-    "0069-packages_ai_agent-news-output-arbitration-and-connect-retry.patch": "1d5f04ba7af01e5ca8170180a0e44dee19b98604aec8d164f7189e52b1061767"
+    "0069-packages_ai_agent-news-output-arbitration-and-connect-retry.patch": "1d5f04ba7af01e5ca8170180a0e44dee19b98604aec8d164f7189e52b1061767",
+    "0070-packages_ai_agent-queue-feishu-reminder-events.patch": "d6de33d09540728b0aafa12413d65e557b5af9433b8d68efde7dd53ec891978d",
+    "0071-packages_ai_agent-quiet-wake-recovery-and-mixed-homophones.patch": "7f0fca6e3246efeb01995cb5148e2b305f6931a3c6a9ef267726235a9e73e3a5",
+    "0072-packages_ai_agent-opt-in-one-shot-asr-audio-diagnostic.patch": "23a0c07e84f0cce4ff991ad168eb2707414011e75bf7ec197d8e0500b659b1b0"
   }
 }

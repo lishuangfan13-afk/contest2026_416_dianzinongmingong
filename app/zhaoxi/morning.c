@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 #include "morning.h"
+#include "notifications/notify_service.h"
 #ifdef CONFIG_ZHAOXI_MIMO_VOICE
 #include "local_prompts.h"
 #endif
@@ -154,6 +155,21 @@ static int profile_request_voice(const char *text)
 int zhaoxi_morning_voice(const char *text,bool gated)
 {
     if(!text)return 0;
+    int notification=gated?zhaoxi_notify_request(text):0;
+    if(notification) {
+        pthread_mutex_lock(&state.lock);
+        if(state.phase!=IDLE){pthread_mutex_unlock(&state.lock);profile_reply("正在处理其他事务，请稍后再发送。");return 1;}
+        state.phase=PREPARING;pthread_mutex_unlock(&state.lock);
+        int rc=notification==3?zhaoxi_notify_todos():zhaoxi_notify_news((unsigned)notification-1);
+        pthread_mutex_lock(&state.lock);state.phase=IDLE;state.error=rc;pthread_mutex_unlock(&state.lock);
+        printf("NOTIFY_VOICE kind=%d rc=%d\n",notification,rc);
+        profile_reply(!rc?"已加入飞书发送队列，请留意飞书通知。":
+            rc==-EALREADY?"同批内容已经入队或发送过，请在飞书查看。":
+            rc==-EACCES?"飞书通知尚未开启。":
+            rc==-ENOENT || rc==-ENODATA?"还没有保存对应日期的新闻。":
+            "没有加入飞书发送队列，请检查配置、缓存和队列状态。");
+        return 1;
+    }
     pthread_mutex_lock(&state.lock);
     if(state.phase==PROFILE_CONFIRM) {
         voice_wake_t fresh=VOICE_WAKE_INITIALIZER;char command[512];
@@ -422,6 +438,8 @@ finished:
 
 int zhaoxi_morning_start(void)
 {
+    int notify_rc=zhaoxi_notify_start();
+    if(notify_rc)printf("NOTIFY_START rc=%d\n",notify_rc);
     pthread_mutex_lock(&state.lock);
     if(state.running){pthread_mutex_unlock(&state.lock);return 0;}
     state.running=true;state.synced=false;state.phase=IDLE;state.permit_id[0]=0;state.day[0]=0;

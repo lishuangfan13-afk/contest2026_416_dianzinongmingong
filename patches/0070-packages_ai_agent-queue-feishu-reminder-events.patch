@@ -1,0 +1,22 @@
+--- a/src/infra/cron_service.c
++++ b/src/infra/cron_service.c
+@@ -412,6 +412,19 @@
+             return false;
+         }
+     }
++
++#ifdef CONFIG_ZHAOXI_BES_AUDIO
++    /* Queue only after local outbound acceptance. No network IO under the
++     * cron lock; a notification failure never changes local delivery. */
++    if (!job->action[0] && (!strcmp(job->channel, AGENT_CHAN_VOICE) || !strcmp(job->channel, "cli"))) {
++        extern int zhaoxi_notify_reminder_event(const char *, int64_t, const char *) __attribute__((weak));
++        if (zhaoxi_notify_reminder_event) {
++            int notify_rc = zhaoxi_notify_reminder_event(job->id, (int64_t)job->next_run, job->message);
++            if (notify_rc && notify_rc != -EACCES)
++                syslog(LOG_WARNING, "[%s] Reminder notification not queued: %d\n", TAG, notify_rc);
++        }
++    }
++#endif
+ 
+     job->last_run = now;
+     return true;

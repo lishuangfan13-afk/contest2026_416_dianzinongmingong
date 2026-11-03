@@ -40,7 +40,7 @@ int zhaoxi_feishu_notify_with_io(const struct zhaoxi_feishu_io *io,
     const char *text, const char *event_id, struct zhaoxi_feishu_receipt *receipt);
 
 /* Production bridge: credentials and fixed target come from runtime config.
- * No automatic start, receive bot, microphone, or scheduler hook is installed. */
+ * notify_service adds optional queued product events; no receive bot. */
 int zhaoxi_feishu_notify(const char *text, const char *event_id,
                         struct zhaoxi_feishu_receipt *receipt);
 int zhaoxi_feishu_notify_test(const char *event_id,

@@ -26,6 +26,8 @@
 #include "drink.h"
 #include "morning.h"
 #include "notifications/feishu_notify.h"
+#include "notifications/notify_service.h"
+#include "wake_audio_diag.h"
 #include "infra/config_store.h"
 #include "dns_diag.h"
 #include "voice/audio_playback.h"
@@ -67,6 +69,7 @@ static int usage(void)
     puts("  zhaoxi auto wake on|off|status （ASR唤醒短语开关）");
     puts("  zhaoxi [--text] drink start [分钟] | stop | status （默认60分钟）");
     puts("  zhaoxi notify status | test <事件编号> | send <事件编号> <内容>");
+    puts("  zhaoxi notify news today|yesterday | todos （加入飞书后台发送队列）");
 #endif
 #ifdef CONFIG_ZHAOXI_BES_AUDIO
     puts("  zhaoxi test-speaker   （两秒本机提示音，不需要网络）");
@@ -211,7 +214,17 @@ static int notify_command(int argc, char **argv, int at)
         printf("NOTIFY_CONFIG enabled=%d app_id_set=%d app_secret_set=%d target_set=%d\n",
                present[0], present[1], present[2], present[3]);
         memset(value, 0, sizeof(value));
+        char state[320];if(!zhaoxi_notify_status(state,sizeof(state)))puts(state);
         return 0;
+    }
+    if((!strcmp(op,"news") && argc==at+3 &&
+        (!strcmp(argv[at+2],"today") || !strcmp(argv[at+2],"yesterday"))) ||
+       (!strcmp(op,"todos") && argc==at+2)) {
+        int result=!strcmp(op,"todos")?zhaoxi_notify_todos():zhaoxi_notify_news(!strcmp(argv[at+2],"yesterday"));
+        printf("NOTIFY_ENQUEUE rc=%d\n",result);
+        puts(result==-EALREADY?"同批内容已经入队或发送过，请在飞书查看。":
+            result?"未加入飞书队列，请检查配置、缓存与队列状态。":"已加入飞书队列；发送结果请查询 notify status。");
+        return result && result!=-EALREADY?1:0;
     }
     struct zhaoxi_feishu_receipt receipt = {0};
     int rc;
@@ -273,6 +286,8 @@ int main(int argc, char **argv)
     }
 #endif
 #ifdef CONFIG_ZHAOXI_BES_AUDIO
+    if(!strcmp(argv[at],"--wake-audio"))
+        return argc==at+2 && !zhaoxi_wake_audio_command(argv[at+1])?0:1;
     if (!strcmp(argv[at], "--asr-probe")) {
         if(argc!=3 || !message_bus_is_ready())return 1;
         char *end=NULL;long milliseconds=strtol(argv[2],&end,10);

@@ -190,8 +190,11 @@ int AUTO_VOICE_TESTS_MAIN(void)
     stop_auto();
 
     reset_fixture();allow_bus=1;fail_asr=1;atomic_store(&fake_input_pattern,1);
+    assert(voice_channel_auto_wake_set_enabled(true)==0);
+    int asleep_asr_errors=atomic_load(&cue_counts[VOICE_AUTO_FEEDBACK_ASR_ERROR]);
     assert(voice_channel_auto_start()==0);wait_count(&fake_asr_calls,1);
     wait_count(&reads,220);assert(atomic_load(&fake_bus_messages)==0);
+    assert(atomic_load(&cue_counts[VOICE_AUTO_FEEDBACK_ASR_ERROR])==asleep_asr_errors);
     stop_auto();
     /* Stop during ASR: no late error cue or queued work after cancellation. */
     reset_fixture();allow_bus=1;fail_asr=1;atomic_store(&fake_input_pattern,1);

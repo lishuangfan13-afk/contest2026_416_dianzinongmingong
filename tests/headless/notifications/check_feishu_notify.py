@@ -144,7 +144,7 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--cc',default='cc');parser.add_argument('--cjson-root',type=Path,required=True)
     args=parser.parse_args()
-    cfg_fail=['disabled_missing','disabled_false','missing_app','missing_secret','missing_target','unknown_type',
+    cfg_fail=['shutdown','disabled_missing','disabled_false','missing_app','missing_secret','missing_target','unknown_type',
               'chat_id_mismatch','open_id_mismatch','bad_mode','config_no_nul','config_truncated','bad_event','text_too_long']
     success=['success','default_type','default_mode','open_id','oauth','test_entry','reminder_entry','token_3072','repeat']
     auth_fail=['auth_http','auth_business','auth_invalid_json','auth_truncated_json','auth_transport_truncated',

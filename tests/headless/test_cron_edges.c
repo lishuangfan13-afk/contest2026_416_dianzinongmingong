@@ -18,6 +18,18 @@
 
 static time_t test_now = 1793536553;
 static unsigned emitted;
+static int outbound_full;
+#ifdef CONFIG_ZHAOXI_BES_AUDIO
+static unsigned notified;
+static int64_t notified_due;
+static char notified_id[32];
+int zhaoxi_notify_reminder_event(const char *id,int64_t due,const char *text)
+{
+    assert(emitted && text && *text);notified++;notified_due=due;
+    snprintf(notified_id,sizeof(notified_id),"%s",id);
+    return -ENOSPC; /* Remote queue failure must not replay local delivery. */
+}
+#endif
 time_t __wrap_time(time_t *out)
 { if (out) *out = test_now; return test_now; }
 int agent_task_create(void *(*fn)(void *), const char *name, int stack, void *arg, int priority)
@@ -25,7 +37,7 @@ int agent_task_create(void *(*fn)(void *), const char *name, int stack, void *ar
 int tool_registry_execute(const char *name, const char *json, char *out, size_t size)
 { (void)name; (void)json; (void)out; (void)size; assert(0); return -1; }
 int message_bus_push_outbound(const agent_msg_t *message)
-{ assert(message && message->content); emitted++; free(message->content); return 0; }
+{ assert(message && message->content);if(outbound_full)return -ENOSPC;emitted++;free(message->content);return 0; }
 
 #include "infra/cron_service.c"
 #include "tools/tool_cron.c"
@@ -45,6 +57,10 @@ static void reset_store(void)
     assert(cron_service_init() == 0);
     test_now = 1793536553;
     emitted = 0;
+    outbound_full=0;
+#ifdef CONFIG_ZHAOXI_BES_AUDIO
+    notified=0;
+#endif
 }
 
 static cron_job_t only_job(void)
@@ -260,6 +276,18 @@ static void legacy_zero_interval_is_disabled(void)
     assert(emitted == 0);
     cron_service_stop();
 }
+static void notification_follows_local_acceptance(void)
+{
+    reset_store();cron_job_t job=recurring(60);
+    assert(!cron_add_job(&job));assert(!cron_service_start());
+    test_now=only_job().next_run;outbound_full=1;cron_process_due_jobs();
+    assert(!emitted && !notified && only_job().next_run==test_now);
+    outbound_full=0;cron_process_due_jobs();
+    assert(emitted==1 && notified==1 && notified_due==test_now && !strcmp(notified_id,job.id));
+    assert(only_job().next_run==test_now+60);cron_process_due_jobs();assert(notified==1);
+    test_now+=60;cron_process_due_jobs();assert(emitted==2 && notified==2 && notified_due==test_now);
+    cron_service_stop();
+}
 #endif
 
 int main(void)
@@ -274,6 +302,7 @@ int main(void)
     untrusted_clock_waits_for_sync();
     resumed_epoch_overflow_is_bounded();
     legacy_zero_interval_is_disabled();
+    notification_follows_local_acceptance();
 #endif
     puts("PASS: actual reminder parameters, restart policy, persistence rollback, cold clock and bounded recurrence.");
     return 0;

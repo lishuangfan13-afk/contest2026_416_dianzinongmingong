@@ -21,7 +21,8 @@ int main(void)
         "Hello xixixyz","你好xixi2","你好xixi_test",NULL};
     for(int i=0;invalid[i];i++) assert(check(&wake,invalid[i],4,"")==VOICE_WAKE_IGNORE);
     const char *homophones[]={"夕夕", "西西", "希希", "嘻嘻", "熙熙", "兮兮",
-        "汐汐", "曦曦", "溪溪", "惜惜", "锡锡", "细细", "喜喜", "茜茜", "xixi", "Xi Xi", NULL};
+        "汐汐", "曦曦", "溪溪", "惜惜", "锡锡", "细细", "喜喜", "茜茜", "xixi", "Xi Xi",
+        "希西", "西希", "夕西", "嘻希", "xi西", "西xi", "夕，希", NULL};
     for(int i=0;homophones[i];i++) {
         char phrase[128];snprintf(phrase,sizeof(phrase),"你好，%s。",homophones[i]);
         assert(check(&wake,phrase,4,"")==VOICE_WAKE_ONLY);voice_wake_reset(&wake);
@@ -35,6 +36,8 @@ int main(void)
     assert(check(&wake,"你好，西西。",5,"")==VOICE_WAKE_ONLY);
     voice_wake_reset(&wake);
     assert(check(&wake,"你好，夕夕，一加一等于几",5,"一加一等于几")==VOICE_WAKE_COMMAND);
+    voice_wake_reset(&wake);
+    assert(check(&wake,"你好，xi西, test",5,"test")==VOICE_WAKE_COMMAND);
     voice_wake_reset(&wake);
     assert(check(&wake,"Helloxixi",5,"")==VOICE_WAKE_ONLY);
     voice_wake_reset(&wake);
