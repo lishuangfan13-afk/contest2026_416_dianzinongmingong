@@ -1,6 +1,10 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 #include "morning.h"
+#ifdef CONFIG_ZHAOXI_MIMO_VOICE
+#include "local_prompts.h"
+#endif
 #include "morning_net.h"
+#include "profile_intent.h"
 #include "agent_compat.h"
 #include "infra/config_store.h"
 #include "infra/network_manager.h"
@@ -16,12 +20,18 @@
 #include <time.h>
 #include <unistd.h>
 
-enum phase { IDLE, PREPARING, ANNOUNCING, PERMISSION, ALLOWED, DECLINED, PLAYING };
+enum phase { IDLE, PREPARING, ANNOUNCING, PERMISSION, ALLOWED, DECLINED, PLAYING,
+             PROFILE_ANNOUNCING, PROFILE_CONFIRM };
 static struct {
     pthread_mutex_t lock;
     bool running, synced, fetch_requested, ask_requested, play_requested;
+    /* BSS lifetime: retained across Agent restarts/reconnects, cleared by boot. */
+    bool boot_network_announced;
+    int boot_network_error;
+    int64_t next_network_notice;
     enum phase phase;
     char day[11], permit_id[17], source[24];
+    char pending_profile[MORNING_PROFILE_MAX+1];
     int error;
     unsigned attempt;
     int64_t next_try, last_sync, consent_until;
@@ -55,7 +65,8 @@ int zhaoxi_morning_sync_time(int64_t epoch,const char *source)
 int zhaoxi_morning_set_profile(const char *text)
 {
     pthread_mutex_lock(&state.lock);
-    if(state.phase==PREPARING || state.phase==ANNOUNCING || state.phase==PLAYING) {
+    if(state.phase==PREPARING || state.phase==ANNOUNCING || state.phase==PLAYING ||
+       state.phase==PROFILE_ANNOUNCING || state.phase==PROFILE_CONFIRM) {
         pthread_mutex_unlock(&state.lock);return -EBUSY;
     }
     state.phase=PREPARING;pthread_mutex_unlock(&state.lock);
@@ -84,9 +95,12 @@ int zhaoxi_morning_status(char *out,size_t cap)
     struct morning_batch *b=calloc(1,sizeof(*b));if(!b)return -ENOMEM;
     int loaded=morning_batch_load(today,b);
     cJSON *r=cJSON_CreateObject();if(!r){free(b);return -ENOMEM;}
-    const char *names[]={"idle","preparing","announcing","waiting_permission","play_pending","declined","playing"};
+    const char *names[]={"idle","preparing","announcing","waiting_permission","play_pending","declined","playing",
+                         "profile_announcing","profile_confirmation"};
     pthread_mutex_lock(&state.lock);
     cJSON_AddBoolToObject(r,"running",state.running);cJSON_AddBoolToObject(r,"time_synced",state.synced);
+    cJSON_AddBoolToObject(r,"boot_network_announced",state.boot_network_announced);
+    cJSON_AddNumberToObject(r,"boot_network_error",state.boot_network_error);
     cJSON_AddStringToObject(r,"phase",names[state.phase]);cJSON_AddStringToObject(r,"time_source",state.source);
     cJSON_AddNumberToObject(r,"last_sync_epoch",(double)state.last_sync);cJSON_AddNumberToObject(r,"last_error",state.error);
     pthread_mutex_unlock(&state.lock);
@@ -100,10 +114,62 @@ int zhaoxi_morning_status(char *out,size_t cap)
     if(!json)return -ENOMEM;
     int rc=strlen(json)<cap?0:-ENOSPC;if(!rc)strcpy(out,json);free(json);return rc;
 }
+static int profile_reply(const char *text)
+{
+    int rc=voice_channel_auto_output_begin(false);if(rc)return rc;
+    rc=voice_channel_speak_auto_owned(text);
+    voice_channel_auto_output_end(true);return rc;
+}
+static int profile_request_voice(const char *text)
+{
+    char content[385],candidate[MORNING_PROFILE_MAX+1];
+    int kind=morning_profile_request(text,content,sizeof(content));if(!kind)return 0;
+    pthread_mutex_lock(&state.lock);
+    if(state.phase!=IDLE){pthread_mutex_unlock(&state.lock);profile_reply("正在处理资讯，请稍后再修改人设。");return 1;}
+    state.phase=PROFILE_ANNOUNCING;pthread_mutex_unlock(&state.lock);
+    int rc=0;
+    if(kind==1) {
+        char previous[MORNING_PROFILE_MAX+1];rc=morning_profile_get(previous,sizeof(previous));
+        if(!rc){int n=snprintf(candidate,sizeof(candidate),"%s\n%s",previous,content);if(n<0 || (size_t)n>=sizeof(candidate))rc=-EFBIG;}
+    } else strcpy(candidate,content);
+    char question[640];
+    if(!rc) {
+        snprintf(question,sizeof(question),"要%s以下内容吗：%s。请说确认保存，或取消。",
+                 kind==1?"在长期人设中记住":"将长期人设替换为",content);
+        rc=profile_reply(question);
+    }
+    pthread_mutex_lock(&state.lock);
+    if(state.phase!=PROFILE_ANNOUNCING || agent_shutdown_requested())rc=-ECANCELED;
+    if(!rc){strcpy(state.pending_profile,candidate);state.phase=PROFILE_CONFIRM;state.consent_until=ticks()+60000;}
+    else {state.phase=IDLE;state.pending_profile[0]=0;state.error=rc;}
+    pthread_mutex_unlock(&state.lock);
+    if(!rc)voice_channel_auto_news_consent(true);
+    else if(rc!=-ECANCELED)profile_reply("暂时无法准备人设修改，原来的人设保持不变。");
+    return 1;
+}
 int zhaoxi_morning_voice(const char *text,bool gated)
 {
     if(!text)return 0;
     pthread_mutex_lock(&state.lock);
+    if(state.phase==PROFILE_CONFIRM) {
+        voice_wake_t fresh=VOICE_WAKE_INITIALIZER;char command[512];
+        voice_wake_result_t wake=voice_wake_process(&fresh,text,(uint64_t)ticks(),command,sizeof(command));
+        bool expired=ticks()>=state.consent_until;
+        if(expired || wake==VOICE_WAKE_ONLY || wake==VOICE_WAKE_COMMAND || wake==VOICE_WAKE_STOP) {
+            state.phase=IDLE;state.pending_profile[0]=0;pthread_mutex_unlock(&state.lock);
+            voice_channel_auto_news_consent(false);return 0;
+        }
+        int decision=morning_profile_decision(text);
+        if(!decision){pthread_mutex_unlock(&state.lock);return 1;}
+        char candidate[MORNING_PROFILE_MAX+1];strcpy(candidate,state.pending_profile);
+        state.phase=PREPARING;state.pending_profile[0]=0;pthread_mutex_unlock(&state.lock);
+        voice_channel_auto_news_consent(false);
+        int rc=decision>0?morning_profile_set(candidate):0;
+        pthread_mutex_lock(&state.lock);state.phase=IDLE;state.error=rc;pthread_mutex_unlock(&state.lock);
+        printf("PROFILE_VOICE_RESULT saved=%d rc=%d\n",decision>0 && !rc,rc);
+        profile_reply(decision<0?"好的，保持原来的人设。":rc?"人设保存未完成，请先查询确认。":"已更新你的长期人设。");
+        return 1;
+    }
     if(state.phase==PERMISSION) {
         if(ticks()>=state.consent_until){state.phase=IDLE;state.permit_id[0]=0;pthread_mutex_unlock(&state.lock);voice_channel_auto_news_consent(false);return 0;}
         /* A fresh wake phrase always hands control back to the normal dialog. */
@@ -121,7 +187,8 @@ int zhaoxi_morning_voice(const char *text,bool gated)
     if(gated && morning_play_request(text)) {
         state.play_requested=true;pthread_mutex_unlock(&state.lock);return 1;
     }
-    pthread_mutex_unlock(&state.lock);return 0;
+    pthread_mutex_unlock(&state.lock);
+    return gated?profile_request_voice(text):0;
 }
 static int prepare(const char *endpoint,const char *profile,int64_t now,struct morning_batch *b)
 {
@@ -155,6 +222,32 @@ done:
     pthread_mutex_unlock(&state.lock);
     printf("MORNING_PLAY rc=%d played=%u count=%u\n",rc,b->played,b->count);
 }
+static void announce_boot_network(int64_t now)
+{
+    pthread_mutex_lock(&state.lock);
+    bool due=!state.boot_network_announced && now>=state.next_network_notice;
+    pthread_mutex_unlock(&state.lock);
+    if(!due || !network_is_connected() || agent_shutdown_requested())return;
+    int rc=0;
+#ifdef CONFIG_ZHAOXI_MIMO_VOICE
+    /* A fixed boot notice must not block on cloud synthesis if its asset is
+     * missing. Installation happens before the final reboot. */
+    size_t bytes;rc=zhaoxi_prompt_check("network_connected",&bytes);
+#endif
+    if(!rc) {
+        rc=voice_channel_auto_output_begin(true);
+        if(rc)return; /* Voice initialization or an active conversation wins. */
+        if(network_is_connected() && !agent_shutdown_requested())
+            rc=voice_channel_speak_auto_owned("联网成功");
+        else rc=-ECANCELED;
+        voice_channel_auto_output_end(false); /* This cue does not wake dialog. */
+    }
+    pthread_mutex_lock(&state.lock);
+    state.boot_network_announced=!rc;state.boot_network_error=rc;
+    state.next_network_notice=rc?ticks()+30000:0;
+    pthread_mutex_unlock(&state.lock);
+    printf("BOOT_NETWORK_NOTICE rc=%d\n",rc);
+}
 static void *morning_worker(void *unused)
 {
     (void)unused;
@@ -164,10 +257,11 @@ static void *morning_worker(void *unused)
     while(!agent_shutdown_requested()) {
         bool online=network_is_connected();int64_t mono=ticks();
         pthread_mutex_lock(&state.lock);
-        if(!online && connected){state.synced=false;state.phase=IDLE;state.permit_id[0]=0;}
+        if(!online && connected){state.synced=false;state.phase=IDLE;state.permit_id[0]=0;state.pending_profile[0]=0;}
         bool synced=state.synced;
         pthread_mutex_unlock(&state.lock);
         if(!online){voice_channel_auto_news_consent(false);connected=false;usleep(1000000);continue;}
+        announce_boot_network(mono);
         if(!connected){next_sync=mono;connected=true;}
         if(!synced && mono>=next_sync) {
             int64_t epoch;int rc=morning_sntp(&epoch);
@@ -183,8 +277,9 @@ static void *morning_worker(void *unused)
             strcpy(state.day,today);state.phase=IDLE;state.permit_id[0]=0;state.attempt=0;state.next_try=0;
         }
         enum phase phase=state.phase;
-        if(phase==PERMISSION && (mono>=state.consent_until || !voice_enabled())) {
+        if((phase==PERMISSION || phase==PROFILE_CONFIRM) && (mono>=state.consent_until || !voice_enabled())) {
             state.phase=IDLE;state.permit_id[0]=0;phase=IDLE;
+            state.pending_profile[0]=0;
             voice_channel_auto_news_consent(false);
         }
         bool fetch=state.fetch_requested,ask=state.ask_requested,play=state.play_requested;
@@ -228,8 +323,11 @@ static void *morning_worker(void *unused)
                 if(state.phase!=IDLE){pthread_mutex_unlock(&state.lock);voice_channel_auto_output_end(false);continue;}
                 state.phase=ANNOUNCING;pthread_mutex_unlock(&state.lock);
                 b->asked=true;int rc=morning_batch_save(b);
-                char prompt[192];snprintf(prompt,sizeof(prompt),"今天准备了%u条与你关注内容相关的资讯，需要播放吗？请说播放，或暂不播放。",b->count);
-                if(!rc)rc=voice_channel_speak_auto_owned(prompt);
+#ifdef CONFIG_ZHAOXI_MIMO_VOICE
+                if(!rc)rc=voice_channel_speak_auto_owned(ZHAOXI_NEWS_PROMPT);
+#else
+                if(!rc)rc=voice_channel_speak_auto_owned("有新的资讯，需要播放吗？请说播放，或暂不播放。");
+#endif
                 if(!rc && !agent_shutdown_requested())rc=voice_channel_auto_news_consent(true);
                 pthread_mutex_lock(&state.lock);
                 state.phase=!rc?PERMISSION:IDLE;state.error=rc;
@@ -242,7 +340,7 @@ static void *morning_worker(void *unused)
     }
 finished:
     voice_channel_auto_news_consent(false);free(b);free(profile);
-    pthread_mutex_lock(&state.lock);state.running=false;state.phase=IDLE;state.permit_id[0]=0;state.synced=false;
+    pthread_mutex_lock(&state.lock);state.running=false;state.phase=IDLE;state.permit_id[0]=0;state.pending_profile[0]=0;state.synced=false;
     pthread_mutex_unlock(&state.lock);return NULL;
 }
 int zhaoxi_morning_start(void)

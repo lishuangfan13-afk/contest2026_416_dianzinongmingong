@@ -115,9 +115,24 @@ static int plain_post(const struct endpoint *e,const char *body,char *out,size_t
     else if(cap)out[0]=0;
     free(wire);close(fd);return rc;
 }
+static cJSON *small_json(const char *text);
 int morning_fetch_candidates(const char *url,const char *profile,int64_t now,char *out,size_t cap)
 {
     struct endpoint e;int rc=parse_endpoint(url,&e);if(rc)return rc;
+    size_t path_length=strlen(e.path);
+    if(e.tls && path_length>=5 && !strcmp(e.path+path_length-5,".json")) {
+        /* Public static snapshots receive no persona, topics or model key.
+         * Article metadata is still checked before any model invocation. */
+        rc=vela_https_get_bounded(e.host,e.port,e.path,out,cap,15000,canceled,NULL);
+        if(rc!=200){out[0]=0;return rc<0?rc:-EIO;}
+        cJSON *snapshot=small_json(out);
+        cJSON *generated=cJSON_GetObjectItem(snapshot,"generated_at");
+        bool fresh=cJSON_IsNumber(generated) && generated->valuedouble>=now-21600 &&
+                   generated->valuedouble<=now+300;
+        cJSON_Delete(snapshot);
+        if(!fresh){out[0]=0;return -ESTALE;}
+        return 0;
+    }
     cJSON *body=cJSON_CreateObject(),*topics=cJSON_AddArrayToObject(body,"topics");
     const char *terms[]={"AI","电子","嵌入式","开源","机器人","半导体",NULL};
     for(int i=0;terms[i];i++)if(strstr(profile,terms[i]))cJSON_AddItemToArray(topics,cJSON_CreateString(terms[i]));

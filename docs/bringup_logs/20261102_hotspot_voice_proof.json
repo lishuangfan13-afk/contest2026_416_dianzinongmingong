@@ -1,0 +1,91 @@
+{
+  "date": "2026-11-02",
+  "scope": "BES2800BP direct phone-hotspot voice; short functional acceptance, not endurance testing",
+  "firmware": {
+    "image": "hotspot-firmware/nuttx_ap_headless.bin",
+    "sha256": "19e657b19148aad422c76a1f11849bbf4040451925fb7a9bf540d5fe65fc8db1",
+    "size": 1364168,
+    "flash_address": "0x30190000",
+    "incremental_build_tasks": 27,
+    "programming": "succeeded",
+    "repository_release_binary_replaced": false
+  },
+  "network": {
+    "uplink_mode": "wifi",
+    "hotspot_band": "5GHz (user configured)",
+    "security": "WPA2-Personal",
+    "pc_ppp": "stopped",
+    "mtu": 1500,
+    "wifi_tls_tx_buffer": "0",
+    "wifi_tls_record_size": "0",
+    "wifi_tcp_mss": "0",
+    "persistent_power_hold": false,
+    "voice_debug": "disabled after acceptance"
+  },
+  "acceptance": {
+    "boot_auto_connect": "passed",
+    "sntp": "passed",
+    "wake_greeting": "passed; user confirmed",
+    "one_plus_one_spoken_answer": "passed; user confirmed",
+    "continued_question_answer": "observed in serial log",
+    "hotspot_disconnect_recovery": "passed in earlier 2.4GHz phase; not repeated on 5GHz"
+  },
+  "synthetic_asr_default_transport": [
+    {
+      "audio_ms": 3000,
+      "pcm_bytes": 96000,
+      "http_body_bytes": 128229,
+      "upload_ms": 220,
+      "total_ms": 1473,
+      "http": 200
+    },
+    {
+      "audio_ms": 6000,
+      "pcm_bytes": 192000,
+      "http_body_bytes": 256229,
+      "upload_ms": 459,
+      "total_ms": 1897,
+      "http": 200
+    }
+  ],
+  "real_voice": {
+    "wake_asr_ms": 1691,
+    "question_asr_ms": 6454,
+    "greeting_pcm_received": 46080,
+    "greeting_pcm_played": 46080,
+    "answer_pcm_received": 99840,
+    "answer_pcm_played": 99840
+  },
+  "preserved": {
+    "persona": true,
+    "news_batch_id": "c80d8601d7a7df06",
+    "news_played_items": 1
+  },
+  "last_sync_epoch": 1793634469,
+  "verification": {
+    "manifest_sources_and_patches_sha256": "matched",
+    "sdk_sequential_patch_apply": "passed (52 SDK patches)",
+    "configure_uplink_unit_tests": "7 passed",
+    "bounded_speech_and_wifi_policy": "passed",
+    "tls_writer_product_and_standard": "passed"
+  },
+  "conclusion": "2.4GHz audio transfer was unreliable in this setup. 5GHz with default TCP settings passed. No established RF/driver/AP root cause.",
+  "remaining": [
+    "Long-duration 5GHz stability validation",
+    "RSS endpoint still points to PC; hosted feed service is a separate next step",
+    "Local common-prompt audio cache discussed, not implemented"
+  ],
+  "evidence": [
+    "work/hotspot-probe-5ghz-default.jsonl:4",
+    "work/hotspot-probe-5ghz-default-6s.jsonl:4",
+    "work/hotspot-real-voice-5g-final.log:161",
+    "work/hotspot-real-voice-5g-final.log:239",
+    "work/hotspot-real-voice-5g-final.log:445",
+    "work/hotspot-real-voice-5g-final.log:489",
+    "work/hotspot-real-voice-5g-final.log:565",
+    "work/hotspot-5g-verified-state.log:2",
+    "work/hotspot-5g-verified-state.log:3",
+    "app/zhaoxi/mimo_voice.c:58",
+    "app/zhaoxi/mimo_voice.c:207"
+  ]
+}

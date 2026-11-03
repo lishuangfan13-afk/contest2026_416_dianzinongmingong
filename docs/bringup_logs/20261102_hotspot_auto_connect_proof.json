@@ -1,0 +1,74 @@
+{
+  "date": "2026-11-02",
+  "recorded_at": "2026-11-02T22:43:06.693285+08:00",
+  "firmware_sha256": "0f4078aafd755bc0cf48d246c02736cbe5493bb05edcc6f4fe49884fd5474e64",
+  "firmware_changed": false,
+  "recompiled_or_flashed": false,
+  "mode": "wifi",
+  "configuration_readback_verified": true,
+  "existing_credentials_persona_and_news_preserved": true,
+  "backup_path": "/emmc/zhaoxi/config/uplink.bak",
+  "acceptance": {
+    "boot_automatic_association_and_dhcp": "passed",
+    "hotspot_off_approximately_20_seconds_then_automatic_recovery": "passed",
+    "sntp_after_connection_and_recovery": "passed",
+    "final_reboot_sntp": "passed",
+    "pc_ppp_forwarding": "stopped; no ppp0",
+    "actual_text_model_request": "WIFI_OK",
+    "voice_over_hotspot": "not passed; user did not hear wake greeting"
+  },
+  "initial_sntp_epoch": 1793628458,
+  "recovery_sntp_epoch": 1793628746,
+  "final_service_state": {
+    "running": true,
+    "time_synced": true,
+    "phase": "idle",
+    "time_source": "SNTP",
+    "last_sync_epoch": 1793630500,
+    "last_error": -113,
+    "date": "2026-11-02",
+    "hour": 7,
+    "permission_timeout_seconds": 60,
+    "endpoint_configured": true,
+    "cached": true,
+    "count": 1,
+    "asked": true,
+    "declined": false,
+    "played_items": 1,
+    "batch_id": "c80d8601d7a7df06"
+  },
+  "selected_device_events_utc": [
+    "[02/11/26 14:07:23.259900] [15] [ap] [agent] Automatic uplink: wifi (reload on Agent restart)",
+    "[02/11/26 14:07:26.273500] [15] [ap] [netmgr] Connecting WiFi SSID=<runtime SSID> on wlan0",
+    "MORNING_TIME source=SNTP epoch=1793628458",
+    "[02/11/26 14:07:39.346200] [15] [ap] [netmgr] WiFi connected: 172.26.66.224",
+    "[02/11/26 14:11:33.123300] [29] [ap] disconnected from AP, reason:0001",
+    "[02/11/26 14:11:39.574300] [15] [ap] [netmgr] Connecting WiFi SSID=<runtime SSID> on wlan0",
+    "[02/11/26 14:20:40.275500] [15] [ap] [agent] Automatic uplink: wifi (reload on Agent restart)",
+    "[02/11/26 14:20:43.288200] [15] [ap] [netmgr] Connecting WiFi SSID=<runtime SSID> on wlan0",
+    "MORNING_TIME source=SNTP epoch=1793629253",
+    "[02/11/26 14:20:54.249400] [15] [ap] [netmgr] WiFi connected: 172.26.66.1",
+    "[02/11/26 14:40:15.251100] [15] [ap] [agent] Automatic uplink: wifi (reload on Agent restart)",
+    "[02/11/26 14:40:18.263600] [15] [ap] [netmgr] Connecting WiFi SSID=<runtime SSID> on wlan0",
+    "[02/11/26 14:40:25.528500] [15] [ap] [netmgr] WiFi connected: 172.26.66.239"
+  ],
+  "diagnostics": {
+    "asr_observed_failures": [
+      "DNS lookup failed",
+      "audio upload connection reset",
+      "audio upload timed out with queued TCP data"
+    ],
+    "single_tts_with_temporary_pm_hold": {
+      "http": 200,
+      "pcm_received": 53760,
+      "pcm_played": 53760
+    },
+    "pm_causality_established": false,
+    "temporary_pm_mtu_power_save_debug_changes": "reverted; clean reboot, mtu 1500"
+  },
+  "host_tool_unit_tests": 6,
+  "remaining": [
+    "Investigate unstable Wi-Fi DNS and large audio transport before claiming stable voice operation.",
+    "RSS collector remains on PC; persistent online feed service belongs to the next step."
+  ]
+}

@@ -8,8 +8,18 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
 static const char *answer;
 static unsigned calls;
+static int64_t snapshot_time;
+static unsigned gets;
+int vela_https_get_bounded(const char *host,const char *port,const char *path,
+    char *out,size_t cap,unsigned budget,int (*cancel)(void *),void *user)
+{
+    assert(!strcmp(host,"example.org") && !strcmp(port,"443") && !strcmp(path,"/candidates.json"));
+    assert(budget==15000 && !cancel(user));gets++;
+    snprintf(out,cap,"{\"schema\":1,\"generated_at\":%lld,\"items\":[]}",(long long)snapshot_time);return 200;
+}
 bool agent_shutdown_requested(void){return false;}
 int agent_secure_random(void *buf,size_t len){memset(buf,0x42,len);return 0;}
 int claw_config_get(const char *key,char *buf,size_t size)
@@ -36,6 +46,12 @@ int vela_https_post_json_bounded(const char *host,const char *port,const char *p
 int main(void)
 {
     const int64_t now=1793574000;
+    char fetched[256];snapshot_time=now;
+    assert(!morning_fetch_candidates("https://example.org/candidates.json","private persona stays local",now,fetched,sizeof(fetched)) && gets==1);
+    snapshot_time=now-21601;
+    assert(morning_fetch_candidates("https://example.org/candidates.json","AI",now,fetched,sizeof(fetched))==-ESTALE && !fetched[0]);
+    snapshot_time=now+301;
+    assert(morning_fetch_candidates("https://example.org/candidates.json","AI",now,fetched,sizeof(fetched))==-ESTALE);
     char source[2048];snprintf(source,sizeof(source),"{\"schema\":1,\"items\":[{\"id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"title\":\"Official AI release\",\"source\":\"Official\",\"url\":\"https://example.org/real\",\"published_at\":%lld,\"description\":\"A verified candidate description\"}]}",(long long)(now-60));
     char out[MORNING_JSON_MAX];struct morning_batch *batch=calloc(1,sizeof(*batch));assert(batch);
     answer="{\"items\":[{\"index\":0,\"summary\":\"基于资料的简报\",\"relevance\":\"与AI学习有关\",\"url\":\"https://attacker.invalid/invented\",\"title\":\"invented\"}]}";

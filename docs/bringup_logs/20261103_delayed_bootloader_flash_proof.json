@@ -1,0 +1,33 @@
+{
+  "started_at": "2026-11-03T02:15:31.382122+00:00",
+  "finished_at": "2026-11-03T02:15:54.255287+00:00",
+  "port": "COM20",
+  "baud": 921600,
+  "dtr": false,
+  "rts": false,
+  "delay_seconds": 5,
+  "image_sha256": "19e657b19148aad422c76a1f11849bbf4040451925fb7a9bf540d5fe65fc8db1",
+  "image_size": 1364168,
+  "flash_address": "0x30190000",
+  "manual_reset_required": false,
+  "terminal_inherited": true,
+  "handoff_elapsed_ms": 266,
+  "downloader_exit": 0,
+  "sync_command": "unavailable in this image; no persistent files changed in this test",
+  "recompiled": false,
+  "image_reused": true,
+  "terminal_observed_events": [
+    "[5187] handle_sync_msg/[SYNC]: Started",
+    "[5203] handle_sync_msg/[SYNC]: Confirmed",
+    "[6250] main_loop/------ Burn File starts ------",
+    "PROGRAMMING SUCCEEDED",
+    "DOWNLOADER_EXIT 0"
+  ],
+  "downloader_total_seconds": 13.766,
+  "postflash": {
+    "agent_running": true,
+    "automatic_wake_listening": true,
+    "persona_readback": "passed",
+    "prior_news_file_present": true
+  }
+}

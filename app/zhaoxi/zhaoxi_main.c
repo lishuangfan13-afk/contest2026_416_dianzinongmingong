@@ -9,6 +9,9 @@
 #include "todo_store.h"
 #include "journal.h"
 #include "local_intent.h"
+#ifdef CONFIG_ZHAOXI_MIMO_VOICE
+#include "local_prompts.h"
+#endif
 
 #include <errno.h>
 #include <stdio.h>
@@ -26,6 +29,7 @@
 #include "infra/config_store.h"
 #include "dns_diag.h"
 #include "voice/audio_playback.h"
+#include "voice/voice_asr.h"
 #include "tools/tool_registry.h"
 #include <netutils/netlib.h>
 #include <stdint.h>
@@ -67,6 +71,9 @@ static int usage(void)
     puts("  zhaoxi test-speaker   （两秒本机提示音，不需要网络）");
 #endif
     puts("  zhaoxi say <文本>    （直接测试语音合成与播放）");
+#ifdef CONFIG_ZHAOXI_MIMO_VOICE
+    puts("  zhaoxi prompt status | play hello|news_ready|network_error|network_connected （本地提示音）");
+#endif
     puts("默认通过现有语音通道回复；--text 使用串口文字回复。");
     return 0;
 }
@@ -234,6 +241,26 @@ int main(int argc, char **argv)
     int first_text = 0;
     int needs_text = 1;
     if (argc < 2 || !strcmp(argv[at], "help")) return usage();
+#ifdef CONFIG_ZHAOXI_MIMO_VOICE
+    if(!strcmp(argv[at],"prompt")) {
+        if(argc==3 && !strcmp(argv[2],"status")) {
+            char status[256];int rc=zhaoxi_prompt_status(status,sizeof(status));
+            if(!rc)fputs(status,stdout);return rc?1:0;
+        }
+        if(argc==4 && !strcmp(argv[2],"play") && message_bus_is_ready()) {
+            const char *text=zhaoxi_prompt_text(argv[3]);size_t bytes;
+            int rc=text?zhaoxi_prompt_check(argv[3],&bytes):-EINVAL;
+            if(!rc)rc=voice_channel_speak(text);
+            printf("PROMPT_RESULT rc=%d\n",rc);return rc?1:0;
+        }
+        if(argc==5 && !strcmp(argv[2],"receive") && !message_bus_is_ready()) {
+            char *end;unsigned long length=strtoul(argv[4],&end,10);
+            if(!argv[4][0] || *end || length>480024)return 1;
+            return zhaoxi_prompt_receive(argv[3],length)?1:0;
+        }
+        return usage();
+    }
+#endif
 #ifdef CONFIG_NETUTILS_PPPD
     if (!strcmp(argv[at], "pc-link")) {
         if (argc != 3) return 1;
@@ -245,6 +272,21 @@ int main(int argc, char **argv)
     }
 #endif
 #ifdef CONFIG_ZHAOXI_BES_AUDIO
+    if (!strcmp(argv[at], "--asr-probe")) {
+        if(argc!=3 || !message_bus_is_ready())return 1;
+        char *end=NULL;long milliseconds=strtol(argv[2],&end,10);
+        if(!end || *end || milliseconds<1000 || milliseconds>6000)return 1;
+        char status[1400];if(voice_channel_auto_status(status,sizeof(status)))return 1;
+        if(strstr(status,"\"enabled\":true") || strstr(status,"\"running\":true") ||
+           strstr(status,"\"output_active\":true")) {
+            puts("ASR_PROBE refused: stop automatic voice and wait for output to finish.");return 1;
+        }
+        size_t size=(size_t)milliseconds*32;unsigned char *silence=calloc(1,size);
+        if(!silence)return 1;
+        char text[1024];int rc=voice_asr_recognize(silence,size,text,sizeof(text));free(silence);
+        printf("ASR_PROBE synthetic_silence_ms=%ld bytes=%zu rc=%d text_bytes=%zu\n",
+               milliseconds,size,rc,rc?0:strlen(text));return rc?1:0;
+    }
     if (!strcmp(argv[at], "news")) return zhaoxi_morning_command(argc-at+1,argv+at-1);
     if (!strcmp(argv[at], "profile")) {
         char profile[MORNING_PROFILE_MAX+1]={0};int rc=-EINVAL;

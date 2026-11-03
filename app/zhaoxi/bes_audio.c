@@ -5,6 +5,10 @@
 #include "voice/audio_capture.h"
 #include "voice/audio_playback.h"
 #include "voice/voice_channel.h"
+#ifdef CONFIG_ZHAOXI_MIMO_VOICE
+#include "local_prompts.h"
+#include "agent_compat.h"
+#endif
 #include <errno.h>
 #include <pthread.h>
 #include <semaphore.h>
@@ -304,13 +308,28 @@ void audio_playback_stop(audio_playback_t *pb)
 }
 void audio_playback_close(audio_playback_t *pb) { if (pb) { close_session(&pb->pcm); free(pb); } }
 
-/* Cues are emitted only after the automatic worker releases capture. */
+#ifdef CONFIG_ZHAOXI_MIMO_VOICE
+struct prompt_playback {audio_playback_t *output;};
+static int feedback_cancel(void *unused)
+{(void)unused;return agent_shutdown_requested();}
+static int feedback_pcm(const unsigned char *pcm,size_t length,void *opaque)
+{
+    struct prompt_playback *p=opaque;
+    if(agent_shutdown_requested())return -ECANCELED;
+    if(!p->output)p->output=audio_playback_open(NULL,24000,1,16);
+    if(!p->output)return -EIO;
+    int n=audio_playback_write(p->output,pcm,length);
+    return n==(int)length?0:n<0?n:-EIO;
+}
+#endif
+/* Cues are emitted with capture closed and SDK output/auto locks held.
+ * Never reenter voice_channel_speak or use a network provider from here. */
 void voice_channel_auto_feedback(int event)
 {
     static atomic_uint previous = ATOMIC_VAR_INIT(0);
     bool ready = event == VOICE_AUTO_FEEDBACK_READY;
     bool accepted = event == VOICE_AUTO_FEEDBACK_ACCEPTED;
-    if (ready) puts("AUTO_VOICE_READY：收音已就绪；唤醒模式先说“你好，openvela”或“Hello，openvela”，对话中可接着提问。");
+    if (ready) puts("AUTO_VOICE_READY：收音已就绪；先说“你好，夕夕”，对话中可接着提问。");
     else if (accepted) puts("AUTO_VOICE_ACCEPTED：本句话已收取，正在处理；回答结束再说下一句。");
     else {
         unsigned now = milliseconds(), last = atomic_exchange(&previous, now);
@@ -319,6 +338,21 @@ void voice_channel_auto_feedback(int event)
         else printf("AUTO_VOICE_ERROR event=%d：语音处理未完成，正在恢复等待。\n", event);
         if (last && now - last < 2000) return;
     }
+#ifdef CONFIG_ZHAOXI_MIMO_VOICE
+    /* Only an actual dispatched turn failure gets the longer prompt.
+     * ASR errors while asleep retain the short cue, avoiding noise spam. */
+    if(event==VOICE_AUTO_FEEDBACK_DISPATCH_ERROR || event==VOICE_AUTO_FEEDBACK_TURN_TIMEOUT) {
+        static atomic_uint last_prompt=ATOMIC_VAR_INIT(0);
+        unsigned now=milliseconds(),last=atomic_load(&last_prompt);
+        if(!last || now-last>=60000) {
+            struct prompt_playback output={0};bool handled=false;
+            int rc=zhaoxi_prompt_stream("network_error",feedback_pcm,feedback_cancel,&output,&handled);
+            if(output.output)audio_playback_close(output.output);
+            if(handled){atomic_store(&last_prompt,now);return;}
+            if(rc==-ECANCELED)return;
+        }
+    }
+#endif
     audio_playback_t *pb = audio_playback_open(NULL, 16000, 1, 16);
     if (!pb) return;
     static const int16_t wave[16] = {0,3134,5792,7568,8192,7568,5792,3134,

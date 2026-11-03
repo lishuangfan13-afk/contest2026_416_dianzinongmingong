@@ -1,0 +1,89 @@
+{
+  "date": "2026-11-03",
+  "recorded_at": "2026-11-03T03:07:17.879294+00:00",
+  "firmware": {
+    "sha256": "49aeef2f1b732c0c079ad0c71bfa5a1287653ef9c8457be7364cb2dbf6a93158",
+    "size": 1370464,
+    "flash_address": "0x30190000",
+    "incremental_build": true,
+    "manual_reset_required": false,
+    "downloader_exit": 0,
+    "repository_release_bin_replaced": false
+  },
+  "local_prompts": {
+    "installed_ids": [
+      "hello",
+      "news_ready",
+      "network_error"
+    ],
+    "offline_wlan_ipv4": "0.0.0.0",
+    "cloud_tts_requests_during_test": 0,
+    "pcm_received_equals_played": [
+      46080,
+      207360,
+      130560
+    ],
+    "hello_first_chunk_ms": 78,
+    "after_final_flash_hello": "passed",
+    "natural_wake_listening_test": "pending user hotspot/test conditions"
+  },
+  "profile_voice": {
+    "implemented": [
+      "append",
+      "replace",
+      "explicit_confirmation",
+      "cancel",
+      "60s_timeout"
+    ],
+    "actual_C_service_tests": "passed; includes failure/restart/preemption/no-write cases",
+    "device_persona_changed": false,
+    "live_ASR_TTS_confirmation_test": "pending network"
+  },
+  "public_feed": {
+    "export_actual_candidates": 1,
+    "static_https_get_and_freshness_tests": "passed",
+    "workflow_prepared": true,
+    "workflow_deployed": false,
+    "device_endpoint_changed": false,
+    "schedule_0700_policy_tests": "passed with fixture clock; not an unattended 07:00 device test"
+  },
+  "verification": {
+    "source_manifest_hashes": "matched",
+    "sdk_patch_sequence": "53 passed",
+    "prompt_reader_malformed_cancel_output_tests": "passed",
+    "prompt_receive_real_PTY_tests": "passed",
+    "morning_runtime_and_profile_confirmation": "passed",
+    "morning_store_and_CST_time_edges": "passed",
+    "morning_network_summarizer_and_static_get": "passed",
+    "actual_TLS_bounded_JSON_SSE_GET": "passed",
+    "python_feed_and_publisher_tests": "5 + 4 passed",
+    "uplink_config_tests": "8 passed"
+  },
+  "delegation": {
+    "dsh_provider": "xindu",
+    "configured_model": "deepSeek-v4.1-flash-1017",
+    "model_list_query": "HTTP 200, exact model ID present",
+    "probe_and_actual_review_task": "HTTP 503; no usable review returned",
+    "fallback": "primary agent implementation and executable checks"
+  },
+  "final_device": {
+    "auto_running": true,
+    "accepting_speech": true,
+    "awake": false,
+    "original_persona_readback": "passed",
+    "previous_news_file_present": true,
+    "wifi_connected_at_final_check": false
+  },
+  "remaining": [
+    "Confirm deployment target and enable the public feed workflow on default branch",
+    "Restore hotspot for natural wake and profile voice interaction acceptance",
+    "Run an actual unattended 07:00 morning-news test"
+  ],
+  "evidence": [
+    "work/local-prompts-playback-proof.jsonl",
+    "work/local-memory-news-postflash.jsonl",
+    "work/local-memory-news-final-state.jsonl",
+    "work/local-memory-news-flash-result.json",
+    "work/static-feed-sdk-patch-check.json"
+  ]
+}

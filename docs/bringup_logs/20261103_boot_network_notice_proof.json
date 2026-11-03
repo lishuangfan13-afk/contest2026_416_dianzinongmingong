@@ -1,0 +1,45 @@
+{
+  "date": "2026-11-03",
+  "feature": "Announce local 联网成功 once per board boot after network and idle voice readiness",
+  "firmware_sha256": "565b643297d63b467a766504bcc9955259158bdac1ae66ba58ee07e09b2e39a6",
+  "firmware_size": 1370912,
+  "incremental_tasks": 17,
+  "ap_address": "0x30190000",
+  "manual_reset_required": false,
+  "downloader_exit": 0,
+  "local_asset": {
+    "id": "network_connected",
+    "text": "联网成功",
+    "pcm_bytes": 46080,
+    "sample_rate": 24000,
+    "duration_ms": 960,
+    "crc_verified_on_board": true
+  },
+  "acceptance": {
+    "heard_by_user": true,
+    "boot_network_announced": true,
+    "boot_network_error": 0,
+    "auto_listening_after_announcement": true,
+    "dialog_awake_after_announcement": false,
+    "original_persona_preserved": true,
+    "news_cache_and_endpoint_preserved": true
+  },
+  "actual_C_tests": [
+    "offline does not announce",
+    "busy dialog has priority",
+    "playback failure retries after cooldown",
+    "successful playback marks done",
+    "same-boot reconnect does not repeat",
+    "Agent restart does not repeat",
+    "new board boot clears notice state"
+  ],
+  "failure_policy": "missing or invalid local asset never calls online TTS for this boot notice; retry after 30 seconds",
+  "source_evidence": [
+    "app/zhaoxi/morning.c:225",
+    "app/zhaoxi/morning.c:264",
+    "work/boot-network-notice-final-state.jsonl:2",
+    "work/boot-network-notice-final-state.jsonl:3"
+  ],
+  "dsh_review": "attempted, provider returned HTTP 503; executable C checks performed by primary agent",
+  "repository_release_bin_replaced": false
+}

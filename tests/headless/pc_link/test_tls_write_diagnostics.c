@@ -24,12 +24,13 @@
 #define MBEDTLS_ERR_SSL_TIMEOUT -105
 typedef struct {int fd;} mbedtls_net_context;
 typedef struct {int marker;} fake_ssl;
-typedef struct {fake_ssl ssl;mbedtls_net_context net;} tls_ctx_t;
+typedef struct {fake_ssl ssl;mbedtls_net_context net;int64_t request_deadline;size_t write_limit;} tls_ctx_t;
 static const char *TAG="fixture";
 static struct {
     unsigned char wire[100000];size_t used;
     int returns[16],errors[16];unsigned plan,index,calls;
     size_t record_limit;
+    size_t largest_write;
     char logs[16000];size_t logged;
     int64_t now;
     const char *response;size_t response_at;
@@ -77,6 +78,7 @@ static int fixture_clock(clockid_t clock,struct timespec *out)
 static int mbedtls_ssl_write(fake_ssl *ssl,const unsigned char *bytes,size_t length)
 {
     (void)ssl;int ret;f.calls++;
+    if(length>f.largest_write)f.largest_write=length;
     if(f.index<f.plan) {
         errno=f.errors[f.index];ret=f.returns[f.index++];
         if(ret<=0)return ret;
@@ -204,6 +206,15 @@ int main(void)
     assert(count==4 && !memcmp(response,"okay",4) && !keep);
     assert(f.raw_acquires==1 && f.raw_releases==1);
     assert_private();
+    reset();ctx.write_limit=1024;
+    assert(post(&ctx,body)==0 && f.largest_write<=1024);
+    char *payload=strstr((char *)f.wire,"\r\n\r\n");assert(payload);payload+=4;
+    assert(f.used-(size_t)(payload-(char *)f.wire)==40000 && !memcmp(payload,body,40000));
+    ctx.write_limit=0;
+    reset();ctx.request_deadline=1;
+    f.response="HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\nokay";
+    assert(tls_read_response(&ctx,response,sizeof(response),NULL,NULL,false)==VELA_TLS_ERR_TIMEOUT);
+    assert(!response[0]);ctx.request_deadline=0;
     puts("PASS: actual TLS writer/reader short-write accounting, record-sized progress, retry/failure preservation, socket metadata and private-log boundaries");
     return 0;
 }

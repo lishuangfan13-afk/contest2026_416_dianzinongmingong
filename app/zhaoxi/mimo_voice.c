@@ -8,6 +8,8 @@
 #include "infra/config_store.h"
 #include "infra/vela_tls.h"
 #include "mimo_sse.h"
+#include "local_prompts.h"
+#include "agent_compat.h"
 #include "mbedtls/base64.h"
 #include "cJSON.h"
 #include <errno.h>
@@ -37,6 +39,12 @@ static int credentials(char key[128], char host[128])
     return 0;
 }
 
+static int request_cancel(void *unused)
+{(void)unused;return agent_shutdown_requested();}
+
+static int stream_cancel(void *unused)
+{(void)unused;return agent_shutdown_requested() || voice_channel_tts_stream_error();}
+
 static cJSON *request(cJSON *body, size_t capacity, const char *phase)
 {
     int64_t started = monotonic_ms();
@@ -48,8 +56,8 @@ static cJSON *request(cJSON *body, size_t capacity, const char *phase)
         free(payload); free(response); memset(key, 0, sizeof(key)); return NULL;
     }
     vela_header_t headers[] = {{"api-key", key}, {NULL, NULL}};
-    int status = vela_https_post_json(host, "443", "/v1/chat/completions", headers,
-                                      payload, response, capacity);
+    int status = vela_https_post_json_bounded(host, "443", "/v1/chat/completions", headers,
+                                      payload, response, capacity,60000,request_cancel,NULL);
     free(payload);
     cJSON *result = status == 200 ? cJSON_Parse(response) : NULL;
     printf("MIMOVOICE http=%d parsed=%d phase=%s elapsed_ms=%lld\n",
@@ -173,9 +181,27 @@ static int stream_body(const unsigned char *bytes, size_t length, void *opaque)
     return rc ? rc : mimo_sse_feed(opaque, bytes, length);
 }
 
+static int local_pcm(const unsigned char *pcm,size_t length,void *opaque)
+{
+    struct stream_output *out=opaque;
+    if(agent_shutdown_requested())return -ECANCELED;
+    int rc=voice_channel_tts_stream_error();if(rc)return rc;
+    out->callback(pcm,length,0,out->user);
+    return voice_channel_tts_stream_error();
+}
 int zhaoxi_mimo_tts_stream(const char *text, voice_tts_chunk_cb callback, void *data)
 {
     if (!callback || !text || !text[0] || strlen(text) > 2048) return -EINVAL;
+    const char *prompt=zhaoxi_prompt_id(text);
+    if(prompt) {
+        bool handled=false;
+        struct stream_output local={callback,data,monotonic_ms(),-1};
+        int local_result=zhaoxi_prompt_stream(prompt,local_pcm,request_cancel,&local,&handled);
+        if(handled || agent_shutdown_requested()) {
+            if(!local_result){callback(NULL,0,1,data);local_result=voice_channel_tts_stream_error();}
+            return local_result;
+        }
+    }
     char key[128] = {0}, host[128] = {0};
     int rc = credentials(key, host);
     if (rc) return rc;
@@ -197,8 +223,8 @@ int zhaoxi_mimo_tts_stream(const char *text, voice_tts_chunk_cb callback, void *
     }
     vela_header_t headers[] = {{"api-key", key}, {"Accept", "text/event-stream"}, {NULL, NULL}};
     printf("MIMOVOICE phase=tts begin mode=stream text_bytes=%lu\n", (unsigned long)strlen(text));
-    int status = vela_https_post_json_stream(host, "443", "/v1/chat/completions", headers,
-        payload, stream_body, sse);
+    int status = vela_https_post_json_stream_bounded(host, "443", "/v1/chat/completions", headers,
+        payload, stream_body, sse,180000,stream_cancel,NULL);
     free(payload); memset(key, 0, sizeof(key));
     rc = status == 200 ? mimo_sse_finish(sse) : status < 0 ? status : -EIO;
     if (!rc) {

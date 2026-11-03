@@ -43,16 +43,39 @@ cd flash\vela_2800bp\vela_2800bp
 
 **红线（违反可能变砖）**：
 - **只许 AP-only 烧录（`-M nuttx_ap.bin`）**，严禁烧 `nuttx_ota.bin` / `nuttx_bl.bin`。
-- 烧录前**杀掉所有 Python 进程**，避免 COM 口被诊断脚本抢占导致烧录中断。
+- 烧录前正常关闭占用目标 COM 口的诊断脚本、供网会话和终端，确认串口已释放；不要结束无关 Python 进程。
 - 烧录时不要运行任何串口工具。
-- 烧录完成后板子进入 SYS SHUTDOWN 状态，需**拔插 USB** 重启。
+- `--reboot` 表示**下载操作完成后重启**，不是让运行中的固件主动进入下载模式。未使用该选项时，完成后可能进入 SYS SHUTDOWN；根据实际状态用 POWER 或重新供电恢复。
 
 **进入下载模式（板子只有 POWER/RESET 两键，无 BOOT/DL 键）**：
 | 板子状态 | 方法 |
 |----------|------|
-| 正常运行 | dldtool 加 `--reboot`（串口发复位命令） |
+| 正常运行且 NSH 可用 | 正常停止 Agent，按下节安排后台延迟 `reboot bootloader`，立即释放串口并在同一进程内启动 dldtool；已实板验证无需按 RESET |
 | 崩溃循环 | 直接启动 dldtool，按 RESET 触发 SYNC |
 | OTA 引导态（串口输出 CHIP=best1700） | 直接启动 dldtool 自动 SYNC |
+
+`CHIP=best1700` 本身只说明运行到了引导代码，不保证停留在下载模式；须看到下载工具完成 SYNC 确认。
+
+### 无需按 RESET 的已验证流程
+
+前提是板子已开机且 NSH 能执行命令。PPP 或其他串口会话须先正常结束；DTR、RTS 均为 False，不用于硬件复位。
+
+1. 通过 NSH 正常停止 Agent，等待 `Shutdown complete`，结合 `zhaoxi status` 和 `ps` 确认已退出。支持 `sync` 的固件执行 `sync`；当前候选镜像未编入此命令，本次复用原镜像且不修改持久文件，临时脚本只写 `/tmp`。
+2. 在板端执行以下命令，并确认后台启动回执 `sh [`：
+
+   ```sh
+   echo sleep 5 > /tmp/zhaoxi_flash_reset
+   echo reboot bootloader >> /tmp/zhaoxi_flash_reset
+   source /tmp/zhaoxi_flash_reset &
+   ```
+
+3. **在同一个 Python 程序内连续执行**关闭 pyserial 串口句柄、立即 `subprocess.Popen(args, cwd=runtime_directory)`、`wait(timeout=90)`。下载器继承真实终端，不使用 stdout 管道或 `CREATE_NO_WINDOW`。不要拆成两次 AI 工具调用，也不要关闭串口后等待 5 秒。
+4. 参数列表使用 `-b 921600 <COM数字> -v --no-retry --reboot --sector-size-kib 64 <programmer1700_dual.bin> --set-dual-chip 1 -M <AP镜像绝对路径> --addr 0x30190000 --pgm-rate 2000000`。启动前核对镜像大小、SHA256、manifest 地址、末尾 AP 地址及 NTC 补丁。`--reboot` 只负责完成后重启。
+5. 必须看到 `[SYNC]: Started`、`[SYNC]: Confirmed`、`Burn File starts`、`PROGRAMMING SUCCEEDED` 和退出码 0。下载器释放串口后回读启动、Agent 和自动语音状态，并确认持久数据保留。
+
+**2026-11-03 实板通过**：COM20 / 921600，复用 AP 镜像 SHA-256 `19e657b19148aad422c76a1f11849bbf4040451925fb7a9bf540d5fe65fc8db1`。后台任务启动至下载器创建约 266ms，5 秒后完成 SYNC，13.766 秒完成下载操作，退出码 0，`manual_reset_required=false`。板子自动重启，Agent、唤醒监听、人设和原资讯文件均已确认。先前“立即发 reboot 后才启动下载器”的失败测试未复现正确时序，不能用来否定免按键方案。完整记录见 [自动复位核验](../../../docs/bringup_logs/20261103_auto_reset_verification.md)。
+
+NSH 卡死、未开机或 FTDI 串口桥异常时不能套用此流程；分别恢复主控、使用 POWER 开机或恢复电脑端 USB 串口，再判断是否具备上述前提。
 
 ## 四、启动验证清单
 

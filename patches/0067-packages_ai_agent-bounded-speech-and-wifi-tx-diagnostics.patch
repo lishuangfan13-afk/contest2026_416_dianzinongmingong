@@ -1,0 +1,251 @@
+diff --git a/src/infra/vela_tls.c b/src/infra/vela_tls.c
+--- a/src/infra/vela_tls.c
++++ b/src/infra/vela_tls.c
+@@ -37,6 +37,7 @@
+ #include <sys/socket.h>
+ #include <sys/select.h>
+ #include <sys/types.h>
++#include <netinet/tcp.h>
+ #include <unistd.h>
+ 
+ /* mbedTLS */
+@@ -136,15 +137,21 @@
+     int64_t request_deadline;
+     int (*request_cancel)(void *);
+     void *request_user;
++    size_t write_limit;
++    bool abortive_close;
+ } tls_ctx_t;
+ 
+ static void tls_ctx_free(tls_ctx_t* ctx)
+ {
+ #ifdef CONFIG_EXAMPLES_ZHAOXI
++    if(ctx->abortive_close && ctx->net.fd>=0) {
++        struct linger option={.l_onoff=1,.l_linger=0};
++        setsockopt(ctx->net.fd,SOL_SOCKET,SO_LINGER,&option,sizeof(option));
++    }
+     /* Shutdown can follow removal of the PPP uplink. Never wait for a dead
+      * peer while releasing a cached connection; notify only if nonblocking
+      * mode was established, then free even if notify needs another write. */
+-    if (ctx->net.fd >= 0 && mbedtls_net_set_nonblock(&ctx->net) == 0)
++    if (!ctx->abortive_close && ctx->net.fd >= 0 && mbedtls_net_set_nonblock(&ctx->net) == 0)
+         mbedtls_ssl_close_notify(&ctx->ssl);
+ #else
+     mbedtls_ssl_close_notify(&ctx->ssl);
+@@ -322,12 +329,57 @@
+         get_rc, get_errno);
+     errno = saved_errno;
+ }
++
++/* Opt-in diagnostic for the direct Wi-Fi path. Keep queued bulk audio small
++ * without changing PPP, global TCP defaults or the TLS record format. */
++static int zhaoxi_apply_wifi_tx_buffer(int fd)
++{
++    int saved_errno=errno;char mode[16]={0},value[16]={0};
++    if(claw_config_get("uplink_mode",mode,sizeof(mode)) || strcmp(mode,"wifi") ||
++       claw_config_get("wifi_tls_tx_buffer",value,sizeof(value))){errno=saved_errno;return 0;}
++    int requested=!strcmp(value,"8192")?8192:!strcmp(value,"16384")?16384:
++                  !strcmp(value,"32768")?32768:0;
++    if(!requested){errno=saved_errno;return 0;}
++    struct ifaddrs *list=NULL;bool wifi=false,ppp=false;
++    if(!getifaddrs(&list)) {
++        for(struct ifaddrs *at=list;at;at=at->ifa_next) {
++            if(!at->ifa_name || !at->ifa_addr || at->ifa_addr->sa_family!=AF_INET ||
++               (at->ifa_flags&(IFF_UP|IFF_RUNNING))!=(IFF_UP|IFF_RUNNING) ||
++               !((struct sockaddr_in *)at->ifa_addr)->sin_addr.s_addr)continue;
++            if(!strcmp(at->ifa_name,"wlan0"))wifi=true;
++            if(!strcmp(at->ifa_name,"ppp0"))ppp=true;
++        }
++        freeifaddrs(list);
++    }
++    int result=0;
++    if(wifi && !ppp) {
++        char mss_value[16]={0};claw_config_get("wifi_tcp_mss",mss_value,sizeof(mss_value));
++        int mss=!strcmp(mss_value,"256")?256:!strcmp(mss_value,"472")?472:
++                !strcmp(mss_value,"512")?512:!strcmp(mss_value,"1024")?1024:0;
++        if(mss) {
++            int mss_rc=setsockopt(fd,IPPROTO_TCP,TCP_MAXSEG,&mss,sizeof(mss));
++            syslog(LOG_INFO,"[%s] TLS_WIFI_MSS requested=%d set_rc=%d\n",TAG,mss,mss_rc);
++        }
++        int actual=-1;socklen_t size=sizeof(actual);
++        int rc=setsockopt(fd,SOL_SOCKET,SO_SNDBUF,&requested,sizeof(requested));
++        int get_rc=rc?-1:getsockopt(fd,SOL_SOCKET,SO_SNDBUF,&actual,&size);
++        if(!rc && !get_rc && actual>0) {
++            char record[16]={0};claw_config_get("wifi_tls_record_size",record,sizeof(record));
++            result=!strcmp(record,"0")?0:!strcmp(record,"512")?512:
++                   !strcmp(record,"2048")?2048:!strcmp(record,"4096")?4096:1024;
++        }
++        syslog(LOG_INFO,"[%s] TLS_WIFI_TX requested=%d actual=%d set_rc=%d get_rc=%d record_bytes=%d\n",
++               TAG,requested,actual,rc,get_rc,result);
++    }
++    errno=saved_errno;return result;
++}
+ /* ZHAOXI_PPP_RX_WINDOW_END */
+ #endif
+ 
+ static int zhaoxi_tcp_connect(mbedtls_net_context *net, const char *host,
+-                              const char *port, unsigned timeout_ms)
+-{
++                              const char *port, unsigned timeout_ms,size_t *write_limit)
++{
++    *write_limit=0;
+     struct addrinfo hints = {0}, *addresses = NULL;
+     hints.ai_family = AF_INET;
+     hints.ai_socktype = SOCK_STREAM;
+@@ -345,6 +397,7 @@
+ #if defined(CONFIG_EXAMPLES_ZHAOXI) && defined(CONFIG_NETUTILS_PPPD)
+         /* Before connect: the peer must see this cap in the first SYN. */
+         zhaoxi_apply_ppp_rx_window(fd);
++        *write_limit=(size_t)zhaoxi_apply_wifi_tx_buffer(fd);
+ #endif
+         int flags = fcntl(fd, F_GETFL, 0);
+         if (flags < 0 || fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0) {
+@@ -374,6 +427,11 @@
+             }
+         }
+         if (rc == 0 && fcntl(fd, F_SETFL, flags) == 0) {
++            if(*write_limit) {
++                int mss=0;socklen_t size=sizeof(mss);
++                int mss_rc=getsockopt(fd,IPPROTO_TCP,TCP_MAXSEG,&mss,&size);
++                syslog(LOG_INFO,"[%s] TLS_WIFI_DIAL mss=%d get_rc=%d\n",TAG,mss,mss_rc);
++            }
+             net->fd = fd;
+             result = 0;
+             break;
+@@ -443,6 +501,8 @@
+     int ret;
+     ctx->request_deadline=budget?bounded_now_ms()+budget:0;
+     ctx->request_cancel=cancel;ctx->request_user=user;
++    ctx->write_limit=0;
++    ctx->abortive_close=false;
+ 
+     mbedtls_ssl_init(&ctx->ssl);
+     mbedtls_ssl_config_init(&ctx->cfg);
+@@ -499,7 +559,7 @@
+             TAG, tunnel_fd, host, port);
+     } else {
+ #ifdef CONFIG_ZHAOXI_BES_AUDIO
+-        ret = zhaoxi_tcp_connect(&ctx->net, host, port, budget && budget<15000?budget:15000);
++        ret = zhaoxi_tcp_connect(&ctx->net, host, port, budget && budget<15000?budget:15000,&ctx->write_limit);
+ #else
+         ret = mbedtls_net_connect(&ctx->net, host, port, MBEDTLS_NET_PROTO_TCP);
+ #endif
+@@ -760,9 +820,11 @@
+     int last_ssl_result = 0, last_errno = 0;
+ #endif
+     while (written < pos) {
++        size_t count=(size_t)(pos-written);
++        if(ctx->write_limit && count>ctx->write_limit)count=ctx->write_limit;
+         ret = mbedtls_ssl_write(&ctx->ssl,
+             (const unsigned char*)(hdr + written),
+-            (size_t)(pos - written));
++            count);
+ #ifdef CONFIG_ZHAOXI_BES_AUDIO
+         calls++;
+         last_ssl_result = ret;
+@@ -782,8 +844,10 @@
+ 
+     if (body && body_len > 0) {
+         while (bw < body_len) {
++            size_t count=body_len-bw;
++            if(ctx->write_limit && count>ctx->write_limit)count=ctx->write_limit;
+             ret = mbedtls_ssl_write(&ctx->ssl,
+-                (const unsigned char*)(body + bw), body_len - bw);
++                (const unsigned char*)(body + bw), count);
+ #ifdef CONFIG_ZHAOXI_BES_AUDIO
+             calls++;
+             last_ssl_result = ret;
+@@ -1218,7 +1282,8 @@
+     resp_buf[0] = 0;
+     char *raw = tls_raw_acquire();
+     tls_body_collector_t collector = {resp_buf, resp_cap, 0};
+-    int64_t deadline = tls_stream_now_ms() + (int64_t)AGENT_LLM_SOCKET_TIMEOUT_SEC * 1000;
++    int64_t deadline = ctx->request_deadline ? ctx->request_deadline :
++        tls_stream_now_ms() + (int64_t)AGENT_LLM_SOCKET_TIMEOUT_SEC * 1000;
+     int result = tls_read_response_body(ctx, tls_collect_body, &collector, deadline,
+                                         true, out_keep_alive, raw, head_only);
+     tls_raw_release(raw);
+@@ -1352,9 +1417,12 @@
+     if(headers)for(;headers->name && count<15;headers++)merged[count++]=*headers;
+     merged[count]=(vela_header_t){NULL,NULL};
+     tls_ctx_t *ctx=calloc(1,sizeof(*ctx));if(!ctx)return VELA_TLS_ERR_OVERFLOW;
+-    int rc=tls_ctx_connect_limited(ctx,host,port,budget,cancel,user);
++    int64_t end=bounded_now_ms()+budget;
++    int rc=tls_ctx_connect_limited(ctx,host,port,budget<15000?budget:15000,cancel,user);
++    if(!rc)ctx->request_deadline=end;
+     if(!rc)rc=tls_write_request(ctx,"POST",host,path,merged,body,strlen(body));
+     if(!rc)rc=tls_read_response(ctx,out,capacity,NULL,NULL,false);
++    ctx->abortive_close=rc<0;
+     tls_ctx_free(ctx);free(ctx);
+     if(rc<0)out[0]=0;
+     return rc;
+@@ -1391,9 +1459,10 @@
+         json_body, body_len, resp_buf, resp_cap, NULL);
+ }
+ 
+-int vela_https_post_json_stream(const char *host, const char *port, const char *path,
++static int https_post_json_stream_impl(const char *host, const char *port, const char *path,
+     const vela_header_t *extra_headers, const char *json_body,
+-    vela_https_body_cb callback, void *user)
++    vela_https_body_cb callback, void *user,unsigned budget,
++    int (*cancel)(void *),void *cancel_user)
+ {
+     if (!host || !*host || !port || !*port || !path || path[0] != '/' ||
+         !json_body || !callback || strchr(host, '\r') || strchr(host, '\n') ||
+@@ -1410,10 +1479,15 @@
+     merged[n] = (vela_header_t){NULL, NULL};
+     tls_ctx_t *ctx = calloc(1, sizeof(*ctx));
+     if (!ctx) return VELA_TLS_ERR_OVERFLOW;
+-    int result = tls_ctx_connect(ctx, host, port);
++    int64_t end=budget?bounded_now_ms()+budget:0;
++    int result = budget ? tls_ctx_connect_limited(ctx,host,port,budget<15000?budget:15000,cancel,cancel_user) :
++        tls_ctx_connect(ctx, host, port);
++    if(!result && budget)ctx->request_deadline=end;
+     if (!result) result = tls_write_request(ctx, "POST", host, path, merged,
+                                            json_body, strlen(json_body));
+-    if (!result) {
++    if (!result && budget) {
++        result=tls_read_response_stream(ctx,callback,user,ctx->request_deadline);
++    } else if (!result) {
+         tls_stream_bio_t bio = {&ctx->net, tls_stream_now_ms() + TLS_STREAM_TIMEOUT_MS};
+         mbedtls_ssl_set_bio(&ctx->ssl, &bio, tls_stream_send, tls_stream_recv, NULL);
+         result = tls_read_response_stream(ctx, callback, user, bio.deadline);
+@@ -1426,7 +1500,22 @@
+ #endif
+                              NULL);
+     }
++    ctx->abortive_close=result<0;
+     tls_ctx_free(ctx); free(ctx); return result;
++}
++
++int vela_https_post_json_stream(const char *host,const char *port,const char *path,
++    const vela_header_t *headers,const char *body,vela_https_body_cb callback,void *user)
++{
++    return https_post_json_stream_impl(host,port,path,headers,body,callback,user,0,NULL,NULL);
++}
++
++int vela_https_post_json_stream_bounded(const char *host,const char *port,const char *path,
++    const vela_header_t *headers,const char *body,vela_https_body_cb callback,void *user,
++    unsigned budget,int (*cancel)(void *),void *cancel_user)
++{
++    if(budget<1000 || budget>180000)return VELA_TLS_ERR_PROTOCOL;
++    return https_post_json_stream_impl(host,port,path,headers,body,callback,user,budget,cancel,cancel_user);
+ }
+ 
+ 
+diff --git a/src/infra/vela_tls.h b/src/infra/vela_tls.h
+--- a/src/infra/vela_tls.h
++++ b/src/infra/vela_tls.h
+@@ -109,6 +109,12 @@
+     const vela_header_t *extra_headers, const char *json_body,
+     vela_https_body_cb callback, void *user);
+ 
++/* Dedicated cancellable SSE request: connect/handshake budget <=15 seconds,
++ * total monotonic budget 1..180 seconds. DNS retains its resolver bound. */
++int vela_https_post_json_stream_bounded(const char *host,const char *port,const char *path,
++    const vela_header_t *headers,const char *body,vela_https_body_cb callback,void *user,
++    unsigned budget_ms,int (*cancel)(void *),void *cancel_user);
++
+ /**
+  * Plain HTTP (no TLS) POST with Content-Type: application/json.
+  * Used for internal/intranet endpoints that don't support HTTPS.

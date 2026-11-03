@@ -1,0 +1,43 @@
+diff --git a/src/infra/vela_tls.c b/src/infra/vela_tls.c
+--- a/src/infra/vela_tls.c
++++ b/src/infra/vela_tls.c
+@@ -1435,6 +1435,25 @@
+         resp_buf, resp_cap, NULL);
+ }
+ 
++int vela_https_get_bounded(const char *host,const char *port,const char *path,
++    char *out,size_t capacity,unsigned budget,int (*cancel)(void *),void *user)
++{
++    if(!host || !port || !path || !out || capacity<2 || !budget || budget>60000)
++        return VELA_TLS_ERR_OVERFLOW;
++    out[0]=0;
++    tls_ctx_t *ctx=calloc(1,sizeof(*ctx));if(!ctx)return VELA_TLS_ERR_OVERFLOW;
++    int64_t end=bounded_now_ms()+budget;
++    int rc=tls_ctx_connect_limited(ctx,host,port,budget<15000?budget:15000,cancel,user);
++    if(!rc)ctx->request_deadline=end;
++    vela_header_t headers[]={{"Accept","application/json"},{"Accept-Encoding","identity"},{NULL,NULL}};
++    if(!rc)rc=tls_write_request(ctx,"GET",host,path,headers,NULL,0);
++    if(!rc)rc=tls_read_response(ctx,out,capacity,NULL,NULL,false);
++    ctx->abortive_close=rc<0;
++    tls_ctx_free(ctx);free(ctx);
++    if(rc<0)out[0]=0;
++    return rc;
++}
++
+ int vela_https_post_json(const char* host, const char* port, const char* path,
+     const vela_header_t* extra_headers,
+     const char* json_body,
+diff --git a/src/infra/vela_tls.h b/src/infra/vela_tls.h
+--- a/src/infra/vela_tls.h
++++ b/src/infra/vela_tls.h
+@@ -81,6 +81,10 @@
+  */
+ int vela_https_get(const char *host, const char *port, const char *path,
+                    char *resp_buf, size_t resp_cap);
++/* Dedicated, cancellable GET; absolute budget includes connect/write/read.
++ * DNS retains the system resolver's configured retry boundary. */
++int vela_https_get_bounded(const char *host,const char *port,const char *path,
++    char *out,size_t capacity,unsigned budget_ms,int (*cancel)(void *),void *user);
+ 
+ /**
+  * Convenience wrapper for POST with Content-Type: application/json.

@@ -1,0 +1,26 @@
+{
+  "date": "2026-11-03",
+  "purpose": "Promote the board-tested AP and assets in PR #13",
+  "firmware_sha256": "565b643297d63b467a766504bcc9955259158bdac1ae66ba58ee07e09b2e39a6",
+  "size": 1370912,
+  "repository_release_bin_replaced": true,
+  "source_and_patch_hashes": "matched",
+  "sdk_patches": 53,
+  "native_checks": "passed",
+  "python_checks": {
+    "static_feed": 7,
+    "uplink_config": 8,
+    "morning_feed": 5
+  },
+  "live_acceptance": [
+    "5GHz hotspot voice",
+    "local wake greeting",
+    "profile cancel/save with original restored",
+    "cloud feed download and cross-day dedup",
+    "local boot network-success announcement"
+  ],
+  "real_0700_unattended": "not yet observed",
+  "workflow_enablement": "explicit ZHAOXI_NEWS_FEED_ENABLED repository variable",
+  "private_values_scan": "passed, values read from board only in RAM; no configured private values found",
+  "private_values_checked": 3
+}

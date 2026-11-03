@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "prompts": {
+    "hello": {
+      "text": "你好",
+      "file": "hello.zxp",
+      "size": 46104,
+      "sha256": "a60b9495f5caa3ad5d36b4cadf6a3e1f35c6a29a23eaf5dca83981070a0df567"
+    },
+    "news_ready": {
+      "text": "有新的资讯，需要播放吗？请说播放，或暂不播放。",
+      "file": "news_ready.zxp",
+      "size": 207384,
+      "sha256": "4840c6115ac0a119c2a7d4d2774aa4fa32dfe308c92ae6a6397f716af2a653cd"
+    },
+    "network_error": {
+      "text": "网络暂时不可用，请稍后再试。",
+      "file": "network_error.zxp",
+      "size": 130584,
+      "sha256": "28760c9c2c3bea9b2d48c90d00779290276fa3ecd055fe59619aa73bff3e335f"
+    },
+    "network_connected": {
+      "text": "联网成功",
+      "file": "network_connected.zxp",
+      "size": 46104,
+      "sha256": "f0679a06c73b8be7d25e64b6ff86554946f0911a2df8e7ec1f99708c1e4cf2c9"
+    }
+  }
+}

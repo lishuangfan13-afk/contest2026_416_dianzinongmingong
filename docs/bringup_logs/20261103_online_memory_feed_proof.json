@@ -1,0 +1,101 @@
+{
+  "date": "2026-11-03",
+  "recorded_at_utc": "2026-11-03T03:49:17.380330+00:00",
+  "firmware": {
+    "sha256": "d16abc96df8fd8b17b416e5eac967dbbd11a7ece075e82cf28b7b7b721e459a6",
+    "size": 1370528,
+    "address": "0x30190000",
+    "final_incremental_tasks": 12,
+    "downloader_exit": 0,
+    "manual_reset_required": false,
+    "source_manifest_hashes": "matched"
+  },
+  "live_user_acceptance": {
+    "natural_wake_greeting_and_one_plus_one": "user confirmed both heard",
+    "greeting_local_pcm_bytes": 46080,
+    "greeting_first_chunk_ms": 143,
+    "profile_cancel": "user heard prompt/cancel reply; original readback unchanged",
+    "profile_confirm": "user heard saved reply; appended sentence read back",
+    "original_profile_restored_byte_equal": true
+  },
+  "service": {
+    "repository": "yuk1-r/contest2026_416_dianzinongmingong",
+    "deployment_commit": "1c29ae43a29c3c8336012e6f5d208a9c0034ad26",
+    "workflow_state": "active",
+    "latest_run": {
+      "id": 41573353930,
+      "status": "completed",
+      "conclusion": "success",
+      "event": "push",
+      "html_url": "https://github.com/yuk1-r/contest2026_416_dianzinongmingong/actions/runs/41573353930",
+      "created_at": "2026-11-03T03:37:52Z",
+      "head_sha": "1c29ae43a29c3c8336012e6f5d208a9c0034ad26"
+    },
+    "schedule_cst": [
+      "hourly at minute 17",
+      "06:47 daily"
+    ],
+    "published_branch": "news-site",
+    "published_files": [
+      "candidates.json",
+      ".nojekyll"
+    ],
+    "feed_url": "https://yuk1-r.github.io/contest2026_416_dianzinongmingong/candidates.json",
+    "pages_https_enforced": true,
+    "pages_latest_build": {
+      "status": "built",
+      "error": {
+        "message": null
+      },
+      "created_at": "2026-11-03T03:38:01Z",
+      "updated_at": "2026-11-03T03:38:21Z",
+      "commit": "f2e1b3a6208efbf191c01b8f0ec3f61e0886b095"
+    },
+    "competition_repository_modified": false,
+    "github_credentials_on_board": false
+  },
+  "board_integration": {
+    "saved_today": true,
+    "date": "2026-11-03",
+    "candidate_count_from_public_service": 1,
+    "new_items_after_cross_day_dedup": 0,
+    "duplicate_seen_in_yesterday_played_cache": true,
+    "repeat_announcement": false,
+    "last_error": 0,
+    "clock": "SNTP",
+    "original_persona_preserved": true,
+    "yesterday_news_preserved": true,
+    "today_news_preserved_after_final_firmware_update": true
+  },
+  "reachability": {
+    "raw_github_domain": "TCP connect failed on this hotspot",
+    "anonymous_api_alternative": "PC egress hit anonymous rate limit; not used",
+    "final_delivery": "GitHub Pages; board TLS and static download passed"
+  },
+  "tests": {
+    "profile_punctuation_omission_compatibility": "passed in actual C service test",
+    "public_feed_publisher": "5 passed; includes data-only orphan branch and explicit Pages build"
+  },
+  "final_device": {
+    "wifi_connected": true,
+    "auto_running": true,
+    "accepting_speech": true,
+    "awake": false,
+    "time_synced": true,
+    "diagnostic_wake_logging": "off after monitor shutdown"
+  },
+  "remaining": [
+    "Observe an actual 07:00 Asia/Shanghai unattended run; next opportunity is 2026-11-04",
+    "No new nonduplicate content was available today, so no new announcement/playback was forced"
+  ],
+  "evidence": [
+    "work/local-prompts-live-wake.log",
+    "work/profile-live-cancel.log",
+    "work/profile-live-confirm.log",
+    "work/board-public-feed-activation.json",
+    "work/board-pages-feed-config.json",
+    "work/final-public-pages-status.json",
+    "work/final-public-workflow-status.json",
+    "work/online-final-postflash.jsonl"
+  ]
+}

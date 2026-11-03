@@ -185,6 +185,13 @@ def main():
              'docs/本地中文指令.md', 'docs/本地记事.md',
              'tools/display_link.py', 'assets/agent_deploy/README.md']
     names += ['assets/agent_deploy/'+name for name in ASSETS]
+    names += ['tools/configure_uplink.py', 'tools/local_prompts.py',
+              'tools/morning_feed.py', 'tools/export_morning_feed.py',
+              'tools/publish_morning_feed.py', '.github/workflows/morning-feed.yml',
+              'docs/本地语音与独立资讯.md']
+    names += ['assets/local_prompts/'+name for name in (
+        'manifest.json', 'hello.zxp', 'news_ready.zxp',
+        'network_error.zxp', 'network_connected.zxp')]
     names += [p.relative_to(REPO).as_posix() for p in sorted((REPO/'tools/pc_link').iterdir())
               if p.is_file() and p.suffix in ('.py', '.md', '.cmd')]
     names += extension_source_names()
@@ -217,7 +224,7 @@ def main():
     # Keep copied scripts byte-exact. Missing documentation links open the
     # pinned public source instead of pointing at absent build dependencies.
     transformed = []
-    public_source = 'https://github.com/lishuangfan13-afk/contest2026_416_dianzinongmingong/blob/'+source_commit+'/'
+    public_source = 'https://github.com/open-vela/contest2026_416_dianzinongmingong/blob/'+source_commit+'/'
     for name, data in list(files.items()):
         if not name.endswith('.md'):
             continue
@@ -239,7 +246,7 @@ def main():
                     if display_release else '- 本快照包含 EasyMatrix 源码与主机桥，屏端发布应用按对应固件目录准备。\n')
     files['README.md'] = (f'''# 朝夕作品交付包（{args.date} · {args.label}）
 
-本包用于接手朝夕的问答、备忘待办和提醒演示，包含 BES AP、电脑供网与控制工具、业务资产、扩展源码及操作文档。先读 [项目完整交接](docs/项目完整交接.md)，了解比赛、硬件、软件、启动与全部待办，再看 [交付清单](docs/交付核对清单.md)。功能命令见 [使用说明](docs/无屏核心功能.md)，夜间修复见 [工作记录](docs/20261102夜间工作交接.md)。
+本包用于接手朝夕的语音问答、长期人设、资讯、备忘待办和提醒，包含 BES AP、手机热点配置与电脑供网工具、固定提示音、干净业务资产、扩展源码及文档。先读 [项目完整交接](docs/项目完整交接.md)，新功能的当前状态见 [本地语音与独立资讯](docs/本地语音与独立资讯.md)，早期修复见 [工作记录](docs/20261102夜间工作交接.md)。
 
 ## 版本
 
@@ -249,9 +256,9 @@ def main():
 ## 启动
 
 1. 先运行 `python verify_bundle.py` 核对文件和固件。
-2. 在 Windows 准备 Python 3、pyserial、FTDI 驱动及 Ubuntu-22.04 WSL；WSL 使用 root，装好 pppd、ip、iptables 并启用 PPP/TUN。
-3. 运行 `python tools/pc_link/launch.py --check-only`，然后双击 `tools/pc_link/仅共享网络.cmd`。
-4. 保留启动窗口，在另一个终端用 `tools/pc_link/control.py` 体验业务。结束用 `停止朝夕语音.cmd`。
+2. 保存热点与 `uplink_mode=wifi`、部署固定提示音并配置服务凭据后，开机自动联网播报“联网成功”，等待“你好，夕夕”。本板已验证 5GHz / WPA2；首次配置与音频安装见 [新功能说明](docs/本地语音与独立资讯.md)。
+3. 若使用电脑 PPP，准备 Python 3、pyserial、FTDI 驱动和 Ubuntu-22.04 WSL；WSL 使用 root，装好 pppd、ip、iptables 并启用 PPP/TUN。
+4. 电脑模式运行 `python tools/pc_link/launch.py --check-only`，再启动 `tools/pc_link/仅共享网络.cmd`。保留窗口，在另一终端用 `tools/pc_link/control.py` 体验业务；结束用 `停止朝夕语音.cmd`。
 
 ## 本地业务与扩展
 
@@ -259,7 +266,7 @@ def main():
 
 [喝水提醒](docs/喝水提醒.md)使用本地周期任务；[唤醒短语](docs/ASR唤醒短语.md)与自动语音开关配合；[飞书通知](docs/飞书通知接口.md)配置固定收件目标后由使用者发送；[颜文字屏](docs/颜文字屏使用.md)通过独立 CH343 串口显示状态。联网模式见 [配置说明](docs/联网方式配置.md)。
 
-API 凭据与真实记录保存在板子和操作者本机，包内业务资产是可复用的干净模板。运行后产生的 `out/pc_link` 留在本机。首次安装、外壳接线与源码重建分别见交付清单和构建说明。当前演示以电脑供网、文字输入与语音播报为主，连续自动语音仍在现场联调。
+API 凭据与真实记录保存在板子和操作者本机，包内业务资产是可复用的干净模板。运行后产生的 `out/pc_link` 留在本机。首次安装、外壳接线与源码重建分别见交付清单和构建说明。热点语音、本地提示音与语音人设已实板验证，公开资讯服务已在个人 fork 上线；真实早七点无人值守验收仍待观察。
 ''').encode('utf-8')
     changed_sources = []
     for name in names:

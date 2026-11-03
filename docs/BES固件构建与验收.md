@@ -9,13 +9,13 @@
 | 开发板 | BES2800BP EVB，板级目录 `vendor/bes/boards/best1700_ep/aos_evb` |
 | 产品配置 | `apheadless`，匹配 `apaudio3` BSP 库 |
 | 镜像 | [nuttx_ap_headless.bin](../firmware/headless_pc_link/nuttx_ap_headless.bin) |
-| 镜像大小 | 1,362,288 字节 |
-| SHA256 | `0f4078aafd755bc0cf48d246c02736cbe5493bb05edcc6f4fe49884fd5474e64` |
+| 镜像大小 | 1,370,912 字节 |
+| SHA256 | `565b643297d63b467a766504bcc9955259158bdac1ae66ba58ee07e09b2e39a6` |
 | AP 烧录地址 | `0x30190000` |
 | 持久数据目录 | `/emmc/zhaoxi` |
 | 来源与校验 | [固件 manifest](../firmware/headless_pc_link/nuttx_ap_headless.manifest.json) |
 
-BES 源码现已整合电脑 PPP、实际音频、MiMo ASR／增量 TTS、本地备忘与待办、明确中文指令、提醒调度、喝水任务、开机唤醒、长期人设、晨间资讯和固定目标飞书通知。EasyMatrix 作为独立显示终端，由电脑主机桥连接。2026-11-02 发布固件和 manifest 已成对更新，完成 AP 烧录、人设与资讯重启保存、资讯同意／拒绝／复播实测，见 [本轮验收](2026-11-02唤醒与晨间资讯验收.md)。热点独立供网、持续在线资讯接口及真实七点无人值守仍待验证。
+BES 源码现已整合电脑 PPP／自动 Wi-Fi、实际音频、MiMo ASR／增量 TTS、本地提示音、备忘与待办、提醒调度、喝水任务、开机唤醒、确认后修改长期人设、晨间资讯和固定目标飞书通知。2026-11-03 发布镜像与实板一致，热点语音、开机“联网成功”、人设取消／确认和云端资讯下载／去重已验收。个人 fork 的 Actions / Pages 已上线；比赛仓库工作流须显式启用才执行。真实七点无人值守仍待观察。详见 [本地语音与独立资讯](本地语音与独立资讯.md) 与 [开机播报证明](bringup_logs/20261103_boot_network_notice_proof.json)，早期许可／拒绝／复播结果保留在 [11月2日验收](2026-11-02唤醒与晨间资讯验收.md)。
 
 ## 工作区与固定依赖
 
@@ -78,13 +78,15 @@ python3 tools/build_bes_headless.py \
   --stage-only
 ```
 
-`--stage-only` 使用已经完成的构建。修改普通代码后先增量编译，修改配置后重新配置和编译；修改 `.ap` 启动包含文件后要更新顶层启动文件，完整配置入口已处理这一关系。`firmware/headless` 保留历史 R10，当前电脑供网镜像写入 `firmware/headless_pc_link`。
+`--stage-only` 使用已经完成的构建。修改普通代码后先增量编译，修改配置后重新配置和编译；修改 `.ap` 启动包含文件后要更新顶层启动文件，完整配置入口已处理这一关系。`firmware/headless` 保留历史 R10，当前 PC／Wi-Fi 无屏发布镜像写入 `firmware/headless_pc_link`。
+
+本版固定音频在 `assets/local_prompts`。板端 Agent 正常退出并释放串口后执行 `python tools/local_prompts.py install --port COM20 --assets assets/local_prompts`，回读四段 CRC 均正常后重启。已有板更新无需重铺人设、凭据或资讯数据。NSH 可用时优先使用 `board-bringup` 技能的后台延迟重启交接，避免人工反复按 RESET。
 
 ## 烧录与安装
 
 ### 1. 写入 AP
 
-准备厂商 `dldtool.exe` 和 `programmer1700_dual.bin`，选择双芯片模式，将封装后的 `nuttx_ap_headless.bin` 写到 AP 地址 `0x30190000`。使用当前正常的 USB2UART 与供电接法，引导同步期间按下载工具提示操作；正常系统也可通过软件重启进入下载流程。
+准备厂商 `dldtool.exe` 和 `programmer1700_dual.bin`，选择双芯片模式，将封装后的 `nuttx_ap_headless.bin` 写到 AP 地址 `0x30190000`。使用当前正常的 USB2UART 与供电接法，引导同步期间按下载工具提示操作；2026-11-03 已验证免按键流程：NSH 后台延迟 5 秒执行 `reboot bootloader`，在同一 Python 程序内立即释放串口并启动继承终端的 dldtool；同步和烧录成功、退出码 0，无需人工 RESET。`--reboot` 负责下载完成后重启。具体时序与参数见 [核验记录](bringup_logs/20261103_auto_reset_verification.md) 和 `board-bringup` 技能。
 
 本镜像更新 AP，APC1 与引导固件沿用板上已有版本。烧录前用 manifest 核对镜像大小、SHA256 和地址。厂商板级资料见 [aos_evb 开发说明](https://github.com/open-vela/vendor_bes/blob/dev-ai-contest-2026/boards/best1700_ep/aos_evb/README_zh-cn.md)。
 

@@ -1,0 +1,39 @@
+name: Public morning news feed
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Hourly, plus an extra pre-morning refresh at 06:47 Asia/Shanghai.
+    - cron: '17 * * * *'
+    - cron: '47 22 * * *'
+  push:
+    branches: [dev-ai-contest-2026]
+    paths:
+      - '.github/workflows/morning-feed.yml'
+      - 'tools/morning_feed.py'
+      - 'tools/export_morning_feed.py'
+      - 'tools/publish_morning_feed.py'
+
+permissions:
+  contents: write
+  pages: write
+
+concurrency:
+  group: public-morning-news-feed
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    # Opt in per repository; merging this workflow must not provision a feed.
+    if: vars.ZHAOXI_NEWS_FEED_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Collect official public RSS
+        run: python3 tools/export_morning_feed.py --output "$RUNNER_TEMP/candidates.json"
+      - name: Publish only the public snapshot
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_PAGES_PUBLISH: '1'
+        run: python3 tools/publish_morning_feed.py --input "$RUNNER_TEMP/candidates.json"
