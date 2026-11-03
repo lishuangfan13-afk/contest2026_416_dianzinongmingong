@@ -210,6 +210,31 @@ int AUTO_VOICE_TESTS_MAIN(void)
     assert(!voice_channel_auto_start());wait_count(&product_replied,1);
     assert(!atomic_load(&fake_bus_messages));stop_auto();atomic_store(&product_reply,0);
 
+    /* A reply already receiving/playing TTS owns a speaker reservation and
+     * remains active beyond the absent-reply deadline. Finishing that reply
+     * releases the reservation and returns to capture without a timeout cue. */
+    reset_fixture();allow_bus=1;atomic_store(&fake_input_pattern,1);
+    assert(!voice_channel_auto_start());wait_count(&fake_bus_messages,1);
+    char speaking_id[32];snprintf(speaking_id,sizeof(speaking_id),"%s",last_chat_id);
+    voice_auto_pause_for_tts();
+    int timeout_cues=atomic_load(&cue_counts[VOICE_AUTO_FEEDBACK_TURN_TIMEOUT]);
+    pthread_mutex_lock(&s_auto.lock);
+    assert(s_auto.speakers==1 && s_auto.awaiting && !s_auto.capture);
+    s_auto.reply_started=auto_now_ms()-AUTO_REPLY_TIMEOUT_MS-1;
+    pthread_mutex_unlock(&s_auto.lock);
+    assert(!auto_can_capture());usleep(100000);
+    pthread_mutex_lock(&s_auto.lock);
+    assert(s_auto.enabled && s_auto.running && s_auto.awaiting && s_auto.speakers==1);
+    pthread_mutex_unlock(&s_auto.lock);
+    assert(voice_channel_auto_reply_is_active(speaking_id));
+    assert(atomic_load(&cue_counts[VOICE_AUTO_FEEDBACK_TURN_TIMEOUT])==timeout_cues);
+    voice_channel_auto_reply_done_for(speaking_id);
+    voice_auto_resume_after_tts();
+    pthread_mutex_lock(&s_auto.lock);assert(!s_auto.speakers && !s_auto.awaiting);pthread_mutex_unlock(&s_auto.lock);
+    int speaking_reads=atomic_load(&reads);wait_count(&reads,speaking_reads+60);
+    assert(atomic_load(&cue_counts[VOICE_AUTO_FEEDBACK_TURN_TIMEOUT])==timeout_cues);
+    stop_auto();
+
     /* Timeouts stop the automatic loop; a cancelled ID cannot release a later
      * turn even if its model/outbound operation finishes after restart. */
     reset_fixture();allow_bus=1;atomic_store(&fake_input_pattern,1);

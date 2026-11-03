@@ -1,0 +1,23 @@
+{
+  "date": "2026-11-04",
+  "board": "BES2800BP / best1700 AP",
+  "flash_address": "0x30190000",
+  "image": "firmware/dialogue_prefetch/nuttx_ap_headless.bin",
+  "image_sha256": "e15ddc4a95312dcbe9ea19e8064af15c16a8944fae0aa278644a320beaa4aafb",
+  "flash": {"real_console": true, "programming_succeeded": true, "downloader_exit": 0, "sync_confirmed": false, "reason_sync_false": "sync output was not captured in bounded console evidence; flash preflight explicitly states no persistent files changed"},
+  "diagnosis": {"old_ppp_pcm_rate_bytes_per_second": "about 34000-35000 decoded PCM B/s", "required_pcm_bytes_per_second": 48000, "old_queue_prefill_bytes": 30720, "old_queue_capacity_bytes": 65536},
+  "fix": ["PC uplink selects bounded complete PCM prefetch before playback; max 5760000 bytes", "Wi-Fi keeps original stream playback", "active speaker does not trigger absent-reply timeout", "BESPCM close metrics report successful DMA span only"],
+  "offline": ["71 Python headless tests passed", "actual MiMo/SSE prefetch ASan+UBSan+LSan: 51 allocation failure positions, zero live allocations", "prefetch exact ordering, delayed/fractured SSE, Wi-Fi streaming, cancellation, HTTP/protocol/limit failures passed", "actual auto voice active-speaker timeout and normal missing-reply timeout passed", "59 SDK patches replayed and compared to build source"],
+  "hardware": {
+    "wireless_fixed_phrase": {"pcm_bytes": 161280, "ideal_ms": 3360, "play_ms": 3367, "max_gap_ms": 3, "http": 200},
+    "wired_fixed_phrase": {"pcm_bytes": 322560, "ideal_ms": 6720, "play_ms": 6733, "max_gap_ms": 1, "prefetch_receive_ms": 10596, "http": 200},
+    "wired_real_reply_1": {"pcm_bytes": 906240, "ideal_ms": 18880, "play_ms": 18923, "max_gap_ms": 1, "prefetch_receive_ms": 28112, "http": 200},
+    "wired_real_reply_2": {"pcm_bytes": 821760, "ideal_ms": 17120, "play_ms": 17154, "max_gap_ms": 1, "prefetch_receive_ms": 24632, "http": 200},
+    "control_during_playback": "auto-status rc=0; Agent remained enabled/running and returned to accepting speech",
+    "stop": "boot watcher stopped with serial/session cleanup confirmed"
+  },
+  "preservation": {"persistent_snapshot_before_flash": "outputs/dialogue-before-flash-data.json", "credentials_exported": false, "personal_model_changed": false},
+  "known_tradeoff": "PC mode waits for complete audio before starting playback; slow cloud generation increases start latency but removes mid-answer starvation for measured rate differences.",
+  "not_claimed": ["all networks/all answer lengths", "long-term unattended run", "speaker-independent ASR accuracy", "sync console text capture"],
+  "hardware_functional_acceptance_complete": false
+}

@@ -1,0 +1,14 @@
+diff --git a/src/voice/voice_channel.c b/src/voice/voice_channel.c
+--- a/src/voice/voice_channel.c
++++ b/src/voice/voice_channel.c
+@@ -396,7 +396,9 @@ static bool auto_can_capture(void)
+ {
+     bool timed_out=false;
+     pthread_mutex_lock(&s_auto.lock);
+-    if(s_auto.enabled && s_auto.awaiting &&
++    /* Receiving and playing a bounded TTS response is active output, not
++     * waiting for an absent reply. Its provider and DMA own their deadlines. */
++    if(s_auto.enabled && s_auto.awaiting && !s_auto.speakers &&
+        auto_now_ms()-s_auto.reply_started>=AUTO_REPLY_TIMEOUT_MS) {
+         timed_out=true;
+         s_auto.awaiting=false;s_auto.pending_id[0]=0;

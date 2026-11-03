@@ -9,13 +9,17 @@ import argparse
 import csv
 import io
 import json
+import math
 import os
 from pathlib import Path
 import re
 import subprocess
 import sys
 import tempfile
+import time
 import xml.etree.ElementTree as ET
+
+from launch import process_running, read_status
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
@@ -24,6 +28,8 @@ STATE = ROOT / 'out/pc_link_boot'
 NS = 'http://schemas.microsoft.com/windows/2004/02/mit/task'
 OWNER = 'Zhaoxi.PcLink.BootWatcher.v1'
 NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
+WATCHER_FRESH_SECONDS = 15
+WATCHER_START_SECONDS = 20
 ET.register_namespace('', NS)
 
 
@@ -218,8 +224,9 @@ def install(sid, port, state_dir, start=False):
         old = owned_config(old_xml, sid)
         if old == config:
             if start:
-                start_task(name)
-            print('Logon standby task is already installed and verified.')
+                start_task(name, config)
+            print('Logon standby task is already installed and verified' +
+                  ('; watcher runtime confirmed.' if start else '.'))
             return 0
         stop_watcher(Path(old['state_dir']))
     # Temporary XML holds paths, not credentials; always remove it after use.
@@ -236,15 +243,74 @@ def install(sid, port, state_dir, start=False):
     if installed is None or owned_config(installed, sid) != config:
         raise StartupError('Task installation could not be verified.')
     if start:
-        start_task(name)
-    print('Logon standby task installed and verified' + ('; start requested.' if start else '.'))
+        start_task(name, config)
+    print('Logon standby task installed and verified' +
+          ('; watcher runtime confirmed.' if start else '.'))
     return 0
 
 
-def start_task(name):
+def read_watcher(config):
+    """Read only the installed task's state; missing/partial files prove nothing."""
+    try:
+        value = read_status(Path(config['state_dir']) / 'watch.json')
+    except (OSError, ValueError, UnicodeError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def watcher_runtime(value, config, now=None):
+    """A live PID alone may be reused; also require this instance's heartbeat."""
+    now = time.time() if now is None else now
+    if (type(value.get('schema')) is not int or value['schema'] != 1 or
+            value.get('port') != config['port'] or type(value.get('pid')) is not int or value['pid'] <= 0):
+        return False
+    if not isinstance(value.get('instance_id'), str) or not re.fullmatch(r'[0-9a-f]{32}', value['instance_id']):
+        return False
+    started, updated = value.get('started_at'), value.get('updated_at')
+    if any(type(stamp) not in (int, float) or not math.isfinite(stamp) for stamp in (started, updated)):
+        return False
+    if not 0 < started <= updated <= now + 1 or not 0 <= now - updated <= WATCHER_FRESH_SECONDS:
+        return False
+    return process_running(value['pid']) is True
+
+
+def watcher_ready(value, config, now=None):
+    if not watcher_runtime(value, config, now):
+        return False
+    phase = value.get('phase')
+    if phase in ('waiting-choice', 'polling-wireless'):
+        return value.get('serial_open') is True
+    if phase == 'wireless-selected':
+        return value.get('serial_open') is False and value.get('serial_close_confirmed') is True
+    if phase == 'attaching-wired':
+        child = value.get('attach_pid')
+        return (value.get('serial_open') is False and value.get('serial_close_confirmed') is True
+                and type(child) is int and child > 0 and process_running(child) is True)
+    return False
+
+
+def wait_for_watcher(config, requested_at, timeout=WATCHER_START_SECONDS,
+                     clock=time.monotonic, wall_clock=time.time, pause=time.sleep):
+    """Require a heartbeat published after /Run, including an already-live task."""
+    end = clock() + timeout
+    while True:
+        value = read_watcher(config)
+        if (watcher_ready(value, config, wall_clock()) and
+                value['updated_at'] >= requested_at):
+            return value
+        remaining = end - clock()
+        if remaining <= 0:
+            raise StartupError('Task remains installed, but watcher readiness was not confirmed; '
+                               'inspect --status and recover any unconfirmed previous session.')
+        pause(min(.2, remaining))
+
+
+def start_task(name, config):
+    requested_at = time.time()
     result = run_command(['schtasks.exe', '/Run', '/TN', name])
     if result.returncode:
         raise StartupError('Task remains installed, but immediate start was not confirmed.')
+    return wait_for_watcher(config, requested_at)
 
 
 def status(sid):
@@ -252,9 +318,25 @@ def status(sid):
     if xml is None:
         print('Logon standby task is not installed.')
     else:
-        owned_config(xml, sid)
-        print('Logon standby task is installed and ownership verified. '
-              'This does not confirm watcher or network readiness.')
+        config = owned_config(xml, sid)
+        value = read_watcher(config)
+        print('Logon standby task is installed and ownership verified.')
+        if watcher_ready(value, config):
+            messages = {'waiting-choice': 'Watcher is ready and waiting for a network choice.',
+                        'polling-wireless': 'Watcher is running; wireless-mode console polling is active.',
+                        'wireless-selected': 'Watcher is running; the board selected wireless.',
+                        'attaching-wired': 'Watcher is running; its wired attachment process is active.'}
+            print(messages[value['phase']])
+        elif (value.get('phase') == 'failed' or
+              value.get('cleanup_confirmed') is False and not watcher_runtime(value, config)):
+            print('Watcher is failed or stopped without confirmed cleanup; explicit recovery is required.')
+        elif value.get('phase') == 'stopped' and value.get('cleanup_confirmed') is True:
+            print('Watcher is stopped with cleanup confirmed; it is not waiting for the board.')
+        elif watcher_runtime(value, config):
+            print('Watcher is running, but serial standby readiness is unconfirmed.')
+        else:
+            print('Watcher runtime is not confirmed; installation alone does not provide wired standby.')
+        print('Watcher status does not confirm the board Internet connection.')
     return 0
 
 

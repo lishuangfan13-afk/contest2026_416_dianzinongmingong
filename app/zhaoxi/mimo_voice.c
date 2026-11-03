@@ -176,7 +176,35 @@ struct stream_output {
     voice_tts_chunk_cb callback;
     void *user;
     int64_t started, first_pcm;
+    unsigned char *prefetch;
+    size_t used, capacity;
+    bool buffered;
 };
+
+/* PPP measured 34-35 kB/s decoded PCM, below the DAC's 48 kB/s.
+ * Finish receiving before playback on that link. The existing SSE limit is
+ * 120 seconds; never grow beyond it or fall back to starved live playback. */
+#define MIMO_PREFETCH_MAX (24000u * 2u * 120u)
+static int prefetch_pcm(struct stream_output *out,const unsigned char *pcm,size_t length)
+{
+    if(!pcm || length%2)return -EINVAL;
+    if(length>MIMO_PREFETCH_MAX-out->used)return -EFBIG;
+    size_t needed=out->used+length;
+    if(needed>out->capacity) {
+        size_t capacity=out->capacity?out->capacity:48000u;
+        while(capacity<needed) {
+            if(capacity>MIMO_PREFETCH_MAX/2){capacity=MIMO_PREFETCH_MAX;break;}
+            capacity*=2;
+        }
+        unsigned char *grown=realloc(out->prefetch,capacity);
+        if(!grown)return -ENOMEM;
+        out->prefetch=grown;out->capacity=capacity;
+    }
+    if(length)memcpy(out->prefetch+out->used,pcm,length);
+    out->used=needed;
+    return 0;
+}
+
 
 static int stream_pcm(const unsigned char *pcm, size_t length, void *opaque)
 {
@@ -187,6 +215,7 @@ static int stream_pcm(const unsigned char *pcm, size_t length, void *opaque)
         out->first_pcm = monotonic_ms() - out->started;
         printf("MIMOVOICE phase=tts first_pcm_ms=%lld\n", (long long)out->first_pcm);
     }
+    if(out->buffered)return prefetch_pcm(out,pcm,length);
     out->callback(pcm, length, 0, out->user);
     return voice_channel_tts_stream_error();
 }
@@ -211,7 +240,7 @@ int zhaoxi_mimo_tts_stream(const char *text, voice_tts_chunk_cb callback, void *
     const char *prompt=zhaoxi_prompt_id(text);
     if(prompt) {
         bool handled=false;
-        struct stream_output local={callback,data,monotonic_ms(),-1};
+        struct stream_output local={.callback=callback,.user=data,.started=monotonic_ms(),.first_pcm=-1};
         int local_result=zhaoxi_prompt_stream(prompt,local_pcm,request_cancel,&local,&handled);
         if(handled || agent_shutdown_requested()) {
             if(!local_result){callback(NULL,0,1,data);local_result=voice_channel_tts_stream_error();}
@@ -232,7 +261,9 @@ int zhaoxi_mimo_tts_stream(const char *text, voice_tts_chunk_cb callback, void *
     cJSON_AddStringToObject(audio, "format", "pcm16");
     cJSON_AddStringToObject(audio, "voice", "mimo_default");
     char *payload = cJSON_PrintUnformatted(body); cJSON_Delete(body);
-    struct stream_output output = {callback, data, monotonic_ms(), -1};
+    char uplink[16]={0};
+    bool buffered=!claw_config_get("uplink_mode",uplink,sizeof(uplink)) && !strcmp(uplink,"pc");
+    struct stream_output output = {.callback=callback,.user=data,.started=monotonic_ms(),.first_pcm=-1,.buffered=buffered};
     mimo_sse_t *sse = mimo_sse_create(stream_pcm, &output);
     if (!payload || !sse) {
         free(payload); mimo_sse_destroy(sse); memset(key, 0, sizeof(key)); return -ENOMEM;
@@ -243,6 +274,18 @@ int zhaoxi_mimo_tts_stream(const char *text, voice_tts_chunk_cb callback, void *
         payload, stream_body, sse,180000,stream_cancel,NULL);
     free(payload); memset(key, 0, sizeof(key));
     rc = status == 200 ? mimo_sse_finish(sse) : status < 0 ? status : -EIO;
+    if(!rc && buffered) {
+        printf("MIMOVOICE phase=tts prefetch_bytes=%lu receive_ms=%lld\n",
+            (unsigned long)output.used,(long long)(monotonic_ms()-output.started));
+        for(size_t at=0;at<output.used && !rc;) {
+            if(agent_shutdown_requested()){rc=-ECANCELED;break;}
+            rc=voice_channel_tts_stream_error();if(rc)break;
+            size_t count=output.used-at;if(count>3200)count=3200;
+            callback(output.prefetch+at,count,0,data);
+            at+=count;rc=voice_channel_tts_stream_error();
+        }
+    }
+    free(output.prefetch);
     if (!rc) {
         callback(NULL, 0, 1, data);
         rc = voice_channel_tts_stream_error();

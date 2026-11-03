@@ -34,6 +34,9 @@ class StartupTests(unittest.TestCase):
         self.addCleanup(self.python.stop)
         self.config = startup.make_config(SID, 'com20', Path.cwd() / '私密 用户' / '状态 & 数据')
         self.xml = startup.task_xml(self.config)
+        self.snapshot = patch.object(startup, 'read_watcher', return_value={})
+        self.snapshot.start()
+        self.addCleanup(self.snapshot.stop)
 
     def test_xml_round_trip_chinese_spaces_and_ampersands(self):
         tree = ET.fromstring(self.xml)
@@ -170,6 +173,7 @@ class StartupTests(unittest.TestCase):
             return result()
         with patch.object(startup, 'query_task', side_effect=[None, self.xml]), \
              patch.object(startup, 'run_command', side_effect=execute), \
+             patch.object(startup, 'wait_for_watcher', return_value={}) as ready, \
              contextlib.redirect_stdout(io.StringIO()) as output:
             self.assertEqual(startup.install(SID, 'COM20', Path(self.config['state_dir']), start=True), 0)
         self.assertEqual([command[1] for command in captured], ['/Create', '/Run'])
@@ -179,6 +183,8 @@ class StartupTests(unittest.TestCase):
         self.assertNotIn('/RP', captured[0])
         self.assertNotIn(self.config['state_dir'], output.getvalue())
         self.assertNotIn(SID, output.getvalue())
+        self.assertEqual(ready.call_args.args[0], self.config)
+        self.assertIn('runtime confirmed', output.getvalue())
 
     def test_identical_install_is_idempotent(self):
         with patch.object(startup, 'query_task', return_value=self.xml), \
@@ -311,6 +317,124 @@ class StartupTests(unittest.TestCase):
         for port in (None, '', 'COM0', 'COM20 & unrelated', 'COM-1'):
             with self.assertRaises(startup.StartupError):
                 startup.make_config(SID, port, Path.cwd())
+
+    def live_snapshot(self, **changes):
+        value = {'schema': 1, 'pid': 1234, 'port': 'COM20',
+                 'phase': 'waiting-choice', 'serial_open': True,
+                 'serial_close_confirmed': False, 'cleanup_confirmed': False,
+                 'instance_id': 'a' * 32, 'started_at': 95.0, 'updated_at': 100.0}
+        value.update(changes)
+        return value
+
+    def test_start_passes_verified_config_and_requires_actual_runtime(self):
+        with patch.object(startup, 'run_command', return_value=result()) as run, \
+             patch.object(startup.time, 'time', return_value=100.0), \
+             patch.object(startup, 'wait_for_watcher', return_value=self.live_snapshot()) as ready:
+            value = startup.start_task(startup.task_name(SID), self.config)
+        self.assertEqual(value['phase'], 'waiting-choice')
+        run.assert_called_once_with(['schtasks.exe', '/Run', '/TN', startup.task_name(SID)])
+        ready.assert_called_once_with(self.config, 100.0)
+
+    def test_idempotent_start_uses_existing_verified_state_directory(self):
+        with patch.object(startup, 'query_task', return_value=self.xml), \
+             patch.object(startup, 'start_task') as start, \
+             contextlib.redirect_stdout(io.StringIO()) as output:
+            startup.install(SID, 'COM20', Path(self.config['state_dir']), start=True)
+        start.assert_called_once_with(startup.task_name(SID), self.config)
+        self.assertIn('runtime confirmed', output.getvalue())
+
+    def test_runtime_rejects_stale_pid_wrong_port_invalid_instance_and_times(self):
+        changes = [{'schema': True}, {'schema': 2}, {'port': 'COM21'}, {'pid': True}, {'pid': -1},
+                   {'instance_id': ''}, {'instance_id': 'not-a-nonce'},
+                   {'updated_at': 80.0, 'started_at': 79.0},
+                   {'updated_at': 102.0}, {'updated_at': float('nan')},
+                   {'started_at': float('inf')}, {'started_at': True},
+                   {'started_at': 101.0}]
+        with patch.object(startup, 'process_running', return_value=True):
+            self.assertTrue(startup.watcher_ready(self.live_snapshot(), self.config, 100.0))
+            for change in changes:
+                with self.subTest(change=change):
+                    self.assertFalse(startup.watcher_ready(self.live_snapshot(**change), self.config, 100.0))
+        for alive in (False, None):
+            with patch.object(startup, 'process_running', return_value=alive):
+                self.assertFalse(startup.watcher_ready(self.live_snapshot(), self.config, 100.0))
+
+    def test_valid_phases_require_actual_port_or_live_child(self):
+        with patch.object(startup, 'process_running', return_value=True):
+            for phase in ('failed', 'stopped', 'port-busy', 'stopping-ppp', 'unknown'):
+                self.assertFalse(startup.watcher_ready(self.live_snapshot(phase=phase), self.config, 100.0))
+            self.assertFalse(startup.watcher_ready(self.live_snapshot(serial_open=False), self.config, 100.0))
+            self.assertTrue(startup.watcher_ready(self.live_snapshot(phase='polling-wireless'), self.config, 100.0))
+            released = self.live_snapshot(phase='wireless-selected', serial_open=False, serial_close_confirmed=True)
+            self.assertTrue(startup.watcher_ready(released, self.config, 100.0))
+            attaching = dict(released, phase='attaching-wired', attach_pid=4321)
+            self.assertTrue(startup.watcher_ready(attaching, self.config, 100.0))
+        with patch.object(startup, 'process_running', side_effect=lambda pid: pid == 1234):
+            self.assertFalse(startup.watcher_ready(attaching, self.config, 100.0))
+
+    def test_wait_rejects_old_reused_pid_snapshot_until_fresh_heartbeat(self):
+        reads = [self.live_snapshot(updated_at=99.5), self.live_snapshot(updated_at=99.5),
+                 self.live_snapshot(updated_at=100.2)]
+        ticks = [0.0]
+        def pause(seconds): ticks[0] += seconds
+        with patch.object(startup, 'read_watcher', side_effect=reads), \
+             patch.object(startup, 'process_running', return_value=True):
+            value = startup.wait_for_watcher(self.config, 100.0, timeout=1,
+                clock=lambda: ticks[0], wall_clock=lambda: 100.0 + ticks[0], pause=pause)
+        self.assertEqual(value['updated_at'], 100.2)
+        self.assertAlmostEqual(ticks[0], .4)
+
+    def test_scheduler_ack_with_failed_stopped_missing_or_old_state_times_out(self):
+        for value in ({}, self.live_snapshot(phase='failed'), self.live_snapshot(phase='stopped'),
+                      self.live_snapshot(updated_at=99.9)):
+            ticks = [0.0]
+            def pause(seconds): ticks[0] += seconds
+            with self.subTest(value=value), \
+                 patch.object(startup, 'read_watcher', return_value=value), \
+                 patch.object(startup, 'process_running', return_value=True):
+                with self.assertRaisesRegex(startup.StartupError, 'readiness was not confirmed'):
+                    startup.wait_for_watcher(self.config, 100.0, timeout=.5,
+                        clock=lambda: ticks[0], wall_clock=lambda: 100.0 + ticks[0], pause=pause)
+                self.assertAlmostEqual(ticks[0], .5)
+
+    def test_startup_runtime_failure_keeps_task_and_does_not_claim_success(self):
+        with patch.object(startup, 'query_task', return_value=self.xml), \
+             patch.object(startup, 'run_command', return_value=result()) as run, \
+             patch.object(startup, 'wait_for_watcher', side_effect=startup.StartupError('runtime unconfirmed')), \
+             contextlib.redirect_stdout(io.StringIO()) as output:
+            with self.assertRaises(startup.StartupError):
+                startup.install(SID, 'COM20', Path(self.config['state_dir']), start=True)
+        self.assertEqual(output.getvalue(), '')
+        self.assertEqual(run.call_count, 1)
+        self.assertIn('/Run', run.call_args.args[0])
+
+    def test_status_reports_ready_stopped_failed_and_unconfirmed_without_paths(self):
+        cases = [(self.live_snapshot(), 'ready and waiting'),
+                 (self.live_snapshot(phase='failed'), 'explicit recovery'),
+                 (self.live_snapshot(phase='stopped', cleanup_confirmed=True), 'not waiting'),
+                 ({}, 'installation alone'),
+                 (self.live_snapshot(phase='port-busy'), 'serial standby readiness is unconfirmed')]
+        for value, message in cases:
+            with self.subTest(message=message), \
+                 patch.object(startup, 'query_task', return_value=self.xml), \
+                 patch.object(startup, 'read_watcher', return_value=value), \
+                 patch.object(startup.time, 'time', return_value=100.0), \
+                 patch.object(startup, 'process_running', return_value=True), \
+                 contextlib.redirect_stdout(io.StringIO()) as output:
+                startup.status(SID)
+            self.assertIn(message, output.getvalue())
+            self.assertIn('does not confirm the board Internet', output.getvalue())
+            for private in (SID, self.config['port'], self.config['state_dir'], self.config['python']):
+                self.assertNotIn(private, output.getvalue())
+
+    def test_read_snapshot_uses_exact_installed_path_and_redacts_file_errors(self):
+        self.snapshot.stop()
+        with patch.object(startup, 'read_status', return_value=self.live_snapshot()) as read:
+            self.assertEqual(startup.read_watcher(self.config)['pid'], 1234)
+        read.assert_called_once_with(Path(self.config['state_dir']) / 'watch.json')
+        for error in (FileNotFoundError('PRIVATE PATH'), ValueError('PRIVATE DATA')):
+            with patch.object(startup, 'read_status', side_effect=error):
+                self.assertEqual(startup.read_watcher(self.config), {})
 
 
 if __name__ == '__main__':

@@ -193,6 +193,105 @@ def watcher_lock(state_dir):
     return handle
 
 
+def recovery_console_probe(port):
+    """Explicit maintenance only: fresh NSH acknowledgement and no boot PPP.
+
+    Ordinary watching remains read-only. Do not treat an open COM port, an old
+    prompt or the absence of PPP bytes as proof that the board has released it.
+    """
+    sys.path.insert(0,str(HERE.parent))
+    from configure_uplink import Nsh
+    nonce='PC_RECOVER_'+secrets.token_hex(8)
+    port.write(b'\n')
+    nsh=Nsh(port)
+    reply=nsh.run('echo '+nonce)
+    if not re.search(r'(?m)^'+re.escape(nonce)+r'\r?$',reply):
+        raise RuntimeError('Fresh board console acknowledgement was not confirmed')
+    reply=nsh.run('zhaoxi uplink-status')
+    values=re.findall(r'(?m)^UPLINK_BOOT active=[01] selected=[012] attempts=\d+ ppp_running=([01]) last_rc=-?\d+\r?$',reply)
+    if values!=['0']:
+        raise RuntimeError('Board boot PPP is still running or its state is unconfirmed')
+    return {'console_challenge_confirmed':True,'board_ppp_stopped':True}
+
+
+def recover_watch(port_name,state_dir,serial_factory=None,probe=recovery_console_probe):
+    """Recover an exact failed session without inventing a normal exit receipt.
+
+    Keep the old child status and every log intact. Local cleanup must already
+    be confirmed; fresh read-only board commands are the additional evidence
+    that permits a new watcher. Never reset the board or kill a process here.
+    """
+    from launch import active_sessions,process_running,read_status
+    from start import close_serial_transport
+    if serial_factory is None:
+        import serial
+        serial_factory=serial.Serial
+    with watcher_lock(state_dir):
+        status_path=state_dir/'watch.json'
+        previous=read_status(status_path)
+        if not isinstance(previous,dict) or previous.get('port')!=port_name:
+            raise RuntimeError('Recovery port does not match the previous watcher')
+        if previous.get('phase') not in ('failed','stopped'):
+            raise RuntimeError('Stop the existing watcher before recovery')
+        if previous.get('serial_close_confirmed') is not True or previous.get('serial_cleanup_timeout') is True:
+            raise RuntimeError('Previous watcher serial release is unconfirmed; recovery refused')
+        if active_sessions(state_dir/'sessions'):
+            raise RuntimeError('An attached PPP session is still active; recovery refused')
+        session_id=previous.get('attach_session_id')
+        if session_id is not None:
+            if not isinstance(session_id,str) or not re.fullmatch('[0-9a-f]{32}',session_id):
+                raise RuntimeError('Previous child session identity is invalid')
+            child=read_status(state_dir/'sessions'/session_id/'status.json')
+            if not isinstance(child,dict) or child.get('session_id')!=session_id or \
+               type(previous.get('attach_pid')) is not int or child.get('forwarder_pid')!=previous['attach_pid'] or \
+               child.get('port')!=port_name or child.get('boot_attach') is not True:
+                raise RuntimeError('Previous child receipt does not match this exact watcher')
+            if child.get('phase') not in ('failed','stopped') or process_running(child.get('forwarder_pid')) is not False:
+                raise RuntimeError('Previous child process has not exited; recovery refused')
+            if child.get('serial_close_confirmed') is not True or child.get('serial_receiver_stopped') is not True or \
+               child.get('serial_cleanup_timeout') is not False or child.get('gateway_cleanup_confirmed') is not True:
+                raise RuntimeError('Previous child serial/gateway cleanup is unconfirmed; recovery refused')
+        port=serial_factory()
+        port.port=port_name;port.baudrate=921600;port.timeout=.05;port.write_timeout=2
+        port.dtr=False;port.rts=False
+        # Publish new ownership before opening. A crash or stuck close must
+        # never leave the *old* closed flag as permission to open again.
+        write_json(status_path,dict(previous,phase='failed',cleanup_confirmed=False,
+                   serial_close_confirmed=False,serial_open=True,
+                   error='Console recovery is in progress; serial release is not yet confirmed'))
+        probe_error=None
+        try:
+            port.open()
+            evidence=probe(port)
+            if evidence!={'console_challenge_confirmed':True,'board_ppp_stopped':True}:
+                raise RuntimeError('Board console recovery proof is incomplete')
+        except Exception as error:
+            probe_error=error
+        finally:
+            result=close_serial_transport(port)
+            if result.get('serial_close_confirmed') is not True or result.get('serial_cleanup_timeout') is not False:
+                write_json(status_path,dict(previous,**result,phase='failed',cleanup_confirmed=False,
+                           serial_open=False,error='Recovery serial release was not confirmed'))
+            else:
+                write_json(status_path,previous)
+        if result.get('serial_close_confirmed') is not True or result.get('serial_cleanup_timeout') is not False:
+            raise RuntimeError('Recovery serial release was not confirmed')
+        if probe_error:
+            raise RuntimeError('Fresh console and stopped PPP were not confirmed; previous failure retained') from None
+        receipt=dict(schema=1,recovered_at=time.time(),port=port_name,
+                     previous_session_id=session_id,previous_phase=previous['phase'],
+                     original_exit_receipt_preserved=True,**evidence)
+        recovery_name='recovery-'+secrets.token_hex(8)+'.json'
+        write_json(state_dir/recovery_name,receipt)
+        recovered=dict(previous,phase='stopped',cleanup_confirmed=True,
+                       child_cleanup_confirmed=True,serial_open=False,
+                       recovery_receipt=recovery_name,updated_at=time.time())
+        recovered.pop('error',None)
+        write_json(status_path,recovered)
+        print('Fresh console and stopped PPP confirmed; previous failure records preserved. Ready to start standby.')
+    return 0
+
+
 def run_watch(port_name,state_dir,duration=0,serial_factory=None,popen=None,clock=time.monotonic):
     state_dir.mkdir(parents=True,exist_ok=True)
     with watcher_lock(state_dir):
@@ -219,9 +318,11 @@ def _run_watch(port_name,state_dir,duration=0,serial_factory=None,popen=None,clo
     parser=BoardSelectionParser();port=None;child=None;log=None;session_id=None
     release_failed=False;failed=False;child_receipt_failed=False
     status={'schema':1,'pid':os.getpid(),'port':port_name,'phase':'waiting-choice',
+            'instance_id':secrets.token_hex(16),'started_at':time.time(),
             'serial_open':False,'cleanup_confirmed':False,'serial_close_confirmed':True,
             'child_cleanup_confirmed':True}
-    def update(**fields):status.update(fields);write_json(status_path,status)
+    def update(**fields):
+        status.update(fields,updated_at=time.time());write_json(status_path,status)
     def stopped():return stop_path.exists()
     def release_port():
         nonlocal port,release_failed
@@ -249,6 +350,7 @@ def _run_watch(port_name,state_dir,duration=0,serial_factory=None,popen=None,clo
         while not stopped():
             if child:
                 if child.poll() is None:
+                    if time.time()-status['updated_at']>=2:update()
                     time.sleep(.2);continue
                 finish_child()
                 update(phase='waiting-choice')
@@ -328,11 +430,17 @@ def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--port');p.add_argument('--state-dir',type=Path,default=STATE)
     p.add_argument('--duration',type=int,default=0,help='0: until stop (default), or 60..3600 seconds')
-    p.add_argument('--stop',action='store_true')
+    action=p.add_mutually_exclusive_group()
+    action.add_argument('--stop',action='store_true')
+    action.add_argument('--recover',action='store_true',help='Explicitly verify console/PPP after a failed session; preserve its logs')
     a=p.parse_args()
     if os.name!='nt':p.error('Run the watcher on the Windows computer connected to the board')
     try:
         if a.stop:return request_stop(a.state_dir.resolve())
+        if a.recover:
+            if not a.port or not re.fullmatch('COM[1-9][0-9]*',a.port.upper()):
+                p.error('--recover requires --port COMn')
+            return recover_watch(a.port.upper(),a.state_dir.resolve())
         if not (a.duration==0 or 60<=a.duration<=3600):p.error('--duration must be 0 or 60..3600 seconds')
         from launch import preflight
         port=preflight(a.port)

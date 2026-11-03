@@ -1,0 +1,129 @@
+{
+  "date": "2026-11-04",
+  "board": "BES2800BP / best1700 AP",
+  "scope": "PC watcher readiness and explicit failed-session recovery; no firmware rebuild or flash",
+  "python_tests": {
+    "headless": 88,
+    "pc_tools": 110,
+    "all_passed": true
+  },
+  "c_regressions": [
+    "MiMo/SSE bounded prefetch ASan/UBSan/LSan + 51 allocation failure positions",
+    "auto voice and wake",
+    "morning and today/yesterday playback",
+    "Feishu adapter, queue and service",
+    "keyword/model/audio IO and flow",
+    "SNTP and control deadlines",
+    "actual console lease/readline variants"
+  ],
+  "sdk_patch_replay": {
+    "count": 59,
+    "build_source_match": true
+  },
+  "hardware": [
+    {
+      "event": "scheduled_explicit_cli_ppp_for_automatic_test",
+      "speech_choice_tested": false
+    },
+    {
+      "event": "real_wired_ready",
+      "session_id": "42d31a97cb976d63c7538cc2e0a80b15",
+      "ping_rc": 0,
+      "clock_sync": "confirmed",
+      "boot_attach": true
+    },
+    {
+      "event": "tts_test_queued",
+      "rc": 0
+    },
+    {
+      "event": "real_wired_stop",
+      "session_id": "42d31a97cb976d63c7538cc2e0a80b15",
+      "watcher_cleanup_confirmed": true,
+      "phase": "stopped",
+      "board_finished_marker_seen": true,
+      "board_exit_line_complete": true,
+      "board_cleanup_confirmed": true,
+      "board_exit_rc": 0,
+      "serial_close_confirmed": true,
+      "serial_receiver_stopped": true,
+      "gateway_cleanup_confirmed": true
+    },
+    {
+      "event": "public_playback_metrics",
+      "metrics": [
+        "BESPCM timing bytes=1536 rate=16000 play_ms=48 ideal_ms=48 dma_ms=48 gap_ms=0 max_gap_ms=0",
+        "MIMOVOICE phase=tts prefetch_bytes=291840 receive_ms=6673",
+        "MIMOVOICE phase=tts mode=stream http=200 rc=0 first_pcm_ms=1653 total_ms=11365 pcm_bytes=291840",
+        "BESPCM timing bytes=291840 rate=24000 play_ms=6090 ideal_ms=6080 dma_ms=6064 gap_ms=26 max_gap_ms=1",
+        "BESPCM timing bytes=1536 rate=16000 play_ms=48 ideal_ms=48 dma_ms=48 gap_ms=0 max_gap_ms=0"
+      ]
+    },
+    {
+      "event": "scheduled_explicit_cli_ppp_for_automatic_test",
+      "speech_choice_tested": false
+    },
+    {
+      "event": "real_wired_ready",
+      "session_id": "cc4a6227f66297c0c88b4b8457b9a49a",
+      "ping_rc": 0,
+      "clock_sync": "confirmed",
+      "boot_attach": true
+    },
+    {
+      "event": "tts_test_queued",
+      "rc": 0
+    },
+    {
+      "event": "real_wired_stop",
+      "session_id": "cc4a6227f66297c0c88b4b8457b9a49a",
+      "watcher_cleanup_confirmed": true,
+      "phase": "stopped",
+      "board_finished_marker_seen": true,
+      "board_exit_line_complete": true,
+      "board_cleanup_confirmed": true,
+      "board_exit_rc": 0,
+      "serial_close_confirmed": true,
+      "serial_receiver_stopped": true,
+      "gateway_cleanup_confirmed": true
+    },
+    {
+      "event": "public_playback_metrics",
+      "metrics": [
+        "BESPCM timing bytes=1536 rate=16000 play_ms=47 ideal_ms=48 dma_ms=47 gap_ms=0 max_gap_ms=0",
+        "MIMOVOICE phase=tts prefetch_bytes=284160 receive_ms=6657",
+        "MIMOVOICE phase=tts mode=stream http=200 rc=0 first_pcm_ms=1486 total_ms=11219 pcm_bytes=284160",
+        "BESPCM timing bytes=284160 rate=24000 play_ms=5931 ideal_ms=5920 dma_ms=5902 gap_ms=29 max_gap_ms=1",
+        "BESPCM timing bytes=1536 rate=16000 play_ms=48 ideal_ms=48 dma_ms=48 gap_ms=0 max_gap_ms=0"
+      ]
+    },
+    {
+      "event": "private_model_retained",
+      "ready": true,
+      "saved_default_mode": "wifi"
+    },
+    {
+      "event": "private_model_retained",
+      "ready": true,
+      "saved_default_mode": "wifi"
+    },
+    {
+      "event": "normal_boot_restored_with_pc_standby",
+      "human_network_choice_pending": true
+    }
+  ],
+  "preservation": {
+    "persona_hash_equal": true,
+    "configuration_and_news_hashes_equal": true,
+    "personal_model_ready": true,
+    "secret_matches": 0
+  },
+  "not_claimed": [
+    "New human speech selection/wake/hearing acceptance: user away",
+    "Real Windows logout/logon trigger",
+    "Long-running unattended or 07:00 schedule",
+    "Root cause of original isolated quit timeout"
+  ],
+  "image_sha256": "e15ddc4a95312dcbe9ea19e8064af15c16a8944fae0aa278644a320beaa4aafb",
+  "hardware_functional_acceptance_complete": false
+}

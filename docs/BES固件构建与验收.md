@@ -2,18 +2,20 @@
 
 本页面向接手朝夕的软件维护者，说明当前 AP 镜像、完整工作区要求、源码集成、烧录与资产安装。日常体验从 [作品首页](../README.md) 和 [核心功能说明](无屏核心功能.md) 开始。
 
-## 当前 AP 构建
+## 当前开发候选 AP 构建
 
 | 项目 | 配置 |
 | --- | --- |
 | 开发板 | BES2800BP EVB，板级目录 `vendor/bes/boards/best1700_ep/aos_evb` |
 | 产品配置 | `apheadless`，匹配 `apaudio3` BSP 库 |
-| 镜像 | [nuttx_ap_headless.bin](../firmware/headless_pc_link/nuttx_ap_headless.bin) |
-| 镜像大小 | 1,374,416 字节 |
-| SHA256 | `8e731fb62d72ed2a81c5a20ecd4c623ff4c130e4589aef6989134d58726af6fa` |
+| 镜像 | [nuttx_ap_headless.bin](../firmware/dialogue_prefetch/nuttx_ap_headless.bin) |
+| 镜像大小 | 1,397,952 字节 |
+| SHA256 | `e15ddc4a95312dcbe9ea19e8064af15c16a8944fae0aa278644a320beaa4aafb` |
 | AP 烧录地址 | `0x30190000` |
 | 持久数据目录 | `/emmc/zhaoxi` |
-| 来源与校验 | [固件 manifest](../firmware/headless_pc_link/nuttx_ap_headless.manifest.json) |
+| 来源与校验 | [固件 manifest](../firmware/dialogue_prefetch/nuttx_ap_headless.manifest.json) |
+
+这是已烧录并完成部分实板测试的开发候选，`hardware_functional_acceptance_complete=false`。新增开机本地选网、飞书和有线完整音频预取；当前验证与剩余观察见 [阶段交付](20261104有线恢复与阶段交付.md)。`firmware/headless_pc_link` 和 `firmware/boot_choice` 保留历史阶段镜像，不能将它们与当前实板视为同一版本。本轮有线待命修复仅改变电脑 Python 工具，不需要再次编译或烧录板端固件。
 
 BES 源码现已整合电脑 PPP／自动 Wi-Fi、实际音频、MiMo ASR／增量 TTS、本地提示音、备忘与待办、提醒调度、喝水任务、开机唤醒、确认后修改长期人设、晨间资讯和固定目标飞书通知。2026-11-03 发布镜像与实板一致，热点语音、开机“联网成功”、人设取消／确认和云端资讯下载／去重已验收。个人 fork 的 Actions / Pages 已上线；比赛仓库工作流须显式启用才执行。真实七点无人值守仍待观察。详见 [本地语音与独立资讯](本地语音与独立资讯.md) 与 [开机播报证明](bringup_logs/20261103_boot_network_notice_proof.json)，早期许可／拒绝／复播结果保留在 [11月2日验收](2026-11-02唤醒与晨间资讯验收.md)。
 
@@ -37,7 +39,7 @@ BES 源码现已整合电脑 PPP／自动 Wi-Fi、实际音频、MiMo ASR／增�
 以下命令在本仓库根目录运行，`/path/to/openvela` 替换为完整工作区。
 
 1. 将 `app/zhaoxi` 链接为工作区的 `packages/zhaoxi`，让 packages 的 CMake／Kconfig 发现 `ai_agent` 和 `zhaoxi`。原圆屏 `zhaoxi_ui` 保存在 [legacy](../legacy/README.md)，当前构建使用新的无屏入口。
-2. 按 [补丁顺序](../patches/README.md) 分别更新 SDK、apps、vendor 与 NuttX。SDK 顺序以 `tools/check_agent_patches.py` 的 `SERIES` 为准，apps 顺序为 `0025 → 0042 → 0046 → 0047`。
+2. 按 [补丁顺序](../patches/README.md) 分别更新 SDK、apps、vendor 与 NuttX。SDK 顺序以 `tools/check_agent_patches.py` 的 `SERIES` 为准，apps 顺序为 `0025 → 0042 → 0046 → 0047 → 0074`。
 3. 核对实际源码与完整补丁序列：
 
    ```bash

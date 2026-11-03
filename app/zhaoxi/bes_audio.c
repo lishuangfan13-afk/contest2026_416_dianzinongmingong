@@ -86,7 +86,12 @@ struct pcm_session {
     uint8_t channel;
 };
 struct audio_capture { struct pcm_session pcm; float previous, filtered; };
-struct audio_playback { struct pcm_session pcm; };
+struct audio_playback {
+    struct pcm_session pcm;
+    size_t bytes;
+    unsigned first_ms,last_ms,dma_ms,gap_ms,max_gap_ms;
+    bool measured;
+};
 
 static unsigned milliseconds(void)
 {
@@ -294,7 +299,15 @@ int audio_playback_write(audio_playback_t *pb, const void *buffer, size_t length
         /* User-selected speech level: preserve the provider's full PCM range.
          * The hardware DAC remains at unity gain; no digital overdrive. */
         for (unsigned i = 0; i < samples; i++) pb->pcm.buffer[i] = in[used+i];
+        unsigned begin=milliseconds();
         result = transfer(&pb->pcm, samples); if (result) return result;
+        if(!pb->measured){pb->first_ms=begin;pb->measured=true;}
+        else {
+            unsigned gap=begin-pb->last_ms;
+            pb->gap_ms+=gap;if(gap>pb->max_gap_ms)pb->max_gap_ms=gap;
+        }
+        pb->last_ms=milliseconds();pb->dma_ms+=pb->last_ms-begin;
+        pb->bytes+=samples*2u;
         used += samples;
     }
     return (int)length;
@@ -306,7 +319,17 @@ void audio_playback_stop(audio_playback_t *pb)
         sem_post(&completion[0].signal);
     }
 }
-void audio_playback_close(audio_playback_t *pb) { if (pb) { close_session(&pb->pcm); free(pb); } }
+void audio_playback_close(audio_playback_t *pb)
+{
+    if(pb) {
+        close_session(&pb->pcm);
+        printf("BESPCM timing bytes=%zu rate=%u play_ms=%u ideal_ms=%llu dma_ms=%u gap_ms=%u max_gap_ms=%u\n",
+            pb->bytes,pb->pcm.rate,pb->measured?pb->last_ms-pb->first_ms:0,
+            (unsigned long long)pb->bytes*1000/(pb->pcm.rate*2u),
+            pb->dma_ms,pb->gap_ms,pb->max_gap_ms);
+        free(pb);
+    }
+}
 
 #ifdef CONFIG_ZHAOXI_MIMO_VOICE
 struct prompt_playback {audio_playback_t *output;};

@@ -6,7 +6,7 @@
 
 | 目标 | 基线 | 当前补丁 |
 | --- | --- | --- |
-| `packages/ai_agent` | `e65550f18759f086d7f544edcf17d1e31223244f` | 下表中的 53 项，依次应用 |
+| `packages/ai_agent` | `e65550f18759f086d7f544edcf17d1e31223244f` | 下表中的 59 项，依次应用 |
 | `apps` | `550cd3ba60a03f8ebf9ac7b72f6eed6aea3bedbe` | `0025 → 0042 → 0046 → 0047 → 0074` |
 | `nuttx` | `76354c637858ecb0aa4601629327acb6f44a26bb` | `0022 → 0024` |
 | `vendor/bes` | 公共基线 `36465377d944a575ce8a0c7ba45259f5c6c61ea8` | `0009 → 0016`，再核对匹配 BSP 与本地 vendor 修改 |
@@ -71,6 +71,11 @@ BSP 库、FatFs 和依赖的准确路径、提交及 SHA256 见 [来源清单](.
 | 0067 | 语音 JSON／SSE 全流程预算与取消、失败请求立即释放 TCP 队列、显式 Wi-Fi 模式下可选发送队列／TLS 记录／TCP MSS 对照配置 |
 | 0068 | 独立的可取消 HTTPS GET，限定连接与完整请求预算，供公开资讯静态 JSON 下载使用 |
 | 0069 | 新闻输出避让 ASR、同线程确认播报与有界采集退出；诊断覆盖唤醒后文本；建连前重试共享 15 秒预算；BES STA 开机及重连自动关闭 Wi-Fi 省电并定时维持，PPP/SoftAP 不受影响 |
+| 0070 | 将定时提醒的飞书事件投递到有界通知队列 |
+| 0071 | 安静恢复唤醒等待，补齐混合语言及同音匹配 |
+| 0072 | 默认关闭的一次性 ASR 录音诊断，RAM 保存并校验 |
+| 0073 | 联网前本地语音选择有线或无线，并保留原 Agent 生命周期 |
+| 0075 | 已进入有界 TTS 接收／播放时不触发“缺少回答”超时，仍保留请求、DMA 及取消时限 |
 
 在 `packages/ai_agent` 中逐个执行 `git apply --check /path/to/patch`，检查成功后再执行 `git apply /path/to/patch`。完整顺序以 [check_agent_patches.py](../tools/check_agent_patches.py) 的 `SERIES` 为准。
 
@@ -82,7 +87,7 @@ python3 tools/check_agent_patches.py \
   --patched-agent /path/to/openvela/packages/ai_agent
 ```
 
-检查使用临时副本回放完整序列，再比较实际工作区。当前序列为 53 项，按完整序列回放并与实际构建工作区核对。
+检查使用临时副本回放完整序列，再比较实际工作区。当前序列为 59 项，按完整序列回放并与实际构建工作区核对。
 
 0050／0051 把业务完成确认与本轮工具执行连接起来：文件修改匹配目标业务路径、调用 ID 和成功保存结果；提醒创建／取消匹配成功的 `cron_add`／`cron_remove`。修改请求跳过回答缓存，缺少结果时纠正一次，再返回实际状态。产品的本地 `note` 与 `todo add/list/done` 分别由 `journal.c` 和 `todo_store.c` 执行。0057 用 weak hook 将有限的中文快捷指令接到这些模块与真实 cron，匹配后直接保存并回读；说明见 [本地中文指令](../docs/本地中文指令.md)。0059 在产品配置中完全关闭回答缓存，会话历史继续用于对话上下文。
 
