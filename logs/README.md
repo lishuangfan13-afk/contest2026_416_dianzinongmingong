@@ -4,7 +4,10 @@
 
 存放你在开发中与 AI 工具的对话日志，和作品代码一并提交。
 
-> 本目录现在是**示例**，请替换成你自己导出的真实日志（删掉示例的 `your-github-login/` 目录）。
+本目录同时保留官方采集格式的历史日志与本会话的定向补录。各会话在 manifest 中记录来源与处理方式。
+
+- [本会话 Codex 历史补录说明](lishuangfan13-afk/MANUAL_CODEX_EXPORT.md)：定向导出的可见开发对话，已过滤敏感内容及近期导出方法讨论；`export_mode=manual-scoped-redacted`。
+- [OpenCode 历史采集说明](lishuangfan13-afk/README.md)：原有采集记录继续保留。
 
 ## 目录结构
 

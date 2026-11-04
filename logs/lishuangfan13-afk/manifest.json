@@ -3,7 +3,7 @@
   "team_id": "contest2026_416_dianzinongmingong",
   "github_login": "lishuangfan13-afk",
   "generator": "opencode-collector@1.4.0",
-  "updated_at": "2026-09-19T09:15:02.003446+00:00",
+  "updated_at": "2026-11-04T15:58:28.404226+00:00",
   "sessions": [
     {
       "session_id": "ses_f50124904ffemsvjH5JjSjRONk",
@@ -268,6 +268,32 @@
       "collection_mode": "backfill-sqlite",
       "health": "ok",
       "title": "Write project introduction document (@general subagent)"
+    },
+    {
+      "session_id": "01a161c0-ccea-7a13-a3f5-5f5e30675db9",
+      "tool": "codex",
+      "started_at": "2026-10-22T03:56:39Z",
+      "last_event_at": "2026-11-04T15:45:14Z",
+      "event_count": 935,
+      "file_path": "logs/lishuangfan13-afk/2026-10-22/codex__01a161c0-ccea-7a13-a3f5-5f5e30675db9.jsonl",
+      "collection_mode": "backfill-sqlite",
+      "export_mode": "manual-scoped-redacted",
+      "source_format": "codex-desktop-visible-thread",
+      "source_cwd": "C:\\Users\\[LOCAL_USER]\\Documents\\Codex\\2026-10-22\\new-chat",
+      "timestamp_basis": "turn_started_at",
+      "health": "degraded",
+      "data_completeness_warning": "Curated visible-message history; export discussions and sensitive events omitted; raw tools and internal records excluded. collection_mode retains the official Codex backfill compatibility value; source is not SQLite.",
+      "redacted_count_total": 221,
+      "filter_summary": {
+        "redaction_substitutions": 221,
+        "omitted_sensitive_messages": 2,
+        "omitted_export_discussion_turns": 6
+      },
+      "source_integrity": {
+        "main_sha256": "6444e79cdb002d2db29da45dc89427b674973f3d097f8b51143b64fd2a41c113",
+        "main_size": 704247
+      },
+      "export_sha256": "8f6f33cc637b25b117c0a3cee27d4b527d7915f7e2613cd725d8295877a4967d"
     }
   ]
 }
