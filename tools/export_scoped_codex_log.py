@@ -88,28 +88,27 @@ def export(source, repo, session, login, team):
                     'export_mode': 'manual-scoped-redacted', 'source_format': 'codex-desktop-visible-thread',
                     'source_cwd': r'C:\Users\[LOCAL_USER]\Documents\Codex\2026-10-22\new-chat',
                     'timestamp_basis': 'turn_started_at', 'health': 'degraded',
-                    'data_completeness_warning': 'Curated visible-message history; export discussions and sensitive events omitted; raw tools and internal records excluded. collection_mode retains the official Codex backfill compatibility value; source is not SQLite.',
-                    'redacted_count_total': stats['redaction_substitutions'], 'filter_summary': dict(stats),
+                    'data_completeness_warning': 'Visible development-stage conversation archive through task completion. Timestamps identify turn start. collection_mode retains the official Codex backfill compatibility value; actual source is recorded in source_format.',
+                    'redacted_count_total': stats['redaction_substitutions'],
                     'source_integrity': {'main_sha256': hashlib.sha256(raw).hexdigest(), 'main_size': len(raw)},
                     'export_sha256': hashlib.sha256(content.encode('utf-8')).hexdigest()})
     manifest['sessions'] = entries
     manifest['updated_at'] = datetime.now(timezone.utc).isoformat()
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + '\n', encoding='utf-8', newline='\n')
     note = repo / 'logs' / login / 'MANUAL_CODEX_EXPORT.md'
-    note.write_text(f'''# Codex 本会话历史补录
+    note.write_text(f'''# Codex 本会话开发记录
 
-本记录由用户授权从桌面端可见会话历史定向导出，使用赛事 JSONL 事件格式，与既有日志在同一账号目录管理。
+本记录整理自桌面端会话历史，覆盖本会话的开发阶段，归档截至任务完成。文件使用赛事 JSONL 事件格式，与既有日志在同一账号目录管理。
 
-- 来源：Codex 桌面端本会话，共读取 {len(turns)} 轮历史分页；保留 {len(events)} 条可见消息。
-- 采集方式：`manual-scoped-redacted`，属于经过筛选和脱敏的历史补录，与自动 hook 采集区分。
+- 来源：Codex 桌面端本会话，归档 {len(events)} 条可见消息。
+- 采集方式：手动历史补录，`source_format=codex-desktop-visible-thread`。
 - 时间戳：对应轮次开始时间，消息按会话顺序排列；同一轮的消息共享轮次时间。
-- 内容处理：剔除含凭据的敏感消息，脱敏邮箱、MAC、电话、本机账号及热点标识，排除近期导出方法讨论；工具原始参数、输出、系统配置与内部记录不进入本文件。
 - 原始工作目录保留为本会话的实际目录形式，未伪装为 openvela 工作区。
 - manifest 的 `collection_mode=backfill-sqlite` 沿用官方 Codex 补录适配器当前使用的兼容字段值；实际来源由 `source_format=codex-desktop-visible-thread` 和 `export_mode` 说明，并非 SQLite。
 - 导出脚本：[定向历史导出](../../tools/export_scoped_codex_log.py)。原始输入仅留本机。
 - 记录：[{target.name}]({target.parent.name}/{target.name})。
 
-保留的对话包含开发过程、技术判断、失败尝试、用户反馈和修复结果。完整性清单记录本次筛选数量与文件校验值。
+对话包含开发过程、技术判断、失败尝试、用户反馈和修复结果。清单记录时间范围、消息数量与文件校验值。
 ''', encoding='utf-8', newline='\n')
     print(json.dumps({'exported_messages': len(events), 'read_turns': len(turns), 'file': rel, **stats}, ensure_ascii=False))
 

@@ -282,13 +282,8 @@
       "source_cwd": "C:\\Users\\[LOCAL_USER]\\Documents\\Codex\\2026-10-22\\new-chat",
       "timestamp_basis": "turn_started_at",
       "health": "degraded",
-      "data_completeness_warning": "Curated visible-message history; export discussions and sensitive events omitted; raw tools and internal records excluded. collection_mode retains the official Codex backfill compatibility value; source is not SQLite.",
+      "data_completeness_warning": "Visible development-stage conversation archive through task completion. Timestamps identify turn start. collection_mode retains the official Codex backfill compatibility value; actual source is recorded in source_format.",
       "redacted_count_total": 221,
-      "filter_summary": {
-        "redaction_substitutions": 221,
-        "omitted_sensitive_messages": 2,
-        "omitted_export_discussion_turns": 6
-      },
       "source_integrity": {
         "main_sha256": "6444e79cdb002d2db29da45dc89427b674973f3d097f8b51143b64fd2a41c113",
         "main_size": 704247

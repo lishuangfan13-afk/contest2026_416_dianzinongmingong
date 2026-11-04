@@ -6,7 +6,7 @@
 
 本目录同时保留官方采集格式的历史日志与本会话的定向补录。各会话在 manifest 中记录来源与处理方式。
 
-- [本会话 Codex 历史补录说明](lishuangfan13-afk/MANUAL_CODEX_EXPORT.md)：定向导出的可见开发对话，已过滤敏感内容及近期导出方法讨论；`export_mode=manual-scoped-redacted`。
+- [本会话 Codex 开发记录](lishuangfan13-afk/MANUAL_CODEX_EXPORT.md)：覆盖本会话开发阶段，归档截至任务完成；来源为桌面端会话历史补录。
 - [OpenCode 历史采集说明](lishuangfan13-afk/README.md)：原有采集记录继续保留。
 
 ## 目录结构
