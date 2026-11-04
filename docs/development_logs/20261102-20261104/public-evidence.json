@@ -1,0 +1,126 @@
+{
+  "schema": 1,
+  "scope": "Selected public evidence, not full raw serial logs or a new acceptance run",
+  "pr14_merge": {
+    "html_url": "https://github.com/open-vela/contest2026_416_dianzinongmingong/pull/14",
+    "state": "closed",
+    "merged": true,
+    "merged_at": "2026-11-03T17:31:14Z",
+    "merge_commit_sha": "008690e2c7d3dd7e41b49711a8f8e3e602b27d0a",
+    "base": "dev-ai-contest-2026",
+    "head_sha": "2ea3dfe678acaa25048f2e1a88eb231a932a0eba"
+  },
+  "ap_only_flashes": [
+    {
+      "started_at": "2026-11-04T01:51:14.744916+00:00",
+      "finished_at": "2026-11-04T01:51:30.162893+00:00",
+      "baud": 921600,
+      "delay_seconds": 5,
+      "image_sha256": "544a7abb7dc7d19f6de7ea9e7a75e7a10b611c621f84f596738befafd10332f9",
+      "image_size": 1398504,
+      "flash_address": "0x30190000",
+      "manual_reset_required": false,
+      "terminal_inherited": true,
+      "handoff_elapsed_ms": 453,
+      "downloader_exit": 0,
+      "source_receipt": "bugfix-flash-20261104.json",
+      "verification": {
+        "sync_started_and_confirmed_observed": true,
+        "programming_succeeded_observed": true,
+        "config_and_two_news_caches_match_immediate_preflash": true,
+        "profile_matches_previous_delivery_baseline_and_two_postflash_reads": true,
+        "immediate_preflash_rendered_profile_hash_differs": true,
+        "offline_choice_model_ready": true,
+        "all_ten_local_prompts_ready": true,
+        "boot_network_choice_listening": true,
+        "pc_standby_restored_and_ready": true,
+        "network_selected": false,
+        "new_human_voice_and_feishu_acceptance_complete": false
+      }
+    },
+    {
+      "started_at": "2026-11-04T04:17:49.973874+00:00",
+      "finished_at": "2026-11-04T04:18:06.829127+00:00",
+      "baud": 921600,
+      "delay_seconds": 5,
+      "image_sha256": "6b1ac6c635fb4b79e644f1e21eee324a0e5e0ed185992e11092e8947451c1548",
+      "image_size": 1399040,
+      "flash_address": "0x30190000",
+      "manual_reset_required": false,
+      "terminal_inherited": true,
+      "handoff_elapsed_ms": 531,
+      "downloader_exit": 0,
+      "source_receipt": "volume-flash-20261104.json"
+    },
+    {
+      "started_at": "2026-11-04T04:35:14.144930+00:00",
+      "finished_at": "2026-11-04T04:35:30.136363+00:00",
+      "baud": 921600,
+      "delay_seconds": 5,
+      "image_sha256": "92d321f4d75f9e1d6006c2508d3fa1248c301c73797af1129e609c0ff8cfb828",
+      "image_size": 1399088,
+      "flash_address": "0x30190000",
+      "manual_reset_required": false,
+      "terminal_inherited": true,
+      "handoff_elapsed_ms": 469,
+      "downloader_exit": 0,
+      "source_receipt": "feishu-alias-flash-20261104.json",
+      "verification": {
+        "sync_started_and_confirmed_observed": true,
+        "programming_succeeded_observed": true,
+        "config_and_historical_news_match_preflash": true,
+        "volume_150_config_preserved": true,
+        "profile_hash_match": true,
+        "wireless_selection_observed": true,
+        "auto_voice_listening_after_reconnect": true,
+        "real_alias_voice_send_tested": false
+      }
+    }
+  ],
+  "volume": {
+    "only_config_change": {
+      "playback_level_percent": "150"
+    },
+    "events": [
+      "LOCAL_PROMPT id=uplink_choose bytes=145920 sent=145920 rc=0",
+      "BESPCM playback volume_index=84 gain_code=16384 expected=16384 pcm_divisor=1",
+      "BESPCM timing bytes=145920 rate=24000 play_ms=3042 ideal_ms=3040 dma_ms=3030 gap_ms=12 max_gap_ms=1 level_percent=150",
+      "UPLINK_LISTEN ready=1"
+    ],
+    "persisted_after_reboot": true,
+    "playback_at_150_observed": true,
+    "boot_choice_listening": true
+  },
+  "todo_clear": {
+    "before_count": 13,
+    "after_count": 0,
+    "backup_kept_on_board": true,
+    "events": [
+      "LOCAL_PROMPT id=uplink_choose bytes=145920 sent=145920 rc=0",
+      "UPLINK_LISTEN ready=1"
+    ]
+  },
+  "news_consent_demo": {
+    "purpose": "Re-enact consent prompt using existing cached news, not a simulated fresh arrival",
+    "events": [
+      "LOCAL_PROMPT id=news_ready bytes=207360 sent=207360 rc=0",
+      "MORNING_ANNOUNCE rc=0 rollback_rc=0"
+    ],
+    "phase": "waiting_permission",
+    "date": "2026-11-04",
+    "cached_count": 4,
+    "fresh_arrival_demonstrated": false
+  },
+  "presentation_revision": {
+    "sha256": "9f7e3638f21a20638d2f63485329827059675e68a02070dc6b95506d925d8c00",
+    "slides": 19,
+    "visually_changed_slides": [
+      3,
+      14
+    ],
+    "other_slides_pixel_identical": true,
+    "main_talk_seconds": 480,
+    "canonical_updated": false,
+    "separate_revision_saved": true
+  }
+}

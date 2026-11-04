@@ -1,0 +1,59 @@
+{
+  "schema": 1,
+  "title": "梳理竞赛仓库开发进度",
+  "exported_at": "2026-11-04T09:50:32.911Z",
+  "timezone": "Asia/Shanghai",
+  "turn_count": 56,
+  "user_message_count": 127,
+  "assistant_message_count": 354,
+  "visible_message_count": 481,
+  "operation_metadata_count": 1821,
+  "all_history_pages_read": true,
+  "message_truncation_flags_found": false,
+  "redactions": {
+    "initial_known_private_literals_removed": true,
+    "subsequent_replacement_counts": {
+      "local_account": 19,
+      "supplied_private_value": 3,
+      "oauth_value": 4,
+      "feishu_display_name": 3
+    }
+  },
+  "excluded": [
+    "reasoning",
+    "system/developer prompts",
+    "context-compaction internals",
+    "raw tool arguments and output",
+    "live credentials/config",
+    "personal voice templates",
+    "private TODO contents",
+    "PPTX/firmware binaries"
+  ],
+  "scope_note": "Only documentation is being committed; post-PR14 application changes are left in the original worktree.",
+  "files": {
+    "conversation.jsonl": {
+      "bytes": 209691,
+      "sha256": "a52472034bd81fdab5f027a418a2c7b7cd95a493f288624570c2e180a84d1953"
+    },
+    "conversation.md": {
+      "bytes": 186615,
+      "sha256": "a2c9f30ccc38561de820cadc430765fd2c8f06dd189e3118f3ec6f333f803128"
+    },
+    "engineering-log.md": {
+      "bytes": 12887,
+      "sha256": "2c1ab87039f68762c38f2b3df57cc15495b426ed8399b54ea575d657b381ae2d"
+    },
+    "operation-index.csv": {
+      "bytes": 116982,
+      "sha256": "1beec15889b716554593f595d0e0e35caf3d14d8da3cdb6bf865398ce8a5b4ed"
+    },
+    "public-evidence.json": {
+      "bytes": 4579,
+      "sha256": "03d2986291b8151f0b22f743356bf4ebd104d5378adc95e6f2ae4df046b36b77"
+    },
+    "README.md": {
+      "bytes": 3782,
+      "sha256": "4cf1b70a23d8e717838a0cd76bd5bddf6b8dc9dcb2eb068959410bd7ae2c3dd7"
+    }
+  }
+}
